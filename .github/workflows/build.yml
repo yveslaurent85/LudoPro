@@ -1,0 +1,35 @@
+name: Build LudoPro APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le projet
+        uses: actions/checkout@v6
+
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Creer la structure Android
+        run: flutter create --platforms=android .
+
+      - name: Installer les dependances
+        run: flutter pub get
+
+      - name: Construire l APK
+        run: flutter build apk --release
+
+      - name: Recuperer l APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LudoPro-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
