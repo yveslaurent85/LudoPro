@@ -11,11 +11,12 @@ class LudoProApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
       title: 'LudoPro',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         fontFamily: 'Roboto',
+        scaffoldBackgroundColor: const Color(0xFF10152B),
       ),
       home: const LudoGame(),
     );
@@ -25,14 +26,18 @@ class LudoProApp extends StatelessWidget {
 class Player {
   final String name;
   final Color color;
-  final String emoji;
-  final List<int> pawns;
+  final Color lightColor;
+  final int start;
+  final List<int> pawns = [-1, -1, -1, -1];
+  final IconData avatar;
 
   Player({
     required this.name,
     required this.color,
-    required this.emoji,
-  }) : pawns = [-1, -1, -1, -1];
+    required this.lightColor,
+    required this.start,
+    required this.avatar,
+  });
 }
 
 class LudoGame extends StatefulWidget {
@@ -45,451 +50,650 @@ class LudoGame extends StatefulWidget {
 class _LudoGameState extends State<LudoGame> {
   final Random random = Random();
 
-  late List<Player> players;
+  late final List<Player> players = [
+    Player(
+      name: 'ROUGE',
+      color: const Color(0xFFFF4057),
+      lightColor: const Color(0xFFFFDCE1),
+      start: 0,
+      avatar: Icons.person,
+    ),
+    Player(
+      name: 'VERT',
+      color: const Color(0xFF19C784),
+      lightColor: const Color(0xFFD7FFEC),
+      start: 13,
+      avatar: Icons.face,
+    ),
+    Player(
+      name: 'JAUNE',
+      color: const Color(0xFFFFC928),
+      lightColor: const Color(0xFFFFF2C4),
+      start: 26,
+      avatar: Icons.person_outline,
+    ),
+    Player(
+      name: 'BLEU',
+      color: const Color(0xFF4385FF),
+      lightColor: const Color(0xFFDCE8FF),
+      start: 39,
+      avatar: Icons.face_3,
+    ),
+  ];
 
   int currentPlayer = 0;
   int dice = 1;
-  bool diceRolled = false;
-  String message = 'Lance le dé pour commencer !';
+  bool hasRolled = false;
   bool gameOver = false;
+  String message = 'Lance le dé pour commencer !';
 
-  @override
-  void initState() {
-    super.initState();
+  final List<List<int>> track = const [
+    [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],
+    [5, 6], [4, 6], [3, 6], [2, 6], [1, 6],
+    [0, 6], [0, 7], [0, 8],
+    [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],
+    [6, 9], [6, 10], [6, 11], [6, 12], [6, 13],
+    [6, 14], [7, 14], [8, 14],
+    [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],
+    [9, 8], [10, 8], [11, 8], [12, 8], [13, 8],
+    [14, 8], [14, 7], [14, 6],
+    [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],
+    [8, 5], [8, 4], [8, 3], [8, 2], [8, 1],
+    [8, 0], [7, 0], [6, 0],
+  ];
 
-    players = [
-      Player(name: 'Rouge', color: Colors.red, emoji: '🔴'),
-      Player(name: 'Vert', color: Colors.green, emoji: '🟢'),
-      Player(name: 'Jaune', color: Colors.amber, emoji: '🟡'),
-      Player(name: 'Bleu', color: Colors.blue, emoji: '🔵'),
-    ];
+  final List<List<List<int>>> homeSlots = const [
+    [
+      [1, 1], [1, 3], [3, 1], [3, 3]
+    ],
+    [
+      [1, 11], [1, 13], [3, 11], [3, 13]
+    ],
+    [
+      [11, 11], [11, 13], [13, 11], [13, 13]
+    ],
+    [
+      [11, 1], [11, 3], [13, 1], [13, 3]
+    ],
+  ];
+
+  List<List<int>> homeLane(int player) {
+    switch (player) {
+      case 0:
+        return const [
+          [7, 1], [7, 2], [7, 3], [7, 4], [7, 5],
+        ];
+      case 1:
+        return const [
+          [1, 7], [2, 7], [3, 7], [4, 7], [5, 7],
+        ];
+      case 2:
+        return const [
+          [7, 13], [7, 12], [7, 11], [7, 10], [7, 9],
+        ];
+      default:
+        return const [
+          [13, 7], [12, 7], [11, 7], [10, 7], [9, 7],
+        ];
+    }
   }
 
   void rollDice() {
-    if (diceRolled || gameOver) return;
+    if (hasRolled || gameOver) return;
 
     setState(() {
       dice = random.nextInt(6) + 1;
-      diceRolled = true;
+      hasRolled = true;
 
-      final movable = players[currentPlayer].pawns.any(
-        (position) => position == -1 ? dice == 6 : position < 39,
+      final player = players[currentPlayer];
+      final canMove = player.pawns.any(
+        (p) => p == -1 ? dice == 6 : p + dice <= 56,
       );
 
-      if (!movable) {
-        message = '$dice ! Aucun pion ne peut avancer.';
+      if (!canMove) {
+        message = '$dice ! Aucun déplacement possible.';
       } else {
-        message =
-            '${players[currentPlayer].name} : choisis un pion à déplacer.';
+        message = dice == 6
+            ? 'Super ! Tu peux sortir un pion ou avancer.'
+            : 'Choisis un pion à déplacer.';
       }
     });
-
-    final movable = players[currentPlayer].pawns.any(
-      (position) => position == -1 ? dice == 6 : position < 39,
-    );
-
-    if (!movable) {
-      Future.delayed(const Duration(milliseconds: 1200), () {
-        if (!mounted || gameOver) return;
-
-        setState(() {
-          diceRolled = false;
-          currentPlayer = (currentPlayer + 1) % 4;
-          message = 'Au tour de ${players[currentPlayer].name} !';
-        });
-      });
-    }
   }
 
-  void movePawn(int pawnIndex) {
-    if (!diceRolled || gameOver) return;
+  void nextTurn() {
+    setState(() {
+      currentPlayer = (currentPlayer + 1) % players.length;
+      hasRolled = false;
+      dice = 1;
+      message = 'Au tour de ${players[currentPlayer].name} !';
+    });
+  }
 
-    final player = players[currentPlayer];
-    final position = player.pawns[pawnIndex];
+  void movePawn(int playerIndex, int pawnIndex) {
+    if (!hasRolled || gameOver || playerIndex != currentPlayer) {
+      return;
+    }
 
-    if (position == -1 && dice != 6) {
+    final player = players[playerIndex];
+    final oldPosition = player.pawns[pawnIndex];
+
+    if (oldPosition == -1 && dice != 6) {
       setState(() {
-        message = 'Il faut obtenir un 6 pour sortir ce pion !';
+        message = 'Il faut obtenir un 6 pour sortir ce pion.';
       });
       return;
     }
 
-    final newPosition = position == -1 ? 0 : position + dice;
-
-    if (newPosition > 39) {
+    if (oldPosition >= 0 && oldPosition + dice > 56) {
       setState(() {
-        message = 'Il faut obtenir le bon nombre pour finir !';
+        message = 'Ce pion ne peut pas terminer avec ce lancer.';
       });
       return;
     }
 
     setState(() {
-      player.pawns[pawnIndex] = newPosition;
+      player.pawns[pawnIndex] =
+          oldPosition == -1 ? 0 : oldPosition + dice;
 
-      if (player.pawns.every((p) => p == 39)) {
-        gameOver = true;
-        message = '🏆 ${player.name} a gagné la partie !';
-        return;
+      final newPosition = player.pawns[pawnIndex];
+
+      if (newPosition < 51) {
+        final absolutePosition = (player.start + newPosition) % 52;
+
+        for (int p = 0; p < players.length; p++) {
+          if (p == playerIndex) continue;
+
+          for (int i = 0; i < players[p].pawns.length; i++) {
+            final opponentPosition = players[p].pawns[i];
+
+            if (opponentPosition >= 0 &&
+                opponentPosition < 51 &&
+                (players[p].start + opponentPosition) % 52 ==
+                    absolutePosition) {
+              players[p].pawns[i] = -1;
+              message = 'Bravo ! Tu renvoies un pion à la maison.';
+            }
+          }
+        }
       }
 
-      diceRolled = false;
-
-      if (dice == 6) {
-        message = 'Bravo ! Tu as fait 6. Rejoue !';
+      if (player.pawns.every((p) => p == 56)) {
+        gameOver = true;
+        message = '🏆 ${player.name} remporte la partie !';
+      } else if (dice == 6) {
+        hasRolled = false;
+        dice = 1;
+        message = 'Magnifique ! Tu rejoues.';
       } else {
-        currentPlayer = (currentPlayer + 1) % 4;
-        message = 'Au tour de ${players[currentPlayer].name} !';
+        nextTurn();
       }
     });
+  }
+
+  bool isHomeCell(int row, int col, int player) {
+    final rowStart = player < 2 ? 0 : 9;
+    final colStart = player == 0 || player == 3 ? 0 : 9;
+
+    return row >= rowStart &&
+        row <= rowStart + 5 &&
+        col >= colStart &&
+        col <= colStart + 5;
+  }
+
+  int? playerAtHome(int row, int col) {
+    for (int p = 0; p < 4; p++) {
+      for (int i = 0; i < 4; i++) {
+        final slot = homeSlots[p][i];
+
+        if (slot[0] == row && slot[1] == col &&
+            players[p].pawns[i] == -1) {
+          return p;
+        }
+      }
+    }
+    return null;
+  }
+
+  List<Widget> pawnsAtCell(int row, int col) {
+    final result = <Widget>[];
+
+    for (int p = 0; p < players.length; p++) {
+      for (int i = 0; i < 4; i++) {
+        final position = players[p].pawns[i];
+
+        if (position < 0) continue;
+
+        List<int> cell;
+
+        if (position >= 52) {
+          final lane = homeLane(p);
+          cell = lane[min(position - 52, lane.length - 1)];
+        } else {
+          cell = track[(players[p].start + position) % 52];
+        }
+
+        if (cell[0] == row && cell[1] == col) {
+          result.add(
+            GestureDetector(
+              onTap: () => movePawn(p, i),
+              child: Container(
+                margin: const EdgeInsets.all(1),
+                decoration: BoxDecoration(
+                  color: players[p].color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: players[p].color.withOpacity(0.4),
+                      blurRadius: 3,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    '${i + 1}',
+                    style: const TextStyle(
+                      fontSize: 8,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    return result;
+  }
+
+  Widget buildCell(int row, int col) {
+    Color background = Colors.white;
+    Color borderColor = const Color(0xFFDDE2EF);
+
+    for (int p = 0; p < 4; p++) {
+      if (isHomeCell(row, col, p)) {
+        background = players[p].lightColor;
+      }
+    }
+
+    final trackIndex = track.indexWhere(
+      (cell) => cell[0] == row && cell[1] == col,
+    );
+
+    if (trackIndex >= 0) {
+      background = Colors.white;
+
+      for (int p = 0; p < 4; p++) {
+        if (trackIndex == players[p].start) {
+          background = players[p].color;
+        }
+      }
+
+      if ([1, 14, 27, 40].contains(trackIndex)) {
+        background = const Color(0xFFFFF1B8);
+      }
+    }
+
+    if (row == 7 && col == 7) {
+      background = const Color(0xFF10152B);
+    }
+
+    final homePlayer = playerAtHome(row, col);
+    final pieces = pawnsAtCell(row, col);
+
+    return GestureDetector(
+      onTap: homePlayer != null
+          ? () => movePawn(
+                homePlayer,
+                homeSlots[homePlayer].indexWhere(
+                  (slot) => slot[0] == row && slot[1] == col,
+                ),
+              )
+          : null,
+      child: Container(
+        decoration: BoxDecoration(
+          color: background,
+          border: Border.all(
+            color: borderColor,
+            width: 0.35,
+          ),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (isHomeCell(row, col, 0) &&
+                row == 2 && col == 2)
+              const Icon(Icons.person, size: 11, color: Colors.red),
+            if (isHomeCell(row, col, 1) &&
+                row == 2 && col == 11)
+              const Icon(Icons.face, size: 11, color: Colors.green),
+            if (isHomeCell(row, col, 2) &&
+                row == 11 && col == 11)
+              const Icon(Icons.person_outline,
+                  size: 11, color: Colors.orange),
+            if (isHomeCell(row, col, 3) &&
+                row == 11 && col == 2)
+              const Icon(Icons.face_3, size: 11, color: Colors.blue),
+            if (pieces.isNotEmpty)
+              Center(
+                child: pieces.length == 1
+                    ? SizedBox.expand(child: pieces.first)
+                    : Wrap(
+                        alignment: WrapAlignment.center,
+                        children: pieces
+                            .map(
+                              (piece) => SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: piece,
+                              ),
+                            )
+                            .toList(),
+                      ),
+              ),
+            if (row == 7 && col == 7)
+              const Center(
+                child: Icon(
+                  Icons.star,
+                  color: Colors.amber,
+                  size: 23,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget buildBoard() {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          itemCount: 225,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 15,
+            crossAxisSpacing: 0,
+            mainAxisSpacing: 0,
+          ),
+          itemBuilder: (context, index) {
+            return buildCell(index ~/ 15, index % 15);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget playerCard(int index) {
+    final player = players[index];
+    final active = index == currentPlayer;
+
+    return Expanded(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.all(4),
+        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 3),
+        decoration: BoxDecoration(
+          color: active
+              ? player.color.withOpacity(0.22)
+              : const Color(0xFF1A203A),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: active ? player.color : Colors.white12,
+            width: active ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: player.color,
+              child: Icon(player.avatar, color: Colors.white, size: 22),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              player.name,
+              style: TextStyle(
+                color: player.color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              '${player.pawns.where((p) => p == 56).length}/4',
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget diceWidget() {
+    final faces = [
+      '',
+      '⚀',
+      '⚁',
+      '⚂',
+      '⚃',
+      '⚄',
+      '⚅',
+    ];
+
+    return Container(
+      width: 66,
+      height: 66,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: players[currentPlayer].color.withOpacity(0.35),
+            blurRadius: 15,
+          ),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          faces[dice],
+          style: const TextStyle(fontSize: 43, color: Colors.black87),
+        ),
+      ),
+    );
   }
 
   void restartGame() {
     setState(() {
       for (final player in players) {
-        for (int i = 0; i < player.pawns.length; i++) {
-          player.pawns[i] = -1;
-        }
+        player.pawns.fillRange(0, 4, -1);
       }
-
       currentPlayer = 0;
       dice = 1;
-      diceRolled = false;
+      hasRolled = false;
       gameOver = false;
       message = 'Nouvelle partie ! Lance le dé.';
     });
   }
 
-  Widget buildPawn(Player player, int index) {
-    final position = player.pawns[index];
-    final isCurrent = players[currentPlayer] == player;
-
-    return InkWell(
-      onTap: isCurrent ? () => movePawn(index) : null,
-      borderRadius: BorderRadius.circular(30),
-      child: Container(
-        width: 48,
-        height: 48,
-        margin: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: position == -1
-              ? player.color.withValues(alpha: 0.15)
-              : player.color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: isCurrent ? Colors.white : player.color,
-            width: isCurrent ? 3 : 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: player.color.withValues(alpha: 0.2),
-              blurRadius: 5,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Center(
-          child: Text(
-            position == -1 ? '${index + 1}' : '♟',
-            style: TextStyle(
-              color: position == -1 ? player.color : Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget buildPlayerCard(Player player, int index) {
-    final active = currentPlayer == index;
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: player.color.withValues(alpha: active ? 0.15 : 0.06),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: active ? player.color : Colors.white10,
-          width: active ? 3 : 1,
-        ),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(player.emoji, style: const TextStyle(fontSize: 20)),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  player.name,
-                  style: TextStyle(
-                    color: player.color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            alignment: WrapAlignment.center,
-            children: List.generate(
-              4,
-              (i) => buildPawn(player, i),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${player.pawns.where((p) => p >= 0).length}/4 pions sortis',
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget buildTrack() {
-    final occupied = <int, List<int>>{};
-
-    for (int p = 0; p < players.length; p++) {
-      for (int i = 0; i < players[p].pawns.length; i++) {
-        final pos = players[p].pawns[i];
-
-        if (pos >= 0) {
-          occupied.putIfAbsent(pos, () => []).add(p);
-        }
-      }
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF17233D),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        children: [
-          const Text(
-            'PARCOURS DES PIONS',
-            style: TextStyle(
-              color: Colors.white70,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 2,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 10),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: 40,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 8,
-              crossAxisSpacing: 4,
-              mainAxisSpacing: 4,
-            ),
-            itemBuilder: (context, index) {
-              final colors = occupied[index] ?? [];
-
-              return Container(
-                decoration: BoxDecoration(
-                  color: colors.isEmpty
-                      ? const Color(0xFF263653)
-                      : players[colors.first].color,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.white24),
-                ),
-                child: Center(
-                  child: colors.isEmpty
-                      ? Text(
-                          '${index + 1}',
-                          style: const TextStyle(
-                            color: Colors.white38,
-                            fontSize: 10,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.circle,
-                          color: Colors.white,
-                          size: 14,
-                        ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Les cases représentent les positions des pions.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white54, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final activePlayer = players[currentPlayer];
-
     return Scaffold(
-      backgroundColor: const Color(0xFF0B1224),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF121D35),
-        foregroundColor: Colors.white,
-        centerTitle: true,
-        title: const Text(
-          '🎲 LudoPro',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            onPressed: restartGame,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Nouvelle partie',
-          ),
-        ],
-      ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            children: [
-              const Text(
-                'LE PLAISIR DE JOUER ENSEMBLE',
-                style: TextStyle(
-                  color: Colors.amber,
-                  fontSize: 12,
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF263E72), Color(0xFF182746)],
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [
+                          Color(0xFFFFC928),
+                          Color(0xFFFF7043),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.casino,
+                      color: Colors.white,
+                      size: 28,
+                    ),
                   ),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Column(
-                  children: [
-                    const Text(
-                      'C’EST AU TOUR DE',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        letterSpacing: 2,
-                      ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'LUDO PRO',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 23,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                        Text(
+                          'PLAY • ENJOY • WIN',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 10,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      '${activePlayer.emoji} ${activePlayer.name.toUpperCase()}',
-                      style: TextStyle(
-                        color: activePlayer.color,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 25,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      message,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(child: buildPlayerCard(players[0], 0)),
-                  const SizedBox(width: 10),
-                  Expanded(child: buildPlayerCard(players[1], 1)),
+                  ),
+                  IconButton(
+                    onPressed: restartGame,
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    tooltip: 'Nouvelle partie',
+                  ),
                 ],
               ),
-              const SizedBox(height: 10),
-              buildTrack(),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(child: buildPlayerCard(players[2], 2)),
-                  const SizedBox(width: 10),
-                  Expanded(child: buildPlayerCard(players[3], 3)),
-                ],
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: List.generate(4, playerCard),
               ),
-              const SizedBox(height: 18),
-              GestureDetector(
-                onTap: rollDice,
-                child: Container(
-                  width: 110,
-                  height: 110,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(25),
-                    border: Border.all(
-                      color: activePlayer.color,
-                      width: 5,
+            ),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: buildBoard(),
+                ),
+              ),
+            ),
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A203A),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: activePlayer.color.withValues(alpha: 0.3),
-                        blurRadius: 20,
-                        spreadRadius: 2,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      diceWidget(),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'TOUR DE ${players[currentPlayer].name}',
+                              style: TextStyle(
+                                color: players[currentPlayer].color,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            const Text(
+                              'Lance le dé et sélectionne ton pion.',
+                              style: TextStyle(
+                                color: Colors.white60,
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 42,
+                              child: ElevatedButton(
+                                onPressed: gameOver
+                                    ? restartGame
+                                    : hasRolled
+                                        ? null
+                                        : rollDice,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      players[currentPlayer].color,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor:
+                                      Colors.white12,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Text(
+                                  gameOver
+                                      ? 'REJOUER'
+                                      : hasRolled
+                                          ? 'CHOISIS UN PION'
+                                          : '🎲 LANCER LE DÉ',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                  child: Center(
-                    child: Text(
-                      '$dice',
-                      style: const TextStyle(
-                        color: Color(0xFF17233D),
-                        fontSize: 60,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ),
+                ],
               ),
-              const SizedBox(height: 10),
-              const Text(
-                'APPUIE SUR LE DÉ POUR JOUER',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 11,
-                  letterSpacing: 1.5,
-                ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: restartGame,
-                  icon: const Icon(Icons.replay),
-                  label: const Text('RECOMMENCER LA PARTIE'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber,
-                    foregroundColor: const Color(0xFF17233D),
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 15),
-              const Text(
-                'Version de test • LudoPro',
-                style: TextStyle(color: Colors.white38, fontSize: 11),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
