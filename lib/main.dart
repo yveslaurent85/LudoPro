@@ -50,6 +50,10 @@ class LudoGame extends StatefulWidget {
 class _LudoGameState extends State<LudoGame> {
   final Random random = Random();
 
+  // Cases étoiles (8 cases après chaque départ) et cases sûres (départs + étoiles)
+  static const Set<int> safeStars = {8, 21, 34, 47};
+  static const Set<int> safeCells = {0, 8, 13, 21, 26, 34, 39, 47};
+
   late final List<Player> players = [
     Player(
       name: 'ROUGE',
@@ -85,6 +89,7 @@ class _LudoGameState extends State<LudoGame> {
   int dice = 1;
   bool hasRolled = false;
   bool gameOver = false;
+  int _token = 0; // sert à annuler un passage de tour en attente
   String message = 'Lance le dé pour commencer !';
 
   final List<List<int>> track = const [
@@ -141,14 +146,15 @@ class _LudoGameState extends State<LudoGame> {
   void rollDice() {
     if (hasRolled || gameOver) return;
 
-    setState(() {
-      dice = random.nextInt(6) + 1;
-      hasRolled = true;
+    final newDice = random.nextInt(6) + 1;
+    final player = players[currentPlayer];
+    final canMove = player.pawns.any(
+      (p) => p == -1 ? newDice == 6 : p + newDice <= 56,
+    );
 
-      final player = players[currentPlayer];
-      final canMove = player.pawns.any(
-        (p) => p == -1 ? dice == 6 : p + dice <= 56,
-      );
+    setState(() {
+      dice = newDice;
+      hasRolled = true;
 
       if (!canMove) {
         message = '$dice ! Aucun déplacement possible.';
@@ -158,6 +164,15 @@ class _LudoGameState extends State<LudoGame> {
             : 'Choisis un pion à déplacer.';
       }
     });
+
+    // CORRECTION : si aucun pion ne peut bouger, on passe au joueur suivant
+    if (!canMove) {
+      final token = ++_token;
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (!mounted || token != _token || gameOver) return;
+        nextTurn();
+      });
+    }
   }
 
   void nextTurn() {
@@ -177,6 +192,8 @@ class _LudoGameState extends State<LudoGame> {
     final player = players[playerIndex];
     final oldPosition = player.pawns[pawnIndex];
 
+    if (oldPosition == 56) return;
+
     if (oldPosition == -1 && dice != 6) {
       setState(() {
         message = 'Il faut obtenir un 6 pour sortir ce pion.';
@@ -192,26 +209,28 @@ class _LudoGameState extends State<LudoGame> {
     }
 
     setState(() {
-      player.pawns[pawnIndex] =
-          oldPosition == -1 ? 0 : oldPosition + dice;
+      player.pawns[pawnIndex] = oldPosition == -1 ? 0 : oldPosition + dice;
 
       final newPosition = player.pawns[pawnIndex];
 
+      // Capture possible uniquement sur le circuit commun (0..50), hors cases sûres
       if (newPosition < 51) {
         final absolutePosition = (player.start + newPosition) % 52;
 
-        for (int p = 0; p < players.length; p++) {
-          if (p == playerIndex) continue;
+        if (!safeCells.contains(absolutePosition)) {
+          for (int p = 0; p < players.length; p++) {
+            if (p == playerIndex) continue;
 
-          for (int i = 0; i < players[p].pawns.length; i++) {
-            final opponentPosition = players[p].pawns[i];
+            for (int i = 0; i < players[p].pawns.length; i++) {
+              final opponentPosition = players[p].pawns[i];
 
-            if (opponentPosition >= 0 &&
-                opponentPosition < 51 &&
-                (players[p].start + opponentPosition) % 52 ==
-                    absolutePosition) {
-              players[p].pawns[i] = -1;
-              message = 'Bravo ! Tu renvoies un pion à la maison.';
+              if (opponentPosition >= 0 &&
+                  opponentPosition < 51 &&
+                  (players[p].start + opponentPosition) % 52 ==
+                      absolutePosition) {
+                players[p].pawns[i] = -1;
+                message = 'Bravo ! Tu renvoies un pion à la maison.';
+              }
             }
           }
         }
@@ -240,20 +259,6 @@ class _LudoGameState extends State<LudoGame> {
         col <= colStart + 5;
   }
 
-  int? playerAtHome(int row, int col) {
-    for (int p = 0; p < 4; p++) {
-      for (int i = 0; i < 4; i++) {
-        final slot = homeSlots[p][i];
-
-        if (slot[0] == row && slot[1] == col &&
-            players[p].pawns[i] == -1) {
-          return p;
-        }
-      }
-    }
-    return null;
-  }
-
   List<Widget> pawnsAtCell(int row, int col) {
     final result = <Widget>[];
 
@@ -261,13 +266,17 @@ class _LudoGameState extends State<LudoGame> {
       for (int i = 0; i < 4; i++) {
         final position = players[p].pawns[i];
 
-        if (position < 0) continue;
+        // Pion arrivé : on ne l'affiche plus (il est compté dans le score)
+        if (position == 56) continue;
 
         List<int> cell;
 
-        if (position >= 52) {
-          final lane = homeLane(p);
-          cell = lane[min(position - 52, lane.length - 1)];
+        if (position == -1) {
+          // CORRECTION : les pions à la maison sont maintenant dessinés
+          cell = homeSlots[p][i];
+        } else if (position >= 51) {
+          // CORRECTION : la couloir final commence à 51 (et non 52)
+          cell = homeLane(p)[position - 51];
         } else {
           cell = track[(players[p].start + position) % 52];
         }
@@ -332,8 +341,15 @@ class _LudoGameState extends State<LudoGame> {
         }
       }
 
-      if ([1, 14, 27, 40].contains(trackIndex)) {
+      if (safeStars.contains(trackIndex)) {
         background = const Color(0xFFFFF1B8);
+      }
+    }
+
+    // CORRECTION : couloirs d'arrivée colorés
+    for (int p = 0; p < 4; p++) {
+      if (homeLane(p).any((c) => c[0] == row && c[1] == col)) {
+        background = players[p].color.withOpacity(0.55);
       }
     }
 
@@ -341,69 +357,57 @@ class _LudoGameState extends State<LudoGame> {
       background = const Color(0xFF10152B);
     }
 
-    final homePlayer = playerAtHome(row, col);
     final pieces = pawnsAtCell(row, col);
 
-    return GestureDetector(
-      onTap: homePlayer != null
-          ? () => movePawn(
-                homePlayer,
-                homeSlots[homePlayer].indexWhere(
-                  (slot) => slot[0] == row && slot[1] == col,
-                ),
-              )
-          : null,
-      child: Container(
-        decoration: BoxDecoration(
-          color: background,
-          border: Border.all(
-            color: borderColor,
-            width: 0.35,
-          ),
+    return Container(
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(
+          color: borderColor,
+          width: 0.35,
         ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (isHomeCell(row, col, 0) &&
-                row == 2 && col == 2)
-              const Icon(Icons.person, size: 11, color: Colors.red),
-            if (isHomeCell(row, col, 1) &&
-                row == 2 && col == 11)
-              const Icon(Icons.face, size: 11, color: Colors.green),
-            if (isHomeCell(row, col, 2) &&
-                row == 11 && col == 11)
-              const Icon(Icons.person_outline,
-                  size: 11, color: Colors.orange),
-            if (isHomeCell(row, col, 3) &&
-                row == 11 && col == 2)
-              const Icon(Icons.face_3, size: 11, color: Colors.blue),
-            if (pieces.isNotEmpty)
-              Center(
-                child: pieces.length == 1
-                    ? SizedBox.expand(child: pieces.first)
-                    : Wrap(
-                        alignment: WrapAlignment.center,
-                        children: pieces
-                            .map(
-                              (piece) => SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: piece,
-                              ),
-                            )
-                            .toList(),
-                      ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (trackIndex >= 0 && safeStars.contains(trackIndex))
+            const Center(
+              child: Icon(Icons.star, size: 12, color: Color(0xFFE0A800)),
+            ),
+          if (isHomeCell(row, col, 0) && row == 2 && col == 2)
+            const Icon(Icons.person, size: 11, color: Colors.red),
+          if (isHomeCell(row, col, 1) && row == 2 && col == 11)
+            const Icon(Icons.face, size: 11, color: Colors.green),
+          if (isHomeCell(row, col, 2) && row == 11 && col == 11)
+            const Icon(Icons.person_outline, size: 11, color: Colors.orange),
+          if (isHomeCell(row, col, 3) && row == 11 && col == 2)
+            const Icon(Icons.face_3, size: 11, color: Colors.blue),
+          if (pieces.isNotEmpty)
+            Center(
+              child: pieces.length == 1
+                  ? SizedBox.expand(child: pieces.first)
+                  : Wrap(
+                      alignment: WrapAlignment.center,
+                      children: pieces
+                          .map(
+                            (piece) => SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: piece,
+                            ),
+                          )
+                          .toList(),
+                    ),
+            ),
+          if (row == 7 && col == 7)
+            const Center(
+              child: Icon(
+                Icons.star,
+                color: Colors.amber,
+                size: 23,
               ),
-            if (row == 7 && col == 7)
-              const Center(
-                child: Icon(
-                  Icons.star,
-                  color: Colors.amber,
-                  size: 23,
-                ),
-              ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -521,6 +525,7 @@ class _LudoGameState extends State<LudoGame> {
   }
 
   void restartGame() {
+    _token++; // annule un éventuel passage de tour en attente
     setState(() {
       for (final player in players) {
         player.pawns.fillRange(0, 4, -1);
@@ -666,8 +671,7 @@ class _LudoGameState extends State<LudoGame> {
                                   backgroundColor:
                                       players[currentPlayer].color,
                                   foregroundColor: Colors.white,
-                                  disabledBackgroundColor:
-                                      Colors.white12,
+                                  disabledBackgroundColor: Colors.white12,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
