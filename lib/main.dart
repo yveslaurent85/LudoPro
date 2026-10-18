@@ -1,12 +1,21 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+
+/// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
+bool firebaseReady = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp();
+    firebaseReady = true;
+  } catch (_) {
+    // L'appli s'ouvre quand même : le mode présentiel reste jouable.
+    firebaseReady = false;
+  }
   runApp(const LudoProApp());
 }
 
@@ -262,13 +271,136 @@ class HomeScreen extends StatelessWidget {
 
 // ----------------------------------------------------------------------
 // Jeu en ligne : création de compte / connexion
-// (le serveur n'est pas encore branché : l'écran est prêt, pas le compte)
+// (comptes gérés par Firebase Authentication)
 // ----------------------------------------------------------------------
 
-_OnlineScreenState
-} extends State<OnlineScreen> {
+class OnlineScreen extends StatefulWidget {
+  const OnlineScreen({super.key});
+
+  @override
+  State<OnlineScreen> createState() => _OnlineScreenState();
+}
+
+class _OnlineScreenState extends State<OnlineScreen> {
+  final TextEditingController pseudoCtrl = TextEditingController();
+  final TextEditingController emailCtrl = TextEditingController();
+  final TextEditingController passCtrl = TextEditingController();
+
   bool creating = true;
   bool hidePassword = true;
+  bool busy = false;
+  String? errorText;
+  User? user;
+
+  @override
+  void initState() {
+    super.initState();
+    if (firebaseReady) {
+      user = FirebaseAuth.instance.currentUser;
+    }
+  }
+
+  @override
+  void dispose() {
+    pseudoCtrl.dispose();
+    emailCtrl.dispose();
+    passCtrl.dispose();
+    super.dispose();
+  }
+
+  String _errorMessage(String code) {
+    switch (code) {
+      case 'email-already-in-use':
+        return 'Cet e-mail est déjà utilisé.';
+      case 'invalid-email':
+        return 'E-mail invalide.';
+      case 'weak-password':
+        return 'Mot de passe trop faible (6 caractères minimum).';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'E-mail ou mot de passe incorrect.';
+      case 'too-many-requests':
+        return 'Trop d\'essais. Réessaie dans quelques minutes.';
+      case 'network-request-failed':
+        return 'Pas de connexion internet.';
+      case 'operation-not-allowed':
+        return "La connexion par e-mail n'est pas activée dans Firebase.";
+      default:
+        return 'Erreur : $code';
+    }
+  }
+
+  Future<void> _submit() async {
+    if (!firebaseReady) {
+      setState(() {
+        errorText = "Le serveur en ligne n'est pas configuré dans l'appli.";
+      });
+      return;
+    }
+
+    final pseudo = pseudoCtrl.text.trim();
+    final email = emailCtrl.text.trim();
+    final password = passCtrl.text;
+
+    if (creating && pseudo.isEmpty) {
+      setState(() => errorText = 'Choisis un pseudo.');
+      return;
+    }
+    if (!email.contains('@')) {
+      setState(() => errorText = 'E-mail invalide.');
+      return;
+    }
+    if (password.length < 6) {
+      setState(() => errorText = 'Mot de passe : 6 caractères minimum.');
+      return;
+    }
+
+    setState(() {
+      busy = true;
+      errorText = null;
+    });
+
+    try {
+      final auth = FirebaseAuth.instance;
+      if (creating) {
+        final cred = await auth.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        await cred.user?.updateDisplayName(pseudo);
+        await cred.user?.reload();
+      } else {
+        await auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        user = auth.currentUser;
+        passCtrl.clear();
+      });
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => errorText = _errorMessage(e.code));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => errorText = 'Une erreur est survenue. Réessaie.');
+    } finally {
+      if (mounted) {
+        setState(() => busy = false);
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    setState(() {
+      user = null;
+    });
+  }
 
   InputDecoration _field(String label, IconData icon, {Widget? suffix}) {
     return InputDecoration(
@@ -314,8 +446,205 @@ _OnlineScreenState
     );
   }
 
+  Widget _banner(IconData icon, Color color, String text) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.black26,
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _primaryButton(String label, VoidCallback? onTap) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 50,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(25),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: enabled
+                ? const [Color(0xFF55E05A), Color(0xFF1B9E2B)]
+                : const [Color(0xFF6B7396), Color(0xFF454C70)],
+          ),
+          border: Border.all(
+            color: enabled ? const Color(0xFFFFD54F) : Colors.white24,
+            width: 2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _signedInView(User current) {
+    final name = (current.displayName != null && current.displayName!.isNotEmpty)
+        ? current.displayName!
+        : (current.email ?? 'Joueur');
+
+    return [
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: Colors.white.withOpacity(0.12),
+          border: Border.all(color: Colors.white30),
+        ),
+        child: Row(
+          children: [
+            const CircleAvatar(
+              radius: 26,
+              backgroundColor: Color(0xFF22B14C),
+              child: Icon(Icons.person, color: Colors.white, size: 30),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Connecté',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (current.email != null)
+                    Text(
+                      current.email!,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
+      _banner(
+        Icons.hourglass_top,
+        const Color(0xFFFFC21A),
+        'Ton compte est prêt. Les parties à distance (salles et invitations) '
+        'arrivent à la prochaine étape.',
+      ),
+      const SizedBox(height: 22),
+      _primaryButton('Se déconnecter', _signOut),
+    ];
+  }
+
+  List<Widget> _formView() {
+    return [
+      Row(
+        children: [
+          _tab('Créer un compte', creating, () {
+            setState(() {
+              creating = true;
+              errorText = null;
+            });
+          }),
+          const SizedBox(width: 10),
+          _tab('Se connecter', !creating, () {
+            setState(() {
+              creating = false;
+              errorText = null;
+            });
+          }),
+        ],
+      ),
+      const SizedBox(height: 18),
+      if (creating) ...[
+        TextField(
+          controller: pseudoCtrl,
+          enabled: !busy,
+          style: const TextStyle(color: Colors.white),
+          cursorColor: const Color(0xFFFFC21A),
+          decoration: _field('Pseudo', Icons.person),
+        ),
+        const SizedBox(height: 12),
+      ],
+      TextField(
+        controller: emailCtrl,
+        enabled: !busy,
+        style: const TextStyle(color: Colors.white),
+        cursorColor: const Color(0xFFFFC21A),
+        keyboardType: TextInputType.emailAddress,
+        decoration: _field('E-mail', Icons.email),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: passCtrl,
+        enabled: !busy,
+        style: const TextStyle(color: Colors.white),
+        cursorColor: const Color(0xFFFFC21A),
+        obscureText: hidePassword,
+        decoration: _field(
+          'Mot de passe',
+          Icons.lock,
+          suffix: IconButton(
+            onPressed: () => setState(() => hidePassword = !hidePassword),
+            icon: Icon(
+              hidePassword ? Icons.visibility : Icons.visibility_off,
+              color: Colors.white70,
+            ),
+          ),
+        ),
+      ),
+      if (errorText != null) ...[
+        const SizedBox(height: 12),
+        Text(
+          errorText!,
+          style: const TextStyle(
+            color: Color(0xFFFF8A80),
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+      const SizedBox(height: 22),
+      _primaryButton(
+        busy
+            ? 'Patiente...'
+            : (creating ? 'Créer mon compte' : 'Me connecter'),
+        busy ? null : _submit,
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
+    final current = user;
+
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -344,110 +673,24 @@ _OnlineScreenState
                   ],
                 ),
                 const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    color: Colors.black26,
-                    border: Border.all(
-                      color: const Color(0xFFFFC21A),
-                      width: 1.5,
-                    ),
+                if (!firebaseReady)
+                  _banner(
+                    Icons.warning_amber_rounded,
+                    const Color(0xFFFF8A65),
+                    "Le serveur en ligne n'est pas configuré : Firebase n'a pas "
+                    'démarré. Le mode présentiel reste disponible.',
+                  )
+                else if (current == null)
+                  _banner(
+                    Icons.info_outline,
+                    const Color(0xFFFFC21A),
+                    'Crée un compte ou connecte-toi pour jouer en ligne.',
                   ),
-                  child: const Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.info_outline, color: Color(0xFFFFC21A)),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          "Le serveur en ligne n'est pas encore branché. "
-                          'Les comptes et les parties à distance seront '
-                          'activés dès qu\'il sera prêt.',
-                          style: TextStyle(color: Colors.white, fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 const SizedBox(height: 20),
-                Row(
-                  children: [
-                    _tab('Créer un compte', creating, () {
-                      setState(() => creating = true);
-                    }),
-                    const SizedBox(width: 10),
-                    _tab('Se connecter', !creating, () {
-                      setState(() => creating = false);
-                    }),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                if (creating) ...[
-                  TextField(
-                    style: const TextStyle(color: Colors.white),
-                    cursorColor: const Color(0xFFFFC21A),
-                    decoration: _field('Pseudo', Icons.person),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                TextField(
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: const Color(0xFFFFC21A),
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: _field('E-mail', Icons.email),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  style: const TextStyle(color: Colors.white),
-                  cursorColor: const Color(0xFFFFC21A),
-                  obscureText: hidePassword,
-                  decoration: _field(
-                    'Mot de passe',
-                    Icons.lock,
-                    suffix: IconButton(
-                      onPressed: () =>
-                          setState(() => hidePassword = !hidePassword),
-                      icon: Icon(
-                        hidePassword ? Icons.visibility : Icons.visibility_off,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                GestureDetector(
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Disponible dès que le serveur en ligne sera branché.',
-                        ),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    height: 50,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(25),
-                      gradient: const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0xFF6B7396), Color(0xFF454C70)],
-                      ),
-                      border: Border.all(color: Colors.white24, width: 2),
-                    ),
-                    child: Text(
-                      creating ? 'Créer mon compte' : 'Me connecter',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
+                if (current != null)
+                  ..._signedInView(current)
+                else
+                  ..._formView(),
               ],
             ),
           ),
