@@ -1210,6 +1210,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return Scaffold(
       body: Stack(
         key: rootKey,
+        fit: StackFit.expand,
         children: [
           Positioned.fill(
             child: Container(
