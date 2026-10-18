@@ -21,7 +21,7 @@ jobs:
 
       - name: Creer la structure Android
         
-run: flutter create --org com.yveslaurent85 --platforms=android .
+        run: flutter create --org com.yveslaurent85 --platforms=android .
       - name: Installer les dependances
         run: flutter pub get
 
