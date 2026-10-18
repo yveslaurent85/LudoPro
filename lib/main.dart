@@ -548,7 +548,6 @@ class _LudoGameState extends State<LudoGame> {
 
     final starts = [0, 13, 26, 39];
 
-    // Génère uniquement le nombre de joueurs choisi dans les paramètres
     players = List.generate(widget.playerCount, (index) {
       return LudoPlayer(
         name: names[index],
@@ -745,7 +744,7 @@ class _LudoGameState extends State<LudoGame> {
                     child: AspectRatio(
                       aspectRatio: 1,
                       child: CustomPaint(
-                        painter: BoardPainter(players: players),
+                        painter: ClassicLudoBoardPainter(players: players),
                         child: const SizedBox.expand(),
                       ),
                     ),
@@ -821,214 +820,176 @@ class _LudoGameState extends State<LudoGame> {
   }
 }
 
-class BoardPainter extends CustomPainter {
+class ClassicLudoBoardPainter extends CustomPainter {
   final List<LudoPlayer> players;
 
-  BoardPainter({required this.players});
+  ClassicLudoBoardPainter({required this.players});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final width = size.width;
-    final height = size.height;
-    final unit = min(width, height);
+    final w = size.width;
+    final h = size.height;
+    final cellSize = w / 15;
 
-    final background = Paint()
-      ..color = const Color(0xFFF4F1E8);
-
+    // Fond général du plateau (crème classique)
+    final bgPaint = Paint()..color = const Color(0xFFF9F6EE);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, 0, width, height),
-        const Radius.circular(20),
-      ),
-      background,
+      RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), const Radius.circular(16)),
+      bgPaint,
     );
 
-    final colors = [
-      Colors.red,
-      Colors.green,
-      Colors.blue,
-      Colors.amber,
-    ];
+    final colors = [Colors.red, Colors.green, Colors.blue, Colors.amber];
 
-    final positions = [
-      const Offset(0.04, 0.04),
-      const Offset(0.56, 0.04),
-      const Offset(0.04, 0.56),
-      const Offset(0.56, 0.56),
+    // 1. Dessin des 4 grandes bases aux coins (6x6 cellules)
+    final baseRects = [
+      Rect.fromLTWH(0, 0, 6 * cellSize, 6 * cellSize),         // Rouge (Haut-Gauche)
+      Rect.fromLTWH(9 * cellSize, 0, 6 * cellSize, 6 * cellSize),    // Vert (Haut-Droite)
+      Rect.fromLTWH(0, 9 * cellSize, 6 * cellSize, 6 * cellSize),    // Jaune/Bleu (Bas-Gauche)
+      Rect.fromLTWH(9 * cellSize, 9 * cellSize, 6 * cellSize, 6 * cellSize), // Jaune/Bleu (Bas-Droite)
     ];
-
-    final baseSize = unit * 0.38;
 
     for (int i = 0; i < 4; i++) {
-      // Si le joueur est actif, on affiche sa couleur normale, sinon une base neutre/discrète
       final isActive = i < players.length;
+      final paint = Paint()
+        ..color = isActive ? colors[i] : Colors.grey.withValues(alpha: 0.3);
+      canvas.drawRect(baseRects[i], paint);
 
-      final rect = Rect.fromLTWH(
-        positions[i].dx * width,
-        positions[i].dy * height,
-        baseSize,
-        baseSize,
-      );
-
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          rect,
-          const Radius.circular(14),
-        ),
-        Paint()
-          ..color = isActive
-              ? colors[i].withValues(alpha: 0.85)
-              : Colors.grey.withValues(alpha: 0.15),
-      );
-
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          rect.deflate(unit * 0.045),
-          const Radius.circular(10),
-        ),
-        Paint()..color = Colors.white.withValues(alpha: 0.20),
-      );
+      // Intérieur blanc de la maison
+      final innerRect = baseRects[i].deflate(cellSize * 0.8);
+      canvas.drawRect(innerRect, Paint()..color = Colors.white);
     }
 
-    final center = Offset(width / 2, height / 2);
-    final radius = unit * 0.31;
+    // 2. Grille des pistes extérieures et couloirs (15x15)
+    final trackPaint = Paint()
+      ..color = Colors.black12
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
 
-    canvas.drawCircle(
-      center,
-      radius + unit * 0.045,
-      Paint()..color = const Color(0xFFDED9CE),
-    );
-
-    for (int i = 0; i < 52; i++) {
-      final angle = -pi / 2 + (2 * pi * i / 52);
-      final point = Offset(
-        center.dx + radius * cos(angle),
-        center.dy + radius * sin(angle),
-      );
-
-      final cellColor = switch (i) {
-        0 => Colors.red,
-        13 => Colors.green,
-        26 => Colors.blue,
-        39 => Colors.amber,
-        _ => Colors.white,
-      };
-
-      canvas.drawCircle(
-        point,
-        unit * 0.022,
-        Paint()..color = cellColor,
-      );
-
-      canvas.drawCircle(
-        point,
-        unit * 0.022,
-        Paint()
-          ..color = Colors.black26
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1,
-      );
+    for (int i = 0; i <= 15; i++) {
+      canvas.drawLine(Offset(i * cellSize, 0), Offset(i * cellSize, h), trackPaint);
+      canvas.drawLine(Offset(0, i * cellSize), Offset(w, i * cellSize), trackPaint);
     }
+
+    // 3. Couloirs de couleur (maisons d'arrivée)
+    // Colonne centrale / Lignes centrales
+    // Rouge (gauche)
+    for (int i = 1; i <= 5; i++) {
+      canvas.drawRect(Rect.fromLTWH(i * cellSize, 6 * cellSize, cellSize, cellSize), Paint()..color = Colors.red);
+    }
+    // Vert (haut)
+    for (int i = 1; i <= 5; i++) {
+      canvas.drawRect(Rect.fromLTWH(8 * cellSize, i * cellSize, cellSize, cellSize), Paint()..color = Colors.green);
+    }
+    // Jaune (droite)
+    for (int i = 9; i <= 13; i++) {
+      canvas.drawRect(Rect.fromLTWH(i * cellSize, 8 * cellSize, cellSize, cellSize), Paint()..color = Colors.amber);
+    }
+    // Bleu (bas)
+    for (int i = 9; i <= 13; i++) {
+      canvas.drawRect(Rect.fromLTWH(6 * cellSize, i * cellSize, cellSize, cellSize), Paint()..color = Colors.blue);
+    }
+
+    // Cases de départ / étoiles (repères classiques)
+    _drawStar(canvas, Offset(1.5 * cellSize, 6.5 * cellSize), cellSize * 0.4, Colors.red);
+    _drawStar(canvas, Offset(8.5 * cellSize, 1.5 * cellSize), cellSize * 0.4, Colors.green);
+    _drawStar(canvas, Offset(13.5 * cellSize, 8.5 * cellSize), cellSize * 0.4, Colors.amber);
+    _drawStar(canvas, Offset(6.5 * cellSize, 13.5 * cellSize), cellSize * 0.4, Colors.blue);
+
+    // Centre du plateau (Triangles de victoire)
+    final centerRect = Rect.fromLTWH(6 * cellSize, 6 * cellSize, 3 * cellSize, 3 * cellSize);
+    // On dessine 4 triangles colorés au centre
+    final pathRed = Path()..moveTo(6*cellSize, 6*cellSize)..lineTo(7.5*cellSize, 7.5*cellSize)..lineTo(6*cellSize, 9*cellSize)..close();
+    final pathGreen = Path()..moveTo(6*cellSize, 6*cellSize)..lineTo(9*cellSize, 6*cellSize)..lineTo(7.5*cellSize, 7.5*cellSize)..close();
+    final pathYellow = Path()..moveTo(9*cellSize, 6*cellSize)..lineTo(9*cellSize, 9*cellSize)..lineTo(7.5*cellSize, 7.5*cellSize)..close();
+    final pathBlue = Path()..moveTo(6*cellSize, 9*cellSize)..lineTo(9*cellSize, 9*cellSize)..lineTo(7.5*cellSize, 7.5*cellSize)..close();
+
+    canvas.drawPath(pathRed, Paint()..color = Colors.red);
+    canvas.drawPath(pathGreen, Paint()..color = Colors.green);
+    canvas.drawPath(pathYellow, Paint()..color = Colors.amber);
+    canvas.drawPath(pathBlue, Paint()..color = Colors.blue);
+
+    canvas.drawRect(centerRect, Paint()..color = Colors.black26..style = PaintingStyle.stroke..strokeWidth = 2);
+
+    // 4. Positionnement et affichage des pions des joueurs
+    final homeOffsets = [
+      [Offset(1.5, 1.5), Offset(4.5, 1.5), Offset(1.5, 4.5), Offset(4.5, 4.5)], // Rouge
+      [Offset(10.5, 1.5), Offset(13.5, 1.5), Offset(10.5, 4.5), Offset(13.5, 4.5)], // Vert
+      [Offset(10.5, 10.5), Offset(13.5, 10.5), Offset(10.5, 13.5), Offset(13.5, 13.5)], // Jaune/Bleu
+      [Offset(1.5, 10.5), Offset(4.5, 10.5), Offset(1.5, 13.5), Offset(4.5, 13.5)], // Jaune/Bleu
+    ];
+
+    // Chemin global sur les 52 cases du pourtour (coordonnées en grille 15x15)
+    final List<Offset> trackPath = [
+      Offset(1, 6), Offset(2, 6), Offset(3, 6), Offset(4, 6), Offset(5, 6),
+      Offset(6, 5), Offset(6, 4), Offset(6, 3), Offset(6, 2), Offset(6, 1), Offset(6, 0),
+      Offset(7, 0),
+      Offset(8, 0), Offset(8, 1), Offset(8, 2), Offset(8, 3), Offset(8, 4), Offset(8, 5),
+      Offset(9, 6), Offset(10, 6), Offset(11, 6), Offset(12, 6), Offset(13, 6), Offset(14, 6),
+      Offset(14, 7),
+      Offset(14, 8), Offset(13, 8), Offset(12, 8), Offset(11, 8), Offset(10, 8), Offset(9, 8),
+      Offset(8, 9), Offset(8, 10), Offset(8, 11), Offset(8, 12), Offset(8, 13), Offset(8, 14),
+      Offset(7, 14),
+      Offset(6, 14), Offset(6, 13), Offset(6, 12), Offset(6, 11), Offset(6, 10), Offset(6, 9),
+      Offset(5, 8), Offset(4, 8), Offset(3, 8), Offset(2, 8), Offset(1, 8), Offset(0, 8),
+      Offset(0, 7),
+      Offset(0, 6),
+    ];
 
     for (int p = 0; p < players.length; p++) {
       final player = players[p];
 
       for (int j = 0; j < player.pawns.length; j++) {
-        final position = player.pawns[j];
-        Offset point;
+        final pos = player.pawns[j];
+        Offset cellCoord;
 
-        if (position == -1) {
-          final base = positions[p];
-          final offsetX = j % 2 == 0 ? 0.10 : 0.26;
-          final offsetY = j < 2 ? 0.10 : 0.26;
-
-          point = Offset(
-            (base.dx + offsetX) * width,
-            (base.dy + offsetY) * height,
-          );
-        } else if (position <= 51) {
-          final trackIndex = (player.start + position) % 52;
-          final angle = -pi / 2 + (2 * pi * trackIndex / 52);
-
-          point = Offset(
-            center.dx + radius * cos(angle),
-            center.dy + radius * sin(angle),
-          );
-        } else if (position < 57) {
-          final progress = position - 51;
-          final angle = -pi / 2 + (2 * pi * player.start / 52);
-          final distance = radius * (1 - progress / 7);
-
-          point = Offset(
-            center.dx + distance * cos(angle),
-            center.dy + distance * sin(angle),
-          );
+        if (pos == -1) {
+          // Dans la maison
+          cellCoord = homeOffsets[p][j];
+        } else if (pos <= 51) {
+          // Sur le circuit extérieur
+          final globalIndex = (player.start + pos) % 52;
+          cellCoord = trackPath[globalIndex];
+        } else if (pos < 57) {
+          // Dans le couloir final
+          final step = pos - 51;
+          if (p == 0) cellCoord = Offset(step.toDouble(), 7.0);
+          else if (p == 1) cellCoord = Offset(7.0, step.toDouble());
+          else if (p == 2) cellCoord = Offset(14.0 - step, 7.0);
+          else cellCoord = Offset(7.0, 14.0 - step);
         } else {
-          point = center;
+          // Au centre (Victoire)
+          cellCoord = const Offset(7.0, 7.0);
         }
 
-        final pawnRadius = unit * 0.027;
+        final centerPos = Offset(cellCoord.dx * cellSize + cellSize / 2, cellCoord.dy * cellSize + cellSize / 2);
+        final pawnRadius = cellSize * 0.35;
 
+        // Dessin du pion
+        canvas.drawCircle(centerPos, pawnRadius, Paint()..color = player.color);
         canvas.drawCircle(
-          point,
+          centerPos,
           pawnRadius,
-          Paint()..color = player.color,
+          Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2,
         );
 
-        canvas.drawCircle(
-          point,
-          pawnRadius,
-          Paint()
-            ..color = Colors.white
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5,
-        );
-
-        final numberPainter = TextPainter(
+        // Numéro du pion à l'intérieur
+        final tp = TextPainter(
           text: TextSpan(
             text: '${j + 1}',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: unit * 0.022,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: Colors.white, fontSize: cellSize * 0.35, fontWeight: FontWeight.bold),
           ),
           textDirection: TextDirection.ltr,
-        );
-
-        numberPainter.layout();
-        numberPainter.paint(
-          canvas,
-          Offset(
-            point.dx - numberPainter.width / 2,
-            point.dy - numberPainter.height / 2,
-          ),
-        );
+        )..layout();
+        tp.paint(canvas, Offset(centerPos.dx - tp.width / 2, centerPos.dy - tp.height / 2));
       }
     }
+  }
 
-    final centerPainter = TextPainter(
-      text: const TextSpan(
-        text: 'LUDO',
-        style: TextStyle(
-          color: Colors.deepPurple,
-          fontWeight: FontWeight.bold,
-          fontSize: 20,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-
-    centerPainter.layout();
-    centerPainter.paint(
-      canvas,
-      Offset(
-        center.dx - centerPainter.width / 2,
-        center.dy - centerPainter.height / 2,
-      ),
-    );
+  void _drawStar(Canvas canvas, Offset center, double radius, Color color) {
+    final paint = Paint()..color = color;
+    canvas.drawCircle(center, radius * 0.6, paint);
   }
 
   @override
-  bool shouldRepaint(covariant BoardPainter oldDelegate) => true;
+  bool shouldRepaint(covariant ClassicLudoBoardPainter oldDelegate) => true;
 }
