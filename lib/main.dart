@@ -1,6 +1,8 @@
 import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 void main() {
   runApp(const LudoProApp());
@@ -30,6 +32,138 @@ class LudoProApp extends StatelessWidget {
     );
   }
 }
+
+// ----------------------------------------------------------------------
+// Sons : générés par le code (aucun fichier audio à ajouter)
+// ----------------------------------------------------------------------
+
+const int _sampleRate = 22050;
+
+List<double> _tone(
+  double freq,
+  int ms, {
+  double vol = 0.6,
+  double decay = 6,
+  double endFreq = -1,
+}) {
+  final n = _sampleRate * ms ~/ 1000;
+  final out = List<double>.filled(n, 0.0);
+  double phase = 0;
+  for (int i = 0; i < n; i++) {
+    final t = i / n;
+    final f = endFreq < 0 ? freq : freq + (endFreq - freq) * t;
+    phase += 2 * pi * f / _sampleRate;
+    final attack = i < 80 ? i / 80 : 1.0;
+    out[i] = sin(phase) * vol * exp(-decay * t) * attack;
+  }
+  return out;
+}
+
+List<double> _noise(Random rnd, int ms, {double vol = 0.5, double decay = 12}) {
+  final n = _sampleRate * ms ~/ 1000;
+  return List<double>.generate(
+    n,
+    (i) => (rnd.nextDouble() * 2 - 1) * vol * exp(-decay * i / n),
+  );
+}
+
+List<double> _silence(int ms) =>
+    List<double>.filled(_sampleRate * ms ~/ 1000, 0.0);
+
+List<double> _cat(List<List<double>> parts) => [
+      for (final part in parts) ...part,
+    ];
+
+Uint8List _wav(List<double> samples) {
+  final data = ByteData(44 + samples.length * 2);
+
+  void writeText(int offset, String text) {
+    for (int i = 0; i < text.length; i++) {
+      data.setUint8(offset + i, text.codeUnitAt(i));
+    }
+  }
+
+  writeText(0, 'RIFF');
+  data.setUint32(4, 36 + samples.length * 2, Endian.little);
+  writeText(8, 'WAVE');
+  writeText(12, 'fmt ');
+  data.setUint32(16, 16, Endian.little);
+  data.setUint16(20, 1, Endian.little);
+  data.setUint16(22, 1, Endian.little);
+  data.setUint32(24, _sampleRate, Endian.little);
+  data.setUint32(28, _sampleRate * 2, Endian.little);
+  data.setUint16(32, 2, Endian.little);
+  data.setUint16(34, 16, Endian.little);
+  writeText(36, 'data');
+  data.setUint32(40, samples.length * 2, Endian.little);
+
+  for (int i = 0; i < samples.length; i++) {
+    final v = (samples[i].clamp(-1.0, 1.0) * 32767).round();
+    data.setInt16(44 + i * 2, v, Endian.little);
+  }
+  return data.buffer.asUint8List();
+}
+
+class Sfx {
+  final Random _rnd = Random(7);
+  final List<AudioPlayer> _pool = List.generate(5, (_) => AudioPlayer());
+  int _next = 0;
+  bool enabled = true;
+
+  late final Uint8List _stepSound = _wav(_tone(620, 60, decay: 9, vol: 0.5));
+  late final Uint8List _landSound = _wav(_tone(180, 130, decay: 9, vol: 0.8));
+  late final Uint8List _denySound = _wav(_tone(160, 150, decay: 5, vol: 0.7));
+  late final Uint8List _captureSound =
+      _wav(_tone(700, 320, decay: 4, vol: 0.7, endFreq: 180));
+  late final Uint8List _arriveSound = _wav(
+    _cat([_tone(523, 110), _tone(659, 110), _tone(784, 240, decay: 5)]),
+  );
+  late final Uint8List _winSound = _wav(
+    _cat([
+      _tone(523, 130),
+      _tone(659, 130),
+      _tone(784, 130),
+      _tone(1047, 420, decay: 4),
+    ]),
+  );
+  late final Uint8List _rollSound = _wav(
+    _cat([
+      for (int i = 0; i < 7; i++) ...[
+        _noise(_rnd, 35, vol: 0.45),
+        _silence(45),
+      ],
+    ]),
+  );
+
+  void _play(Uint8List bytes) {
+    if (!enabled) return;
+    try {
+      final player = _pool[_next];
+      _next = (_next + 1) % _pool.length;
+      player.play(BytesSource(bytes)).catchError((_) {});
+    } catch (_) {
+      // Le son ne doit jamais bloquer le jeu
+    }
+  }
+
+  void step() => _play(_stepSound);
+  void land() => _play(_landSound);
+  void deny() => _play(_denySound);
+  void capture() => _play(_captureSound);
+  void arrive() => _play(_arriveSound);
+  void win() => _play(_winSound);
+  void roll() => _play(_rollSound);
+
+  void dispose() {
+    for (final player in _pool) {
+      player.dispose();
+    }
+  }
+}
+
+// ----------------------------------------------------------------------
+// Modèles
+// ----------------------------------------------------------------------
 
 class Player {
   final String display; // ex : Rouge
@@ -64,14 +198,19 @@ class LudoGame extends StatefulWidget {
   State<LudoGame> createState() => _LudoGameState();
 }
 
-class _LudoGameState extends State<LudoGame>
-    with SingleTickerProviderStateMixin {
+class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Cases étoiles (8 cases après chaque départ) et cases sûres (départs + étoiles)
   static const Set<int> safeStars = {8, 21, 34, 47};
   static const Set<int> safeCells = {0, 8, 13, 21, 26, 34, 39, 47};
 
   final Random random = Random();
+  final Sfx sfx = Sfx();
   late final AnimationController _pulse;
+  late final AnimationController _flight;
+
+  final GlobalKey rootKey = GlobalKey();
+  final GlobalKey boardKey = GlobalKey();
+  final List<GlobalKey> diceKeys = List.generate(4, (_) => GlobalKey());
 
   // Ordre des tours (sens horaire) : Rouge, Vert, Bleu, Jaune
   late final List<Player> players = [
@@ -106,15 +245,25 @@ class _LudoGameState extends State<LudoGame>
   ];
 
   int currentPlayer = 0;
-  int dice = 1;
+  int dice = 1; // valeur du dernier lancer validé
+  int pendingDice = 1; // valeur en cours de lancer
+  final List<int> lastRoll = [1, 1, 1, 1]; // face affichée sur le dé de chaque joueur
   bool hasRolled = false;
   bool isRolling = false;
   bool isMoving = false;
   bool gameOver = false;
   bool soundOn = true;
-  double diceTurns = 0;
+
+  // Dé : glissement et lancer
+  bool diceDragging = false;
+  Offset dragPos = Offset.zero;
+  int flightPhase = 0; // 0 = au repos, 1 = lancer, 2 = posé / retour
+  Offset flightFrom = Offset.zero;
+  Offset flightTo = Offset.zero;
+  List<int> faceSeq = [1, 2, 3, 4, 5, 6];
+
   int _token = 0; // sert à annuler les animations en attente
-  String message = 'Lance le dé pour commencer !';
+  String message = 'Touche ton dé ou glisse-le pour le lancer !';
 
   final List<List<int>> track = const [
     [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],
@@ -159,62 +308,166 @@ class _LudoGameState extends State<LudoGame>
       vsync: this,
       duration: const Duration(milliseconds: 650),
     )..repeat(reverse: true);
+    _flight = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
   }
 
   @override
   void dispose() {
     _pulse.dispose();
+    _flight.dispose();
+    sfx.dispose();
     super.dispose();
-  }
-
-  void click() {
-    if (soundOn) {
-      SystemSound.play(SystemSoundType.click);
-    }
   }
 
   // ---------------------------------------------------------------------
   // Règles du jeu
   // ---------------------------------------------------------------------
 
-  bool canPawnMoveWith(int position, int value) {
-    if (position == -1) return value == 6;
-    return position + value <= 56;
+  bool get canRollNow =>
+      !hasRolled && !gameOver && !isRolling && !isMoving && flightPhase == 0;
+
+  bool canPawnMove(int position) {
+    if (position == -1) return dice == 6;
+    return position + dice <= 56;
   }
 
-  bool canPawnMove(int position) => canPawnMoveWith(position, dice);
+  /// Ce coup capture-t-il un pion adverse ?
+  bool moveCaptures(int pawnIndex) {
+    final player = players[currentPlayer];
+    final from = player.pawns[pawnIndex];
+    if (!canPawnMove(from)) return false;
 
-  Future<void> rollDice() async {
-    if (hasRolled || gameOver || isRolling || isMoving) return;
+    final target = from == -1 ? 0 : from + dice;
+    if (target >= 51) return false;
+
+    final absolutePosition = (player.start + target) % 52;
+    if (safeCells.contains(absolutePosition)) return false;
+
+    for (int p = 0; p < players.length; p++) {
+      if (p == currentPlayer) continue;
+      for (final pos in players[p].pawns) {
+        if (pos >= 0 &&
+            pos < 51 &&
+            (players[p].start + pos) % 52 == absolutePosition) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Coups autorisés. Si une capture est possible, elle est obligatoire.
+  List<int> legalMoves() {
+    final player = players[currentPlayer];
+    final all = <int>[
+      for (int i = 0; i < 4; i++)
+        if (canPawnMove(player.pawns[i])) i,
+    ];
+    final captures = all.where(moveCaptures).toList();
+    return captures.isNotEmpty ? captures : all;
+  }
+
+  /// Retire les coups équivalents (pions au même endroit).
+  List<int> distinctMoves(List<int> legal) {
+    final player = players[currentPlayer];
+    final seen = <int>{};
+    final result = <int>[];
+    for (final i in legal) {
+      if (seen.add(player.pawns[i])) result.add(i);
+    }
+    return result;
+  }
+
+  Offset _toRoot(GlobalKey key, [Offset local = Offset.zero]) {
+    final root = rootKey.currentContext!.findRenderObject() as RenderBox;
+    final box = key.currentContext!.findRenderObject() as RenderBox;
+    return root.globalToLocal(box.localToGlobal(local));
+  }
+
+  // --- Dé : glisser puis lâcher, ou simplement toucher -------------------
+
+  void onDicePanStart(int p) {
+    if (p != currentPlayer || !canRollNow) return;
+    final origin = _toRoot(diceKeys[p]);
+    setState(() {
+      diceDragging = true;
+      dragPos = origin;
+    });
+  }
+
+  void onDicePanUpdate(DragUpdateDetails details) {
+    if (!diceDragging) return;
+    setState(() {
+      dragPos += details.delta;
+    });
+  }
+
+  void onDicePanEnd() {
+    if (!diceDragging) return;
+    final from = dragPos;
+    setState(() {
+      diceDragging = false;
+    });
+    throwDice(from);
+  }
+
+  Future<void> throwDice(Offset from) async {
+    if (!canRollNow) return;
 
     final newDice = random.nextInt(6) + 1;
-    final player = players[currentPlayer];
     final rollToken = ++_token;
+
+    const flyingSize = 64.0;
+    final boardBox = boardKey.currentContext!.findRenderObject() as RenderBox;
+    final boardCenter =
+        _toRoot(boardKey, boardBox.size.center(Offset.zero));
+    final jitter = Offset(
+      random.nextDouble() * 60 - 30,
+      random.nextDouble() * 60 - 30,
+    );
 
     setState(() {
       isRolling = true;
+      pendingDice = newDice;
+      faceSeq = List<int>.generate(6, (i) => i + 1)..shuffle(random);
+      flightPhase = 1;
+      flightFrom = from;
+      flightTo = boardCenter -
+          const Offset(flyingSize / 2, flyingSize / 2) +
+          jitter;
       message = 'Le dé roule...';
     });
+    sfx.roll();
 
-    for (int i = 0; i < 8; i++) {
-      await Future.delayed(const Duration(milliseconds: 80));
-      if (!mounted || rollToken != _token) return;
-      click();
-      setState(() {
-        dice = random.nextInt(6) + 1;
-        diceTurns += 0.25;
-      });
-    }
-
-    final canMove = player.pawns.any((p) => canPawnMoveWith(p, newDice));
+    _flight.duration = const Duration(milliseconds: 1000);
+    await _flight.forward(from: 0);
+    if (!mounted || rollToken != _token) return;
 
     setState(() {
       dice = newDice;
+      lastRoll[currentPlayer] = newDice;
       isRolling = false;
       hasRolled = true;
+      flightPhase = 2;
+    });
+    sfx.land();
 
-      if (!canMove) {
+    final legal = legalMoves();
+    final distinct = distinctMoves(legal);
+    final forced = legal.isNotEmpty && moveCaptures(legal.first);
+
+    setState(() {
+      if (legal.isEmpty) {
         message = '$dice ! Aucun déplacement possible.';
+      } else if (distinct.length == 1) {
+        message = forced
+            ? 'Capture obligatoire ! Coup joué automatiquement.'
+            : 'Un seul coup possible : joué automatiquement.';
+      } else if (forced) {
+        message = 'Capture obligatoire : choisis le pion qui capture.';
       } else if (dice == 6) {
         message = 'Un 6 ! Sors un pion ou avance.';
       } else {
@@ -222,19 +475,37 @@ class _LudoGameState extends State<LudoGame>
       }
     });
 
-    // Aucun pion ne peut bouger : on passe au joueur suivant
-    if (!canMove) {
-      await Future.delayed(const Duration(milliseconds: 1200));
+    await Future.delayed(const Duration(milliseconds: 650));
+    if (!mounted || rollToken != _token) return;
+
+    // Le dé retourne devant son joueur
+    setState(() {
+      flightFrom = _toRoot(diceKeys[currentPlayer]);
+    });
+    _flight.duration = const Duration(milliseconds: 380);
+    await _flight.reverse();
+    if (!mounted || rollToken != _token) return;
+    setState(() {
+      flightPhase = 0;
+    });
+
+    if (legal.isEmpty) {
+      sfx.deny();
+      await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted || rollToken != _token || gameOver) return;
       nextTurn();
+    } else if (distinct.length == 1) {
+      // Un seul choix possible : le jeu joue à ta place
+      await Future.delayed(const Duration(milliseconds: 250));
+      if (!mounted || rollToken != _token) return;
+      movePawn(currentPlayer, distinct.first);
     }
   }
 
   void _advanceTurn() {
     currentPlayer = (currentPlayer + 1) % players.length;
     hasRolled = false;
-    dice = 1;
-    message = 'Lance le dé !';
+    message = 'Touche ton dé ou glisse-le pour le lancer !';
   }
 
   void nextTurn() => setState(_advanceTurn);
@@ -244,6 +515,8 @@ class _LudoGameState extends State<LudoGame>
         gameOver ||
         isRolling ||
         isMoving ||
+        flightPhase != 0 ||
+        diceDragging ||
         playerIndex != currentPlayer) {
       return;
     }
@@ -253,16 +526,19 @@ class _LudoGameState extends State<LudoGame>
 
     if (oldPosition == 56) return;
 
-    if (oldPosition == -1 && dice != 6) {
+    final legal = legalMoves();
+    if (!legal.contains(pawnIndex)) {
+      String reason;
+      if (oldPosition == -1 && dice != 6) {
+        reason = 'Il faut un 6 pour sortir ce pion.';
+      } else if (oldPosition >= 0 && oldPosition + dice > 56) {
+        reason = 'Ce pion ne peut pas finir avec ce lancer.';
+      } else {
+        reason = 'Capture obligatoire : prends un pion adverse !';
+      }
+      sfx.deny();
       setState(() {
-        message = 'Il faut un 6 pour sortir ce pion.';
-      });
-      return;
-    }
-
-    if (oldPosition >= 0 && oldPosition + dice > 56) {
-      setState(() {
-        message = 'Ce pion ne peut pas finir avec ce lancer.';
+        message = reason;
       });
       return;
     }
@@ -273,7 +549,7 @@ class _LudoGameState extends State<LudoGame>
     });
 
     if (oldPosition == -1) {
-      click();
+      sfx.step();
       setState(() {
         player.pawns[pawnIndex] = 0;
       });
@@ -282,7 +558,7 @@ class _LudoGameState extends State<LudoGame>
     } else {
       // Le pion avance case par case
       for (int s = 1; s <= dice; s++) {
-        click();
+        sfx.step();
         setState(() {
           player.pawns[pawnIndex] = oldPosition + s;
         });
@@ -317,15 +593,24 @@ class _LudoGameState extends State<LudoGame>
       }
     }
 
+    final won = player.pawns.every((p) => p == 56);
+
+    if (won) {
+      sfx.win();
+    } else if (captured) {
+      sfx.capture();
+    } else if (newPosition == 56) {
+      sfx.arrive();
+    }
+
     setState(() {
       isMoving = false;
 
-      if (player.pawns.every((p) => p == 56)) {
+      if (won) {
         gameOver = true;
         message = '🏆 Joueur ${player.display} remporte la partie !';
       } else if (dice == 6 || captured || newPosition == 56) {
         hasRolled = false;
-        dice = 1;
         message = captured
             ? 'Capture ! Tu rejoues.'
             : newPosition == 56
@@ -339,9 +624,14 @@ class _LudoGameState extends State<LudoGame>
 
   void restartGame() {
     _token++; // annule les animations en attente
+    _flight.stop();
+    _flight.value = 0;
     setState(() {
       for (final player in players) {
         player.pawns.fillRange(0, 4, -1);
+      }
+      for (int i = 0; i < 4; i++) {
+        lastRoll[i] = 1;
       }
       currentPlayer = 0;
       dice = 1;
@@ -349,7 +639,9 @@ class _LudoGameState extends State<LudoGame>
       isRolling = false;
       isMoving = false;
       gameOver = false;
-      message = 'Nouvelle partie ! Lance le dé.';
+      diceDragging = false;
+      flightPhase = 0;
+      message = 'Nouvelle partie ! Touche ton dé pour commencer.';
     });
   }
 
@@ -378,11 +670,18 @@ class _LudoGameState extends State<LudoGame>
 
   // Zone de toucher élargie : on joue le pion le plus proche du doigt
   void onBoardTap(Offset pos, double c) {
-    if (!hasRolled || isRolling || isMoving || gameOver) return;
+    if (!hasRolled ||
+        isRolling ||
+        isMoving ||
+        gameOver ||
+        flightPhase != 0 ||
+        diceDragging) {
+      return;
+    }
 
     final tapRow = pos.dy / c;
     final tapCol = pos.dx / c;
-    final player = players[currentPlayer];
+    final legal = legalMoves();
 
     int? best;
     double bestDist = 1.8; // rayon en nombre de cases
@@ -397,7 +696,7 @@ class _LudoGameState extends State<LudoGame>
       final dc = center[1] - tapCol;
       final dist = sqrt(dr * dr + dc * dc);
 
-      if (canPawnMove(player.pawns[i]) && dist < bestDist) {
+      if (legal.contains(i) && dist < bestDist) {
         bestDist = dist;
         best = i;
       }
@@ -419,6 +718,14 @@ class _LudoGameState extends State<LudoGame>
   // ---------------------------------------------------------------------
 
   List<Widget> buildPawns(double c) {
+    final legal = (hasRolled &&
+            !isRolling &&
+            !isMoving &&
+            !gameOver &&
+            flightPhase == 0)
+        ? legalMoves()
+        : <int>[];
+
     final entries = <_PawnEntry>[];
     for (int p = 0; p < players.length; p++) {
       for (int i = 0; i < 4; i++) {
@@ -449,12 +756,7 @@ class _LudoGameState extends State<LudoGame>
       final h = w * 1.25;
       final dx = stacked ? (k - (n - 1) / 2) * c * 0.3 : 0.0;
 
-      final movable = e.p == currentPlayer &&
-          hasRolled &&
-          !isRolling &&
-          !isMoving &&
-          !gameOver &&
-          canPawnMove(position);
+      final movable = e.p == currentPlayer && legal.contains(e.i);
 
       return AnimatedPositioned(
         key: ValueKey('pawn_${e.p}_${e.i}'),
@@ -483,49 +785,49 @@ class _LudoGameState extends State<LudoGame>
     }).toList();
   }
 
-  Widget buildBoard() {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final c = constraints.maxWidth / 15;
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTapUp: (details) => onBoardTap(details.localPosition, c),
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: BoardPainter(
-                          colors: players.map((p) => p.color).toList(),
-                          lights: players.map((p) => p.lightColor).toList(),
-                          track: track,
-                          lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
-                          starts: players.map((p) => p.start).toList(),
-                          safeStars: safeStars,
-                        ),
+  Widget buildBoard(double size) {
+    return Container(
+      key: boardKey,
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final c = constraints.maxWidth / 15;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: (details) => onBoardTap(details.localPosition, c),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: BoardPainter(
+                        colors: players.map((p) => p.color).toList(),
+                        lights: players.map((p) => p.lightColor).toList(),
+                        track: track,
+                        lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
+                        starts: players.map((p) => p.start).toList(),
+                        safeStars: safeStars,
                       ),
                     ),
-                    ...buildPawns(c),
-                  ],
-                ),
-              );
-            },
-          ),
+                  ),
+                  ...buildPawns(c),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -534,7 +836,7 @@ class _LudoGameState extends State<LudoGame>
   TextStyle logoStyle(Color color) {
     return TextStyle(
       color: color,
-      fontSize: 30,
+      fontSize: 28,
       fontWeight: FontWeight.w900,
       fontStyle: FontStyle.italic,
       height: 1.0,
@@ -546,7 +848,7 @@ class _LudoGameState extends State<LudoGame>
 
   Widget buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
       child: Row(
         children: [
           PopupMenuButton<String>(
@@ -578,7 +880,7 @@ class _LudoGameState extends State<LudoGame>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('👑', style: TextStyle(fontSize: 16)),
+                const Text('👑', style: TextStyle(fontSize: 15)),
                 RichText(
                   text: TextSpan(
                     children: [
@@ -730,82 +1032,120 @@ class _LudoGameState extends State<LudoGame>
     );
   }
 
-  Widget buildDiceArea() {
-    final player = players[currentPlayer];
-    final canRoll = !gameOver && !hasRolled && !isRolling && !isMoving;
-    final active = gameOver || canRoll;
-
-    final label = gameOver
-        ? 'Rejouer'
-        : isRolling
-            ? 'Le dé roule...'
-            : isMoving
-                ? 'Déplacement...'
-                : hasRolled
-                    ? 'Choisis un pion'
-                    : 'Lancer le dé';
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AnimatedRotation(
-          turns: diceTurns,
-          duration: const Duration(milliseconds: 80),
-          child: Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
+  Widget diceBox(int value, Color color, {bool glow = false}) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: glow
+            ? [
                 BoxShadow(
-                  color: player.color.withOpacity(0.75),
-                  blurRadius: 20,
+                  color: color.withOpacity(0.85),
+                  blurRadius: 16,
                   spreadRadius: 2,
                 ),
-              ],
-            ),
-            child: CustomPaint(painter: DicePainter(dice)),
-          ),
-        ),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: gameOver ? restartGame : (canRoll ? rollDice : null),
-          child: Container(
-            width: 132,
-            height: 38,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: active
-                    ? [const Color(0xFF55E05A), const Color(0xFF1B9E2B)]
-                    : [const Color(0xFF6B7396), const Color(0xFF454C70)],
-              ),
-              border: Border.all(
-                color: active ? const Color(0xFFFFD54F) : Colors.white24,
-                width: 2,
-              ),
-              boxShadow: [
+              ]
+            : [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.35),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
                 ),
               ],
-            ),
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+      ),
+      child: CustomPaint(painter: DicePainter(value)),
+    );
+  }
+
+  /// Le dé d'un joueur : on le touche pour lancer, ou on le glisse puis on le lâche.
+  Widget diceSlot(int p) {
+    final player = players[p];
+    final isActive = p == currentPlayer && !gameOver;
+    final canRoll = isActive && canRollNow && !diceDragging;
+    final lifted = isActive && (diceDragging || flightPhase != 0);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: isActive
+          ? () {
+              if (canRollNow) throwDice(_toRoot(diceKeys[p]));
+            }
+          : null,
+      onPanStart: isActive ? (details) => onDicePanStart(p) : null,
+      onPanUpdate: isActive ? onDicePanUpdate : null,
+      onPanEnd: isActive ? (details) => onDicePanEnd() : null,
+      onPanCancel: isActive
+          ? () {
+              if (diceDragging) {
+                setState(() {
+                  diceDragging = false;
+                });
+              }
+            }
+          : null,
+      child: SizedBox(
+        key: diceKeys[p],
+        width: 52,
+        height: 52,
+        child: AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, child) => Transform.scale(
+            scale: canRoll ? 1.0 + _pulse.value * 0.08 : 1.0,
+            child: child,
+          ),
+          child: Opacity(
+            opacity: lifted ? 0.25 : (isActive ? 1.0 : 0.5),
+            child: diceBox(lastRoll[p], player.color, glow: canRoll),
           ),
         ),
-      ],
+      ),
+    );
+  }
+
+  /// Le dé qui suit le doigt, puis qui roule sur le plateau.
+  Widget buildFlyingDie() {
+    final color = players[currentPlayer].color;
+
+    if (diceDragging) {
+      return Positioned(
+        left: dragPos.dx,
+        top: dragPos.dy,
+        width: 58,
+        height: 58,
+        child: IgnorePointer(
+          child: diceBox(lastRoll[currentPlayer], color, glow: true),
+        ),
+      );
+    }
+
+    if (flightPhase == 0) return const SizedBox.shrink();
+
+    return AnimatedBuilder(
+      animation: _flight,
+      builder: (context, child) {
+        final t = _flight.value;
+        final eased = Curves.easeOutCubic.transform(t);
+        final pos = Offset.lerp(flightFrom, flightTo, eased)!;
+        final rolling = flightPhase == 1;
+        final bounce = rolling ? sin(t * pi * 4).abs() * (1 - t) * 26 : 0.0;
+        final size = 52.0 + 12.0 * eased;
+        final face = (rolling && t < 0.85)
+            ? faceSeq[(t * 14).floor() % 6]
+            : pendingDice;
+        final turns = rolling ? t * 3 : 0.0;
+
+        return Positioned(
+          left: pos.dx,
+          top: pos.dy - bounce,
+          width: size,
+          height: size,
+          child: IgnorePointer(
+            child: Transform.rotate(
+              angle: turns * 2 * pi,
+              child: diceBox(face, color, glow: true),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -870,7 +1210,7 @@ class _LudoGameState extends State<LudoGame>
     final player = players[currentPlayer];
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
       child: Row(
         children: [
           Expanded(
@@ -928,7 +1268,13 @@ class _LudoGameState extends State<LudoGame>
           const SizedBox(width: 8),
           roundButton(
             soundOn ? Icons.volume_up : Icons.volume_off,
-            () => setState(() => soundOn = !soundOn),
+            () {
+              setState(() {
+                soundOn = !soundOn;
+                sfx.enabled = soundOn;
+              });
+              sfx.step();
+            },
           ),
           const SizedBox(width: 8),
           roundButton(Icons.bar_chart, showStats),
@@ -937,79 +1283,89 @@ class _LudoGameState extends State<LudoGame>
     );
   }
 
+  Widget badgesRow(int left, int right) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      child: Row(
+        children: [
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: playerBadge(left, avatarOnRight: false),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: playerBadge(right, avatarOnRight: true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget diceRow(int left, int right) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [diceSlot(left), diceSlot(right)],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF1F5BFF),
-              Color(0xFF0B2FA6),
-              Color(0xFF061A66),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              buildHeader(),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: playerBadge(0, avatarOnRight: false),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: playerBadge(1, avatarOnRight: true),
-                      ),
-                    ),
+      body: Stack(
+        key: rootKey,
+        children: [
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFF1F5BFF),
+                    Color(0xFF0B2FA6),
+                    Color(0xFF061A66),
                   ],
                 ),
               ),
-              Expanded(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  child: Center(child: buildBoard()),
+              child: SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final boardSize = min(
+                      constraints.maxWidth - 24,
+                      constraints.maxHeight - 420,
+                    ).clamp(180.0, 700.0).toDouble();
+
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        buildHeader(),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [badgesRow(0, 1), diceRow(0, 1)],
+                        ),
+                        buildBoard(boardSize),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [diceRow(3, 2), badgesRow(3, 2)],
+                        ),
+                        buildStatusBar(),
+                      ],
+                    );
+                  },
                 ),
               ),
-              SizedBox(
-                height: 112,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: playerBadge(3, avatarOnRight: false),
-                        ),
-                      ),
-                      buildDiceArea(),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: playerBadge(2, avatarOnRight: true),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              buildStatusBar(),
-            ],
+            ),
           ),
-        ),
+          buildFlyingDie(),
+        ],
       ),
     );
   }
