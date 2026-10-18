@@ -24,6 +24,15 @@ jobs:
         run: flutter create --org com.yveslaurent85 --platforms=android .
       - name: Configurer Firebase
         run: cp google-services.json android/app/google-services.json
+      - name: Activer le plugin Google Services
+        run: |
+          if [ -f android/settings.gradle.kts ]; then
+            grep -q 'com.google.gms.google-services' android/settings.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
+            grep -q 'com.google.gms.google-services' android/app/build.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
+          else
+            echo "Fichiers Gradle Kotlin non trouves"
+            exit 1
+          fi
       - name: Installer les dependances
         run: flutter pub get
 
