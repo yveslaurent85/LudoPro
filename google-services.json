@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "29829821712",
+    "project_id": "ludopro-cameroun-2026",
+    "storage_bucket": "ludopro-cameroun-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:29829821712:android:efb988dcd1ec4381a4a195",
+        "android_client_info": {
+          "package_name": "com.yveslaurent85.ludopro"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCIdM0OEHS6xYYNAHpZzvoYFZE-lFERiU0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
