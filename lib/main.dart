@@ -1,33 +1,30 @@
 import 'dart:math';
-
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-
-/// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
-bool firebaseReady = false;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  bool firebaseReady = false;
+
   try {
     await Firebase.initializeApp();
     firebaseReady = true;
-  } catch (_) {
-    // L'appli s'ouvre quand même : le mode présentiel reste jouable.
-    firebaseReady = false;
+  } catch (e) {
+    debugPrint('Erreur Firebase : $e');
   }
-  runApp(const LudoProApp());
-}
 
-/// Éclaircit (amount > 0) ou assombrit (amount < 0) une couleur.
-Color shade(Color color, double amount) {
-  final hsl = HSLColor.fromColor(color);
-  final lightness = (hsl.lightness + amount).clamp(0.0, 1.0).toDouble();
-  return hsl.withLightness(lightness).toColor();
+  runApp(LudoProApp(firebaseReady: firebaseReady));
 }
 
 class LudoProApp extends StatelessWidget {
-  const LudoProApp({super.key});
+  final bool firebaseReady;
+
+  const LudoProApp({
+    super.key,
+    required this.firebaseReady,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -36,231 +33,135 @@ class LudoProApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        fontFamily: 'Roboto',
-        scaffoldBackgroundColor: const Color(0xFF061A66),
+        brightness: Brightness.dark,
+        colorSchemeSeed: Colors.deepPurple,
+        scaffoldBackgroundColor: const Color(0xFF10142B),
       ),
-      home: const HomeScreen(),
-    );
-  }
-}
-
-// ----------------------------------------------------------------------
-// Sons (désactivés pour l'instant)
-// ----------------------------------------------------------------------
-
-/// Sons désactivés pour l'instant : aucune extension audio n'est nécessaire.
-/// Les appels dans le jeu sont déjà en place, on pourra les brancher plus tard.
-class Sfx {
-  bool enabled = true;
-
-  void step() {}
-  void land() {}
-  void deny() {}
-  void capture() {}
-  void arrive() {}
-  void win() {}
-  void roll() {}
-  void dispose() {}
-}
-
-// ----------------------------------------------------------------------
-// Modèles
-// ----------------------------------------------------------------------
-
-class Player {
-  final String display; // ex : Rouge
-  final Color color;
-  final Color lightColor;
-  final int start;
-  final IconData avatar;
-  final List<int> pawns = [-1, -1, -1, -1];
-
-  Player({
-    required this.display,
-    required this.color,
-    required this.lightColor,
-    required this.start,
-    required this.avatar,
-  });
-
-  int get finished => pawns.where((p) => p == 56).length;
-}
-
-class _PawnEntry {
-  final int p;
-  final int i;
-  final List<double> center;
-  _PawnEntry(this.p, this.i, this.center);
-}
-
-// ----------------------------------------------------------------------
-// Écran d'accueil : choix du mode de jeu
-// ----------------------------------------------------------------------
-
-const BoxDecoration _appBackground = BoxDecoration(
-  gradient: LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
-  ),
-);
-
-TextStyle _logoStyle(Color color, double size) {
-  return TextStyle(
-    color: color,
-    fontSize: size,
-    fontWeight: FontWeight.w900,
-    fontStyle: FontStyle.italic,
-    height: 1.0,
-    shadows: const [
-      Shadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 3)),
-    ],
-  );
-}
-
-class _ModeCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _ModeCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [shade(color, 0.08), shade(color, -0.12)],
-          ),
-          border: Border.all(color: Colors.white54, width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.35),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.2),
-              ),
-              child: Icon(icon, color: Colors.white, size: 30),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.white),
-          ],
-        ),
-      ),
+      home: HomeScreen(firebaseReady: firebaseReady),
     );
   }
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  final bool firebaseReady;
+
+  const HomeScreen({
+    super.key,
+    required this.firebaseReady,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
         width: double.infinity,
-        height: double.infinity,
-        decoration: _appBackground,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF10142B),
+              Color(0xFF30205D),
+              Color(0xFF126E82),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              children: [
-                const Spacer(flex: 2),
-                const Text('👑', style: TextStyle(fontSize: 44)),
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: 'Ludo',
-                        style: _logoStyle(Colors.white, 52),
-                      ),
-                      TextSpan(
-                        text: 'Pro',
-                        style: _logoStyle(const Color(0xFFFFC21A), 52),
-                      ),
-                    ],
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.casino,
+                    size: 100,
+                    color: Colors.amber,
                   ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Jouez • Gagnez • Amusez-vous !',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                const Spacer(),
-                _ModeCard(
-                  color: const Color(0xFF22B14C),
-                  icon: Icons.groups,
-                  title: 'En présentiel',
-                  subtitle: 'Les joueurs jouent sur le même plateau',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const LudoGame(),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'LudoPro',
+                    style: TextStyle(
+                      fontSize: 42,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                _ModeCard(
-                  color: const Color(0xFF1E6BFF),
-                  icon: Icons.public,
-                  title: 'En ligne',
-                  subtitle: 'Crée un compte pour jouer à distance',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const OnlineScreen(),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Le plaisir du Ludo, partout avec vous !',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.white70,
                     ),
                   ),
-                ),
-                const Spacer(flex: 2),
-              ],
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 58,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.people),
+                      label: const Text(
+                        'JOUER EN PRÉSENTIEL',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const GameSetupScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 58,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.public),
+                      label: const Text(
+                        'JOUER EN LIGNE',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => OnlineScreen(
+                              firebaseReady: firebaseReady,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  const Text(
+                    'LudoPro • Version en développement',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -269,431 +170,311 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------
-// Jeu en ligne : création de compte / connexion
-// (comptes gérés par Firebase Authentication)
-// ----------------------------------------------------------------------
+class GameSetupScreen extends StatefulWidget {
+  const GameSetupScreen({super.key});
+
+  @override
+  State<GameSetupScreen> createState() => _GameSetupScreenState();
+}
+
+class _GameSetupScreenState extends State<GameSetupScreen> {
+  int playerCount = 4;
+  int pawnCount = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Préparer la partie')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Icon(Icons.groups, size: 75, color: Colors.amber),
+            const SizedBox(height: 12),
+            const Text(
+              'CHOISIS TES OPTIONS',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 23,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 28),
+            const Text(
+              'Nombre de joueurs',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              children: [2, 3, 4].map((count) {
+                return ChoiceChip(
+                  label: Text('$count joueurs'),
+                  selected: playerCount == count,
+                  onSelected: (_) {
+                    setState(() => playerCount = count);
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 28),
+            const Text(
+              'Nombre de pions par joueur',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              children: [1, 2, 3, 4].map((count) {
+                return ChoiceChip(
+                  label: Text('$count pion${count > 1 ? 's' : ''}'),
+                  selected: pawnCount == count,
+                  onSelected: (_) {
+                    setState(() => pawnCount = count);
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 28),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'Récapitulatif',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Joueurs : $playerCount'),
+                  Text('Pions par joueur : $pawnCount'),
+                  Text('Total des pions : ${playerCount * pawnCount}'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 30),
+            SizedBox(
+              height: 56,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.play_arrow),
+                label: const Text(
+                  'COMMENCER LA PARTIE',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => LudoGame(
+                        playerCount: playerCount,
+                        pawnCount: pawnCount,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class OnlineScreen extends StatefulWidget {
-  const OnlineScreen({super.key});
+  final bool firebaseReady;
+
+  const OnlineScreen({
+    super.key,
+    required this.firebaseReady,
+  });
 
   @override
   State<OnlineScreen> createState() => _OnlineScreenState();
 }
 
 class _OnlineScreenState extends State<OnlineScreen> {
-  final TextEditingController pseudoCtrl = TextEditingController();
-  final TextEditingController emailCtrl = TextEditingController();
-  final TextEditingController passCtrl = TextEditingController();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
 
-  bool creating = true;
-  bool hidePassword = true;
-  bool busy = false;
-  String? errorText;
-  User? user;
-
-  @override
-  void initState() {
-    super.initState();
-    if (firebaseReady) {
-      user = FirebaseAuth.instance.currentUser;
-    }
-  }
+  bool isLogin = true;
+  bool loading = false;
+  String message = '';
 
   @override
   void dispose() {
-    pseudoCtrl.dispose();
-    emailCtrl.dispose();
-    passCtrl.dispose();
+    emailController.dispose();
+    passwordController.dispose();
     super.dispose();
   }
 
-  String _errorMessage(String code) {
-    switch (code) {
-      case 'email-already-in-use':
-        return 'Cet e-mail est déjà utilisé.';
-      case 'invalid-email':
-        return 'E-mail invalide.';
-      case 'weak-password':
-        return 'Mot de passe trop faible (6 caractères minimum).';
-      case 'user-not-found':
-      case 'wrong-password':
-      case 'invalid-credential':
-        return 'E-mail ou mot de passe incorrect.';
-      case 'too-many-requests':
-        return 'Trop d\'essais. Réessaie dans quelques minutes.';
-      case 'network-request-failed':
-        return 'Pas de connexion internet.';
-      case 'operation-not-allowed':
-        return "La connexion par e-mail n'est pas activée dans Firebase.";
-      default:
-        return 'Erreur : $code';
-    }
-  }
-
-  Future<void> _submit() async {
-    if (!firebaseReady) {
+  Future<void> authenticate() async {
+    if (!widget.firebaseReady) {
       setState(() {
-        errorText = "Le serveur en ligne n'est pas configuré dans l'appli.";
+        message = 'Firebase n’est pas initialisé. Vérifie sa configuration.';
       });
       return;
     }
 
-    final pseudo = pseudoCtrl.text.trim();
-    final email = emailCtrl.text.trim();
-    final password = passCtrl.text;
+    final email = emailController.text.trim();
+    final password = passwordController.text;
 
-    if (creating && pseudo.isEmpty) {
-      setState(() => errorText = 'Choisis un pseudo.');
-      return;
-    }
-    if (!email.contains('@')) {
-      setState(() => errorText = 'E-mail invalide.');
-      return;
-    }
-    if (password.length < 6) {
-      setState(() => errorText = 'Mot de passe : 6 caractères minimum.');
+    if (email.isEmpty || password.length < 6) {
+      setState(() {
+        message = 'Entre un email valide et un mot de passe de 6 caractères minimum.';
+      });
       return;
     }
 
     setState(() {
-      busy = true;
-      errorText = null;
+      loading = true;
+      message = '';
     });
 
     try {
-      final auth = FirebaseAuth.instance;
-      if (creating) {
-        final cred = await auth.createUserWithEmailAndPassword(
+      if (isLogin) {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
           password: password,
         );
-        await cred.user?.updateDisplayName(pseudo);
-        await cred.user?.reload();
+        setState(() => message = 'Connexion réussie !');
       } else {
-        await auth.signInWithEmailAndPassword(
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
+        setState(() => message = 'Compte créé avec succès !');
       }
-      if (!mounted) return;
-      setState(() {
-        user = auth.currentUser;
-        passCtrl.clear();
-      });
     } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      setState(() => errorText = _errorMessage(e.code));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => errorText = 'Une erreur est survenue. Réessaie.');
+      setState(() {
+        message = switch (e.code) {
+          'email-already-in-use' => 'Cette adresse email est déjà utilisée.',
+          'invalid-email' => 'Adresse email invalide.',
+          'weak-password' => 'Mot de passe trop faible.',
+          'user-not-found' => 'Aucun compte trouvé avec cet email.',
+          'wrong-password' => 'Mot de passe incorrect.',
+          'invalid-credential' => 'Email ou mot de passe incorrect.',
+          'network-request-failed' => 'Vérifie ta connexion Internet.',
+          _ => e.message ?? 'Une erreur est survenue.',
+        };
+      });
+    } catch (e) {
+      setState(() => message = 'Erreur : $e');
     } finally {
       if (mounted) {
-        setState(() => busy = false);
+        setState(() => loading = false);
       }
     }
-  }
-
-  Future<void> _signOut() async {
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    setState(() {
-      user = null;
-    });
-  }
-
-  InputDecoration _field(String label, IconData icon, {Widget? suffix}) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: Colors.white70),
-      prefixIcon: Icon(icon, color: Colors.white70),
-      suffixIcon: suffix,
-      filled: true,
-      fillColor: Colors.white.withOpacity(0.12),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Colors.white30),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0xFFFFC21A), width: 2),
-      ),
-    );
-  }
-
-  Widget _tab(String label, bool selected, VoidCallback onTap) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 11),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: selected
-                ? const Color(0xFFFFC21A)
-                : Colors.white.withOpacity(0.12),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? const Color(0xFF1A1F3A) : Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _banner(IconData icon, Color color, String text) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: Colors.black26,
-        border: Border.all(color: color, width: 1.5),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _primaryButton(String label, VoidCallback? onTap) {
-    final enabled = onTap != null;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 50,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(25),
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: enabled
-                ? const [Color(0xFF55E05A), Color(0xFF1B9E2B)]
-                : const [Color(0xFF6B7396), Color(0xFF454C70)],
-          ),
-          border: Border.all(
-            color: enabled ? const Color(0xFFFFD54F) : Colors.white24,
-            width: 2,
-          ),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _signedInView(User current) {
-    final name = (current.displayName != null && current.displayName!.isNotEmpty)
-        ? current.displayName!
-        : (current.email ?? 'Joueur');
-
-    return [
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: Colors.white.withOpacity(0.12),
-          border: Border.all(color: Colors.white30),
-        ),
-        child: Row(
-          children: [
-            const CircleAvatar(
-              radius: 26,
-              backgroundColor: Color(0xFF22B14C),
-              child: Icon(Icons.person, color: Colors.white, size: 30),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Connecté',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  if (current.email != null)
-                    Text(
-                      current.email!,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 16),
-      _banner(
-        Icons.hourglass_top,
-        const Color(0xFFFFC21A),
-        'Ton compte est prêt. Les parties à distance (salles et invitations) '
-        'arrivent à la prochaine étape.',
-      ),
-      const SizedBox(height: 22),
-      _primaryButton('Se déconnecter', _signOut),
-    ];
-  }
-
-  List<Widget> _formView() {
-    return [
-      Row(
-        children: [
-          _tab('Créer un compte', creating, () {
-            setState(() {
-              creating = true;
-              errorText = null;
-            });
-          }),
-          const SizedBox(width: 10),
-          _tab('Se connecter', !creating, () {
-            setState(() {
-              creating = false;
-              errorText = null;
-            });
-          }),
-        ],
-      ),
-      const SizedBox(height: 18),
-      if (creating) ...[
-        TextField(
-          controller: pseudoCtrl,
-          enabled: !busy,
-          style: const TextStyle(color: Colors.white),
-          cursorColor: const Color(0xFFFFC21A),
-          decoration: _field('Pseudo', Icons.person),
-        ),
-        const SizedBox(height: 12),
-      ],
-      TextField(
-        controller: emailCtrl,
-        enabled: !busy,
-        style: const TextStyle(color: Colors.white),
-        cursorColor: const Color(0xFFFFC21A),
-        keyboardType: TextInputType.emailAddress,
-        decoration: _field('E-mail', Icons.email),
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: passCtrl,
-        enabled: !busy,
-        style: const TextStyle(color: Colors.white),
-        cursorColor: const Color(0xFFFFC21A),
-        obscureText: hidePassword,
-        decoration: _field(
-          'Mot de passe',
-          Icons.lock,
-          suffix: IconButton(
-            onPressed: () => setState(() => hidePassword = !hidePassword),
-            icon: Icon(
-              hidePassword ? Icons.visibility : Icons.visibility_off,
-              color: Colors.white70,
-            ),
-          ),
-        ),
-      ),
-      if (errorText != null) ...[
-        const SizedBox(height: 12),
-        Text(
-          errorText!,
-          style: const TextStyle(
-            color: Color(0xFFFF8A80),
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-      const SizedBox(height: 22),
-      _primaryButton(
-        busy
-            ? 'Patiente...'
-            : (creating ? 'Créer mon compte' : 'Me connecter'),
-        busy ? null : _submit,
-      ),
-    ];
   }
 
   @override
   Widget build(BuildContext context) {
-    final current = user;
+    final user = widget.firebaseReady
+        ? FirebaseAuth.instance.currentUser
+        : null;
 
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: _appBackground,
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    ),
-                    const Text(
-                      'Jeu en ligne',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (!firebaseReady)
-                  _banner(
-                    Icons.warning_amber_rounded,
-                    const Color(0xFFFF8A65),
-                    "Le serveur en ligne n'est pas configuré : Firebase n'a pas "
-                    'démarré. Le mode présentiel reste disponible.',
-                  )
-                else if (current == null)
-                  _banner(
-                    Icons.info_outline,
-                    const Color(0xFFFFC21A),
-                    'Crée un compte ou connecte-toi pour jouer en ligne.',
-                  ),
-                const SizedBox(height: 20),
-                if (current != null)
-                  ..._signedInView(current)
-                else
-                  ..._formView(),
-              ],
+      appBar: AppBar(title: const Text('Espace en ligne')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Icon(Icons.public, size: 75, color: Colors.cyanAccent),
+            const SizedBox(height: 12),
+            const Text(
+              'LUDOPRO EN LIGNE',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
             ),
-          ),
+            const SizedBox(height: 20),
+            if (user != null) ...[
+              Text(
+                'Connecté avec : ${user.email}',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () async {
+                  await FirebaseAuth.instance.signOut();
+                  if (mounted) setState(() => message = 'Déconnexion réussie.');
+                },
+                child: const Text('Se déconnecter'),
+              ),
+            ] else ...[
+              TextField(
+                controller: emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Adresse email',
+                  prefixIcon: Icon(Icons.email),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Mot de passe',
+                  prefixIcon: Icon(Icons.lock),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: loading ? null : authenticate,
+                  child: loading
+                      ? const CircularProgressIndicator()
+                      : Text(isLogin ? 'SE CONNECTER' : 'CRÉER UN COMPTE'),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    isLogin = !isLogin;
+                    message = '';
+                  });
+                },
+                child: Text(
+                  isLogin
+                      ? 'Pas encore de compte ? Inscris-toi'
+                      : 'Tu as déjà un compte ? Connecte-toi',
+                ),
+              ),
+            ],
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.amber),
+              ),
+            ],
+            const SizedBox(height: 24),
+            const Text(
+              'La connexion est disponible. Les parties à distance '
+              'avec salons et invitations nécessitent une configuration '
+              'supplémentaire.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+          ],
         ),
       ),
     );
@@ -701,1678 +482,553 @@ class _OnlineScreenState extends State<OnlineScreen> {
 }
 
 class LudoGame extends StatefulWidget {
-  const LudoGame({super.key});
+  final int playerCount;
+  final int pawnCount;
+
+  const LudoGame({
+    super.key,
+    this.playerCount = 4,
+    this.pawnCount = 4,
+  });
 
   @override
   State<LudoGame> createState() => _LudoGameState();
 }
 
-class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
-  // Cases étoiles (8 cases après chaque départ) et cases sûres (départs + étoiles)
-  static const Set<int> safeStars = {8, 21, 34, 47};
-  static const Set<int> safeCells = {0, 8, 13, 21, 26, 34, 39, 47};
+class LudoPlayer {
+  final String name;
+  final Color color;
+  final int start;
+  final List<int> pawns;
 
+  LudoPlayer({
+    required this.name,
+    required this.color,
+    required this.start,
+    required int pawnCount,
+  }) : pawns = List.filled(pawnCount, -1);
+}
+
+class _LudoGameState extends State<LudoGame> {
   final Random random = Random();
-  final Sfx sfx = Sfx();
-  late final AnimationController _pulse;
-  late final AnimationController _flight;
 
-  final GlobalKey rootKey = GlobalKey();
-  final GlobalKey boardKey = GlobalKey();
-  final List<GlobalKey> diceKeys = List.generate(4, (_) => GlobalKey());
-
-  // Ordre des tours (sens horaire) : Rouge, Vert, Bleu, Jaune
-  late final List<Player> players = [
-    Player(
-      display: 'Rouge',
-      color: const Color(0xFFE5262B),
-      lightColor: const Color(0xFFFFE3E5),
-      start: 0,
-      avatar: Icons.person,
-    ),
-    Player(
-      display: 'Vert',
-      color: const Color(0xFF22B14C),
-      lightColor: const Color(0xFFDDF8E6),
-      start: 13,
-      avatar: Icons.face,
-    ),
-    Player(
-      display: 'Bleu',
-      color: const Color(0xFF1E6BFF),
-      lightColor: const Color(0xFFDFEAFF),
-      start: 26,
-      avatar: Icons.face_3,
-    ),
-    Player(
-      display: 'Jaune',
-      color: const Color(0xFFFFC21A),
-      lightColor: const Color(0xFFFFF3CC),
-      start: 39,
-      avatar: Icons.person_outline,
-    ),
-  ];
+  late List<LudoPlayer> players;
 
   int currentPlayer = 0;
-  int dice = 1; // valeur du dernier lancer validé
-  int pendingDice = 1; // valeur en cours de lancer
-  final List<int> lastRoll = [1, 1, 1, 1]; // face affichée sur le dé de chaque joueur
+  int dice = 1;
+  int selectedPawn = -1;
   bool hasRolled = false;
-  bool isRolling = false;
-  bool isMoving = false;
   bool gameOver = false;
-  bool soundOn = true;
-  bool forcedCapture = true; // capture obligatoire
-  bool autoPlay = true; // coup unique joué automatiquement
-  int stepMs = 170; // vitesse des pions (ms par case)
+  String message = 'Appuie sur le dé pour commencer !';
 
-  // Dé : glissement et lancer
-  bool diceDragging = false;
-  Offset dragPos = Offset.zero;
-  int flightPhase = 0; // 0 = au repos, 1 = lancer, 2 = posé / retour
-  Offset flightFrom = Offset.zero;
-  Offset flightTo = Offset.zero;
-  List<int> faceSeq = [1, 2, 3, 4, 5, 6];
-
-  int _token = 0; // sert à annuler les animations en attente
-  String message = 'Touche ton dé ou glisse-le pour le lancer !';
-
-  final List<List<int>> track = const [
-    [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],
-    [5, 6], [4, 6], [3, 6], [2, 6], [1, 6],
-    [0, 6], [0, 7], [0, 8],
-    [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],
-    [6, 9], [6, 10], [6, 11], [6, 12], [6, 13],
-    [6, 14], [7, 14], [8, 14],
-    [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],
-    [9, 8], [10, 8], [11, 8], [12, 8], [13, 8],
-    [14, 8], [14, 7], [14, 6],
-    [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],
-    [8, 5], [8, 4], [8, 3], [8, 2], [8, 1],
-    [8, 0], [7, 0], [6, 0],
-  ];
-
-  List<List<int>> homeLane(int player) {
-    switch (player) {
-      case 0:
-        return const [
-          [7, 1], [7, 2], [7, 3], [7, 4], [7, 5],
-        ];
-      case 1:
-        return const [
-          [1, 7], [2, 7], [3, 7], [4, 7], [5, 7],
-        ];
-      case 2:
-        return const [
-          [7, 13], [7, 12], [7, 11], [7, 10], [7, 9],
-        ];
-      default:
-        return const [
-          [13, 7], [12, 7], [11, 7], [10, 7], [9, 7],
-        ];
-    }
-  }
+  final Set<int> safeCells = {
+    0, 8, 13, 21, 26, 34, 39, 47
+  };
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 650),
-    )..repeat(reverse: true);
-    _flight = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
+    initializePlayers();
   }
 
-  @override
-  void dispose() {
-    _pulse.dispose();
-    _flight.dispose();
-    sfx.dispose();
-    super.dispose();
+  void initializePlayers() {
+    final colors = [
+      Colors.red,
+      Colors.green,
+      Colors.blue,
+      Colors.amber,
+    ];
+
+    final names = [
+      'Rouge',
+      'Vert',
+      'Bleu',
+      'Jaune',
+    ];
+
+    final starts = [0, 13, 26, 39];
+
+    // Génère uniquement le nombre de joueurs choisi dans les paramètres
+    players = List.generate(widget.playerCount, (index) {
+      return LudoPlayer(
+        name: names[index],
+        color: colors[index],
+        start: starts[index],
+        pawnCount: widget.pawnCount,
+      );
+    });
   }
 
-  // ---------------------------------------------------------------------
-  // Règles du jeu
-  // ---------------------------------------------------------------------
+  LudoPlayer get activePlayer => players[currentPlayer];
 
-  /// Progression d'un joueur : somme des cases parcourues par ses 4 pions,
-  /// sur un total de 4 x 56 cases.
-  double progressOf(Player player) {
-    int total = 0;
-    for (final pos in player.pawns) {
-      if (pos > 0) total += pos;
-    }
-    return total / 224.0;
-  }
+  void rollDice() {
+    if (hasRolled || gameOver) return;
 
-  bool get canRollNow =>
-      !hasRolled && !gameOver && !isRolling && !isMoving && flightPhase == 0;
+    setState(() {
+      dice = random.nextInt(6) + 1;
+      hasRolled = true;
+      selectedPawn = -1;
 
-  bool canPawnMove(int position) {
-    if (position == -1) return dice == 6;
-    return position + dice <= 56;
-  }
+      final movable = <int>[];
 
-  /// Ce coup capture-t-il un pion adverse ?
-  bool moveCaptures(int pawnIndex) {
-    final player = players[currentPlayer];
-    final from = player.pawns[pawnIndex];
-    if (!canPawnMove(from)) return false;
+      for (int i = 0; i < activePlayer.pawns.length; i++) {
+        final position = activePlayer.pawns[i];
 
-    final target = from == -1 ? 0 : from + dice;
-    if (target >= 51) return false;
-
-    final absolutePosition = (player.start + target) % 52;
-    if (safeCells.contains(absolutePosition)) return false;
-
-    for (int p = 0; p < players.length; p++) {
-      if (p == currentPlayer) continue;
-      for (final pos in players[p].pawns) {
-        if (pos >= 0 &&
-            pos < 51 &&
-            (players[p].start + pos) % 52 == absolutePosition) {
-          return true;
+        if (position == -1 && dice == 6) {
+          movable.add(i);
+        } else if (position >= 0 && position < 57 &&
+            position + dice <= 57) {
+          movable.add(i);
         }
       }
-    }
-    return false;
-  }
 
-  /// Coups autorisés. Si une capture est possible, elle est obligatoire.
-  List<int> legalMoves() {
-    final player = players[currentPlayer];
-    final all = <int>[
-      for (int i = 0; i < 4; i++)
-        if (canPawnMove(player.pawns[i])) i,
-    ];
-    final captures = all.where(moveCaptures).toList();
-    return (forcedCapture && captures.isNotEmpty) ? captures : all;
-  }
+      if (movable.isEmpty) {
+        message = '${activePlayer.name} a obtenu $dice. '
+            'Aucun pion ne peut avancer.';
 
-  /// Retire les coups équivalents (pions au même endroit).
-  List<int> distinctMoves(List<int> legal) {
-    final player = players[currentPlayer];
-    final seen = <int>{};
-    final result = <int>[];
-    for (final i in legal) {
-      if (seen.add(player.pawns[i])) result.add(i);
-    }
-    return result;
-  }
+        Future.delayed(const Duration(milliseconds: 900), () {
+          if (!mounted || gameOver || !hasRolled) return;
 
-  Offset _toRoot(GlobalKey key, [Offset local = Offset.zero]) {
-    final root = rootKey.currentContext!.findRenderObject() as RenderBox;
-    final box = key.currentContext!.findRenderObject() as RenderBox;
-    return root.globalToLocal(box.localToGlobal(local));
-  }
-
-  // --- Dé : glisser puis lâcher, ou simplement toucher -------------------
-
-  void onDicePanStart(int p) {
-    if (p != currentPlayer || !canRollNow) return;
-    final origin = _toRoot(diceKeys[p]);
-    setState(() {
-      diceDragging = true;
-      dragPos = origin;
-    });
-  }
-
-  void onDicePanUpdate(DragUpdateDetails details) {
-    if (!diceDragging) return;
-    setState(() {
-      dragPos += details.delta;
-    });
-  }
-
-  void onDicePanEnd() {
-    if (!diceDragging) return;
-    final from = dragPos;
-    setState(() {
-      diceDragging = false;
-    });
-    throwDice(from);
-  }
-
-  Future<void> throwDice(Offset from) async {
-    if (!canRollNow) return;
-
-    final newDice = random.nextInt(6) + 1;
-    final rollToken = ++_token;
-
-    const flyingSize = 64.0;
-    final boardBox = boardKey.currentContext!.findRenderObject() as RenderBox;
-    final boardCenter =
-        _toRoot(boardKey, boardBox.size.center(Offset.zero));
-    final jitter = Offset(
-      random.nextDouble() * 60 - 30,
-      random.nextDouble() * 60 - 30,
-    );
-
-    setState(() {
-      isRolling = true;
-      pendingDice = newDice;
-      faceSeq = List<int>.generate(6, (i) => i + 1)..shuffle(random);
-      flightPhase = 1;
-      flightFrom = from;
-      flightTo = boardCenter -
-          const Offset(flyingSize / 2, flyingSize / 2) +
-          jitter;
-      message = 'Le dé roule...';
-    });
-    sfx.roll();
-
-    _flight.duration = const Duration(milliseconds: 1000);
-    await _flight.forward(from: 0);
-    if (!mounted || rollToken != _token) return;
-
-    setState(() {
-      dice = newDice;
-      lastRoll[currentPlayer] = newDice;
-      isRolling = false;
-      hasRolled = true;
-      flightPhase = 2;
-    });
-    sfx.land();
-
-    final legal = legalMoves();
-    final distinct = distinctMoves(legal);
-    final forced =
-        forcedCapture && legal.isNotEmpty && moveCaptures(legal.first);
-
-    setState(() {
-      if (legal.isEmpty) {
-        message = '$dice ! Aucun déplacement possible.';
-      } else if (autoPlay && distinct.length == 1) {
-        message = forced
-            ? 'Capture obligatoire ! Coup joué automatiquement.'
-            : 'Un seul coup possible : joué automatiquement.';
-      } else if (forced) {
-        message = 'Capture obligatoire : choisis le pion qui capture.';
-      } else if (dice == 6) {
-        message = 'Un 6 ! Sors un pion ou avance.';
+          setState(() {
+            hasRolled = false;
+            currentPlayer = (currentPlayer + 1) % players.length;
+            message = 'Au tour de ${activePlayer.name}';
+          });
+        });
       } else {
-        message = 'Touche un pion pour le déplacer.';
+        message = dice == 6
+            ? 'Bravo ! Choisis un pion à sortir ou à avancer.'
+            : 'Choisis le pion que tu veux déplacer.';
       }
     });
-
-    await Future.delayed(const Duration(milliseconds: 650));
-    if (!mounted || rollToken != _token) return;
-
-    // Le dé retourne devant son joueur
-    setState(() {
-      flightFrom = _toRoot(diceKeys[currentPlayer]);
-    });
-    _flight.duration = const Duration(milliseconds: 380);
-    await _flight.reverse();
-    if (!mounted || rollToken != _token) return;
-    setState(() {
-      flightPhase = 0;
-    });
-
-    if (legal.isEmpty) {
-      sfx.deny();
-      await Future.delayed(const Duration(milliseconds: 600));
-      if (!mounted || rollToken != _token || gameOver) return;
-      nextTurn();
-    } else if (autoPlay && distinct.length == 1) {
-      // Un seul choix possible : le jeu joue à ta place
-      await Future.delayed(const Duration(milliseconds: 250));
-      if (!mounted || rollToken != _token) return;
-      movePawn(currentPlayer, distinct.first);
-    }
   }
 
-  void _advanceTurn() {
-    currentPlayer = (currentPlayer + 1) % players.length;
-    hasRolled = false;
-    message = 'Touche ton dé ou glisse-le pour le lancer !';
-  }
+  void movePawn(int pawnIndex) {
+    if (!hasRolled || gameOver) return;
 
-  void nextTurn() => setState(_advanceTurn);
-
-  Future<void> movePawn(int playerIndex, int pawnIndex) async {
-    if (!hasRolled ||
-        gameOver ||
-        isRolling ||
-        isMoving ||
-        flightPhase != 0 ||
-        diceDragging ||
-        playerIndex != currentPlayer) {
-      return;
-    }
-
-    final player = players[playerIndex];
+    final player = activePlayer;
     final oldPosition = player.pawns[pawnIndex];
 
-    if (oldPosition == 56) return;
+    if (oldPosition == -1 && dice != 6) return;
 
-    final legal = legalMoves();
-    if (!legal.contains(pawnIndex)) {
-      String reason;
-      if (oldPosition == -1 && dice != 6) {
-        reason = 'Il faut un 6 pour sortir ce pion.';
-      } else if (oldPosition >= 0 && oldPosition + dice > 56) {
-        reason = 'Ce pion ne peut pas finir avec ce lancer.';
-      } else {
-        reason = 'Capture obligatoire : prends un pion adverse !';
-      }
-      sfx.deny();
-      setState(() {
-        message = reason;
-      });
-      return;
-    }
+    final newPosition = oldPosition == -1 ? 0 : oldPosition + dice;
 
-    final token = _token;
+    if (newPosition > 57) return;
+
     setState(() {
-      isMoving = true;
-    });
+      player.pawns[pawnIndex] = newPosition;
 
-    if (oldPosition == -1) {
-      sfx.step();
-      setState(() {
-        player.pawns[pawnIndex] = 0;
-      });
-      await Future.delayed(Duration(milliseconds: stepMs + 90));
-      if (!mounted || token != _token) return;
-    } else {
-      // Le pion avance case par case
-      for (int s = 1; s <= dice; s++) {
-        sfx.step();
-        setState(() {
-          player.pawns[pawnIndex] = oldPosition + s;
-        });
-        await Future.delayed(Duration(milliseconds: stepMs));
-        if (!mounted || token != _token) return;
-      }
-    }
+      if (newPosition >= 0 && newPosition <= 51) {
+        final cell = (player.start + newPosition) % 52;
 
-    final newPosition = player.pawns[pawnIndex];
-    bool captured = false;
+        if (!safeCells.contains(cell)) {
+          for (int p = 0; p < players.length; p++) {
+            if (p == currentPlayer) continue;
 
-    // Capture possible uniquement sur le circuit commun (0..50), hors cases sûres
-    if (newPosition < 51) {
-      final absolutePosition = (player.start + newPosition) % 52;
+            for (int j = 0; j < players[p].pawns.length; j++) {
+              final opponentPosition = players[p].pawns[j];
 
-      if (!safeCells.contains(absolutePosition)) {
-        for (int p = 0; p < players.length; p++) {
-          if (p == playerIndex) continue;
-
-          for (int i = 0; i < players[p].pawns.length; i++) {
-            final opponentPosition = players[p].pawns[i];
-
-            if (opponentPosition >= 0 &&
-                opponentPosition < 51 &&
-                (players[p].start + opponentPosition) % 52 ==
-                    absolutePosition) {
-              players[p].pawns[i] = -1;
-              captured = true;
+              if (opponentPosition >= 0 &&
+                  opponentPosition <= 51 &&
+                  (players[p].start + opponentPosition) % 52 == cell) {
+                players[p].pawns[j] = -1;
+                message = 'Pion adverse capturé !';
+              }
             }
           }
         }
       }
-    }
 
-    final won = player.pawns.every((p) => p == 56);
+      final finished = player.pawns.every((position) => position == 57);
 
-    if (won) {
-      sfx.win();
-    } else if (captured) {
-      sfx.capture();
-    } else if (newPosition == 56) {
-      sfx.arrive();
-    }
-
-    setState(() {
-      isMoving = false;
-
-      if (won) {
+      if (finished) {
         gameOver = true;
-        message = '🏆 Joueur ${player.display} remporte la partie !';
-      } else if (dice == 6 || captured || newPosition == 56) {
-        hasRolled = false;
-        message = captured
-            ? 'Capture ! Tu rejoues.'
-            : newPosition == 56
-                ? 'Un pion est arrivé ! Tu rejoues.'
-                : 'Un 6 ! Tu rejoues.';
-      } else {
-        _advanceTurn();
+        message = '🏆 ${player.name} a gagné la partie !';
+        return;
+      }
+
+      if (player.pawns[pawnIndex] == 57) {
+        message = 'Bravo ! Un pion est arrivé à destination.';
+      } else if (message != 'Pion adverse capturé !') {
+        message = '${player.name} a déplacé son pion.';
+      }
+
+      hasRolled = false;
+      selectedPawn = -1;
+
+      if (dice != 6) {
+        currentPlayer = (currentPlayer + 1) % players.length;
+      }
+
+      if (!gameOver) {
+        message += ' Au tour de ${activePlayer.name}.';
       }
     });
   }
 
   void restartGame() {
-    _token++; // annule les animations en attente
-    _flight.stop();
-    _flight.value = 0;
     setState(() {
-      for (final player in players) {
-        player.pawns.fillRange(0, 4, -1);
-      }
-      for (int i = 0; i < 4; i++) {
-        lastRoll[i] = 1;
-      }
+      initializePlayers();
       currentPlayer = 0;
       dice = 1;
+      selectedPawn = -1;
       hasRolled = false;
-      isRolling = false;
-      isMoving = false;
       gameOver = false;
-      diceDragging = false;
-      flightPhase = 0;
-      message = 'Nouvelle partie ! Touche ton dé pour commencer.';
+      message = 'Nouvelle partie ! Appuie sur le dé.';
     });
   }
 
-  // ---------------------------------------------------------------------
-  // Positions des pions (en unités de cases)
-  // ---------------------------------------------------------------------
-
-  List<double> homeCenter(int p, int i) {
-    final rowStart = p < 2 ? 0 : 9;
-    final colStart = (p == 0 || p == 3) ? 0 : 9;
-    final r = i < 2 ? 1.75 : 4.25;
-    final c = i.isEven ? 1.75 : 4.25;
-    return [rowStart + r, colStart + c];
-  }
-
-  List<double>? pawnCenter(int p, int i) {
-    final position = players[p].pawns[i];
-    if (position == 56) return null;
-    if (position == -1) return homeCenter(p, i);
-
-    final cell = position >= 51
-        ? homeLane(p)[position - 51]
-        : track[(players[p].start + position) % 52];
-    return [cell[0] + 0.5, cell[1] + 0.5];
-  }
-
-  // Zone de toucher élargie : on joue le pion le plus proche du doigt
-  void onBoardTap(Offset pos, double c) {
-    if (!hasRolled ||
-        isRolling ||
-        isMoving ||
-        gameOver ||
-        flightPhase != 0 ||
-        diceDragging) {
-      return;
-    }
-
-    final tapRow = pos.dy / c;
-    final tapCol = pos.dx / c;
-    final legal = legalMoves();
-
-    int? best;
-    double bestDist = 1.8; // rayon en nombre de cases
-    int? nearest;
-    double nearestDist = 1.2;
-
-    for (int i = 0; i < 4; i++) {
-      final center = pawnCenter(currentPlayer, i);
-      if (center == null) continue;
-
-      final dr = center[0] - 0.2 - tapRow; // le pion est dessiné un peu plus haut
-      final dc = center[1] - tapCol;
-      final dist = sqrt(dr * dr + dc * dc);
-
-      if (legal.contains(i) && dist < bestDist) {
-        bestDist = dist;
-        best = i;
-      }
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = i;
-      }
-    }
-
-    if (best != null) {
-      movePawn(currentPlayer, best);
-    } else if (nearest != null) {
-      movePawn(currentPlayer, nearest); // affiche le message d'explication
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Interface
-  // ---------------------------------------------------------------------
-
-  List<Widget> buildPawns(double c) {
-    final legal = (hasRolled &&
-            !isRolling &&
-            !isMoving &&
-            !gameOver &&
-            flightPhase == 0)
-        ? legalMoves()
-        : <int>[];
-
-    final entries = <_PawnEntry>[];
-    for (int p = 0; p < players.length; p++) {
-      for (int i = 0; i < 4; i++) {
-        final center = pawnCenter(p, i);
-        if (center != null) entries.add(_PawnEntry(p, i, center));
-      }
-    }
-
-    final groups = <String, List<_PawnEntry>>{};
-    for (final e in entries) {
-      groups
-          .putIfAbsent('${e.center[0]}_${e.center[1]}', () => <_PawnEntry>[])
-          .add(e);
-    }
-
-    // Les pions du bas sont dessinés par-dessus ceux du haut
-    entries.sort((a, b) => a.center[0].compareTo(b.center[0]));
-
-    return entries.map((e) {
-      final group = groups['${e.center[0]}_${e.center[1]}']!;
-      final n = group.length;
-      final k = group.indexOf(e);
-      final position = players[e.p].pawns[e.i];
-      final atHome = position == -1;
-      final stacked = n > 1 && !atHome;
-
-      final w = (atHome ? c * 1.5 : c * 1.0) * (stacked ? 0.8 : 1.0);
-      final h = w * 1.25;
-      final dx = stacked ? (k - (n - 1) / 2) * c * 0.3 : 0.0;
-
-      final movable = e.p == currentPlayer && legal.contains(e.i);
-
-      return AnimatedPositioned(
-        key: ValueKey('pawn_${e.p}_${e.i}'),
-        duration: Duration(milliseconds: min(140, stepMs)),
-        curve: Curves.easeOut,
-        left: e.center[1] * c - w / 2 + dx,
-        top: e.center[0] * c - h * 0.65,
-        width: w,
-        height: h,
-        child: IgnorePointer(
-          child: AnimatedBuilder(
-            animation: _pulse,
-            builder: (context, child) => Transform.translate(
-              offset: Offset(0, movable ? -_pulse.value * c * 0.25 : 0),
-              child: child,
-            ),
-            child: CustomPaint(
-              painter: PawnPainter(
-                color: players[e.p].color,
-                highlight: movable,
-              ),
-            ),
-          ),
-        ),
-      );
-    }).toList();
-  }
-
-  Widget buildBoard(double size) {
-    return Container(
-      key: boardKey,
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.5),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final c = constraints.maxWidth / 15;
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapUp: (details) => onBoardTap(details.localPosition, c),
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: BoardPainter(
-                        colors: players.map((p) => p.color).toList(),
-                        lights: players.map((p) => p.lightColor).toList(),
-                        track: track,
-                        lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
-                        starts: players.map((p) => p.start).toList(),
-                        safeStars: safeStars,
-                      ),
-                    ),
-                  ),
-                  ...buildPawns(c),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  TextStyle logoStyle(Color color) {
-    return TextStyle(
-      color: color,
-      fontSize: 28,
-      fontWeight: FontWeight.w900,
-      fontStyle: FontStyle.italic,
-      height: 1.0,
-      shadows: const [
-        Shadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 3)),
-      ],
-    );
-  }
-
-  Widget buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
-      child: Row(
-        children: [
-          PopupMenuButton<String>(
-            color: const Color(0xFF14267A),
-            onSelected: (value) {
-              if (value == 'new') restartGame();
-              if (value == 'home') Navigator.of(context).pop();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem<String>(
-                value: 'new',
-                child: Text(
-                  'Nouvelle partie',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-              PopupMenuItem<String>(
-                value: 'home',
-                child: Text(
-                  "Retour à l'accueil",
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.15),
-                border: Border.all(color: Colors.white54, width: 1.5),
-              ),
-              child: const Icon(Icons.menu, color: Colors.white),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('👑', style: TextStyle(fontSize: 15)),
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(text: 'Ludo', style: logoStyle(Colors.white)),
-                      TextSpan(
-                        text: 'Pro',
-                        style: logoStyle(const Color(0xFFFFC21A)),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  'Jouez • Gagnez • Amusez-vous !',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 10,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              color: Colors.black26,
-              border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.emoji_events, color: Color(0xFFFFC21A), size: 22),
-                SizedBox(width: 4),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Mode : Présentiel',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      '4 Joueurs',
-                      style: TextStyle(
-                        color: Color(0xFFFFC21A),
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget playerBadge(int index, {required bool avatarOnRight}) {
-    final player = players[index];
-    final active = index == currentPlayer && !gameOver;
-    final remaining = 4 - player.finished;
-    final progress = progressOf(player);
-    final percent = (progress * 100).round();
-
-    final avatar = Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [shade(player.color, 0.15), shade(player.color, -0.12)],
-        ),
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: player.color.withOpacity(active ? 0.9 : 0.4),
-            blurRadius: active ? 12 : 4,
-            spreadRadius: active ? 2 : 0,
-          ),
-        ],
-      ),
-      child: Icon(player.avatar, color: Colors.white, size: 26),
-    );
-
-    // Anneau de progression autour de l'avatar
-    final avatarWithRing = SizedBox(
-      width: 52,
-      height: 52,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          SizedBox(
-            width: 52,
-            height: 52,
-            child: TweenAnimationBuilder<double>(
-              tween: Tween<double>(begin: 0, end: progress),
-              duration: const Duration(milliseconds: 400),
-              builder: (context, value, child) => CircularProgressIndicator(
-                value: value,
-                strokeWidth: 3.5,
-                backgroundColor: Colors.white24,
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-            ),
-          ),
-          avatar,
-        ],
-      ),
-    );
-
-    final info = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment:
-          avatarOnRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Joueur ${player.display}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 12,
-              height: 15,
-              child: CustomPaint(
-                painter: PawnPainter(color: player.color, highlight: false),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              '$remaining pions',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.9),
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '$percent %',
-          style: const TextStyle(
-            color: Color(0xFFFFE082),
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-      decoration: BoxDecoration(
-        color: player.color.withOpacity(active ? 0.55 : 0.3),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(
-          color: active ? Colors.white : player.color.withOpacity(0.8),
-          width: active ? 2 : 1.5,
-        ),
-      ),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: avatarOnRight
-              ? [info, const SizedBox(width: 6), avatarWithRing]
-              : [avatarWithRing, const SizedBox(width: 6), info],
-        ),
-      ),
-    );
-  }
-
-  Widget diceBox(int value, Color color, {bool glow = false}) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: glow
-            ? [
-                BoxShadow(
-                  color: color.withOpacity(0.85),
-                  blurRadius: 16,
-                  spreadRadius: 2,
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-      ),
-      child: CustomPaint(painter: DicePainter(value)),
-    );
-  }
-
-  /// Le dé d'un joueur : on le touche pour lancer, ou on le glisse puis on le lâche.
-  Widget diceSlot(int p) {
-    final player = players[p];
-    final isActive = p == currentPlayer && !gameOver;
-    final canRoll = isActive && canRollNow && !diceDragging;
-    final lifted = isActive && (diceDragging || flightPhase != 0);
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: isActive
-          ? () {
-              if (canRollNow) throwDice(_toRoot(diceKeys[p]));
-            }
-          : null,
-      onPanStart: isActive ? (details) => onDicePanStart(p) : null,
-      onPanUpdate: isActive ? onDicePanUpdate : null,
-      onPanEnd: isActive ? (details) => onDicePanEnd() : null,
-      onPanCancel: isActive
-          ? () {
-              if (diceDragging) {
-                setState(() {
-                  diceDragging = false;
-                });
-              }
-            }
-          : null,
-      child: SizedBox(
-        key: diceKeys[p],
-        width: 52,
-        height: 52,
-        child: AnimatedBuilder(
-          animation: _pulse,
-          builder: (context, child) => Transform.scale(
-            scale: canRoll ? 1.0 + _pulse.value * 0.08 : 1.0,
-            child: child,
-          ),
-          child: Opacity(
-            opacity: lifted ? 0.25 : (isActive ? 1.0 : 0.5),
-            child: diceBox(lastRoll[p], player.color, glow: canRoll),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Le dé qui suit le doigt, puis qui roule sur le plateau.
-  Widget buildFlyingDie() {
-    final color = players[currentPlayer].color;
-
-    if (diceDragging) {
-      return Positioned(
-        left: dragPos.dx,
-        top: dragPos.dy,
-        width: 58,
-        height: 58,
-        child: IgnorePointer(
-          child: diceBox(lastRoll[currentPlayer], color, glow: true),
-        ),
-      );
-    }
-
-    if (flightPhase == 0) return const SizedBox.shrink();
-
-    return AnimatedBuilder(
-      animation: _flight,
-      builder: (context, child) {
-        final t = _flight.value;
-        final eased = Curves.easeOutCubic.transform(t);
-        final pos = Offset.lerp(flightFrom, flightTo, eased)!;
-        final rolling = flightPhase == 1;
-        final bounce = rolling ? sin(t * pi * 4).abs() * (1 - t) * 26 : 0.0;
-        final size = 52.0 + 12.0 * eased;
-        final face = (rolling && t < 0.85)
-            ? faceSeq[(t * 14).floor() % 6]
-            : pendingDice;
-        final turns = rolling ? t * 3 : 0.0;
-
-        return Positioned(
-          left: pos.dx,
-          top: pos.dy - bounce,
-          width: size,
-          height: size,
-          child: IgnorePointer(
-            child: Transform.rotate(
-              angle: turns * 2 * pi,
-              child: diceBox(face, color, glow: true),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget roundButton(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: const Color(0xFF0A1B66),
-          border: Border.all(color: Colors.white24, width: 1.5),
-        ),
-        child: Icon(icon, color: Colors.white),
-      ),
-    );
-  }
-
-  void showSettings() {
-    const speeds = <String, int>{'Lente': 300, 'Normale': 170, 'Rapide': 90};
-
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF14267A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            void update(VoidCallback change) {
-              setState(change);
-              setSheetState(() {});
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Paramètres',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        'Capture obligatoire',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      subtitle: const Text(
-                        "Tu dois prendre un pion adverse quand c'est possible",
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                      value: forcedCapture,
-                      onChanged: (value) =>
-                          update(() => forcedCapture = value),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        'Coup unique automatique',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      subtitle: const Text(
-                        "Le jeu joue à ta place quand il n'y a qu'un seul choix",
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                      value: autoPlay,
-                      onChanged: (value) => update(() => autoPlay = value),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Vitesse des pions',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final entry in speeds.entries)
-                          ChoiceChip(
-                            label: Text(entry.key),
-                            selected: stepMs == entry.value,
-                            onSelected: (_) =>
-                                update(() => stepMs = entry.value),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'Mode : en présentiel (tous les joueurs sur le même plateau)',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white54),
-                            ),
-                            onPressed: () {
-                              Navigator.pop(sheetContext);
-                              Navigator.of(this.context).pop();
-                            },
-                            child: const Text('Accueil'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF22B14C),
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () {
-                              Navigator.pop(sheetContext);
-                              restartGame();
-                            },
-                            child: const Text('Nouvelle partie'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void showStats() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF14267A),
-        title: const Text('Score', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final p in players)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    CircleAvatar(radius: 10, backgroundColor: p.color),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Joueur ${p.display}',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                    Text(
-                      '${p.finished}/4 arrivés',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget buildStatusBar() {
-    final player = players[currentPlayer];
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0A1B66),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white24, width: 1.5),
-              ),
-              child: Row(
-                children: [
-                  const Text('👑', style: TextStyle(fontSize: 22)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        RichText(
-                          text: TextSpan(
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            children: [
-                              const TextSpan(text: 'Au tour de : '),
-                              TextSpan(
-                                text: 'Joueur ${player.display}',
-                                style: TextStyle(
-                                  color: shade(player.color, 0.12),
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          message,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          roundButton(Icons.settings, showSettings),
-          const SizedBox(width: 8),
-          roundButton(Icons.bar_chart, showStats),
-        ],
-      ),
-    );
-  }
-
-  Widget badgesRow(int left, int right) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      child: Row(
-        children: [
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: playerBadge(left, avatarOnRight: false),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: playerBadge(right, avatarOnRight: true),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget diceRow(int left, int right) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [diceSlot(left), diceSlot(right)],
-      ),
-    );
-  }
+  Color get currentColor => activePlayer.color;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        key: rootKey,
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0xFF1F5BFF),
-                    Color(0xFF0B2FA6),
-                    Color(0xFF061A66),
+      appBar: AppBar(
+        title: const Text('LudoPro 🎲'),
+        actions: [
+          IconButton(
+            tooltip: 'Recommencer',
+            onPressed: restartGame,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF10142B),
+              Color(0xFF29205A),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              Text(
+                'Joueur ${currentPlayer + 1} / ${players.length}',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                activePlayer.name.toUpperCase(),
+                style: TextStyle(
+                  color: currentColor,
+                  fontSize: 25,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: CustomPaint(
+                        painter: BoardPainter(players: players),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (int i = 0; i < activePlayer.pawns.length; i++)
+                      ElevatedButton(
+                        onPressed: hasRolled && !gameOver
+                            ? () => movePawn(i)
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: currentColor,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.white12,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        child: Text(
+                          'Pion ${i + 1}: '
+                          '${activePlayer.pawns[i] == -1
+                              ? "Maison"
+                              : activePlayer.pawns[i] == 57
+                                  ? "Terminé"
+                                  : activePlayer.pawns[i]}',
+                        ),
+                      ),
                   ],
                 ),
               ),
-              child: SafeArea(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final boardSize = min(
-                      constraints.maxWidth - 24,
-                      constraints.maxHeight - 440,
-                    ).clamp(180.0, 700.0).toDouble();
-
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        buildHeader(),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [badgesRow(0, 1), diceRow(0, 1)],
-                        ),
-                        buildBoard(boardSize),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [diceRow(3, 2), badgesRow(3, 2)],
-                        ),
-                        buildStatusBar(),
-                      ],
-                    );
-                  },
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: ElevatedButton.icon(
+                    onPressed: hasRolled || gameOver ? null : rollDice,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber,
+                      foregroundColor: Colors.black,
+                      disabledBackgroundColor: Colors.white24,
+                    ),
+                    icon: const Icon(Icons.casino, size: 28),
+                    label: Text(
+                      gameOver
+                          ? 'PARTIE TERMINÉE'
+                          : hasRolled
+                              ? 'DÉ : $dice — CHOISIS UN PION'
+                              : 'LANCER LE DÉ',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-          buildFlyingDie(),
-        ],
+        ),
       ),
     );
   }
 }
 
-// ----------------------------------------------------------------------
-// Dessin du plateau
-// ----------------------------------------------------------------------
-
 class BoardPainter extends CustomPainter {
-  final List<Color> colors;
-  final List<Color> lights;
-  final List<List<int>> track;
-  final List<List<List<int>>> lanes;
-  final List<int> starts;
-  final Set<int> safeStars;
+  final List<LudoPlayer> players;
 
-  BoardPainter({
-    required this.colors,
-    required this.lights,
-    required this.track,
-    required this.lanes,
-    required this.starts,
-    required this.safeStars,
-  });
-
-  void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
-    final path = Path();
-    for (int i = 0; i < 10; i++) {
-      final r = i.isEven ? radius : radius * 0.45;
-      final angle = -pi / 2 + i * pi / 5;
-      final x = center.dx + r * cos(angle);
-      final y = center.dy + r * sin(angle);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    path.close();
-    canvas.drawPath(path, paint);
-  }
+  BoardPainter({required this.players});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final c = size.width / 15;
+    final width = size.width;
+    final height = size.height;
+    final unit = min(width, height);
 
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
+    final background = Paint()
+      ..color = const Color(0xFFF4F1E8);
 
-    // Les 4 bases colorées
-    for (int p = 0; p < 4; p++) {
-      final rowStart = p < 2 ? 0 : 9;
-      final colStart = (p == 0 || p == 3) ? 0 : 9;
-      final rect = Rect.fromLTWH(colStart * c, rowStart * c, 6 * c, 6 * c);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, width, height),
+        const Radius.circular(20),
+      ),
+      background,
+    );
 
-      final outer = RRect.fromRectAndRadius(rect, Radius.circular(c * 0.6));
+    final colors = [
+      Colors.red,
+      Colors.green,
+      Colors.blue,
+      Colors.amber,
+    ];
+
+    final positions = [
+      const Offset(0.04, 0.04),
+      const Offset(0.56, 0.04),
+      const Offset(0.04, 0.56),
+      const Offset(0.56, 0.56),
+    ];
+
+    final baseSize = unit * 0.38;
+
+    for (int i = 0; i < 4; i++) {
+      // Si le joueur est actif, on affiche sa couleur normale, sinon une base neutre/discrète
+      final isActive = i < players.length;
+
+      final rect = Rect.fromLTWH(
+        positions[i].dx * width,
+        positions[i].dy * height,
+        baseSize,
+        baseSize,
+      );
+
       canvas.drawRRect(
-        outer,
+        RRect.fromRectAndRadius(
+          rect,
+          const Radius.circular(14),
+        ),
         Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              shade(colors[p], 0.12),
-              colors[p],
-              shade(colors[p], -0.12),
-            ],
-          ).createShader(rect),
+          ..color = isActive
+              ? colors[i].withValues(alpha: 0.85)
+              : Colors.grey.withValues(alpha: 0.15),
       );
 
-      final inner = RRect.fromRectAndRadius(
-        rect.deflate(c * 0.6),
-        Radius.circular(c * 0.45),
-      );
       canvas.drawRRect(
-        inner.shift(Offset(0, c * 0.08)),
-        Paint()..color = Colors.black.withOpacity(0.2),
+        RRect.fromRectAndRadius(
+          rect.deflate(unit * 0.045),
+          const Radius.circular(10),
+        ),
+        Paint()..color = Colors.white.withValues(alpha: 0.20),
       );
-      canvas.drawRRect(inner, Paint()..color = lights[p]);
     }
 
-    final cellStroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = const Color(0xFFB8C2DD);
-    final laneStroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = Colors.white.withOpacity(0.55);
+    final center = Offset(width / 2, height / 2);
+    final radius = unit * 0.31;
 
-    // Circuit commun
-    for (int idx = 0; idx < track.length; idx++) {
-      final cell = track[idx];
-      final rect = Rect.fromLTWH(cell[1] * c, cell[0] * c, c, c);
+    canvas.drawCircle(
+      center,
+      radius + unit * 0.045,
+      Paint()..color = const Color(0xFFDED9CE),
+    );
 
-      Color? fill;
-      for (int p = 0; p < 4; p++) {
-        if (starts[p] == idx) fill = colors[p];
-      }
+    for (int i = 0; i < 52; i++) {
+      final angle = -pi / 2 + (2 * pi * i / 52);
+      final point = Offset(
+        center.dx + radius * cos(angle),
+        center.dy + radius * sin(angle),
+      );
 
-      canvas.drawRect(rect, Paint()..color = fill ?? Colors.white);
-      canvas.drawRect(rect, cellStroke);
+      final cellColor = switch (i) {
+        0 => Colors.red,
+        13 => Colors.green,
+        26 => Colors.blue,
+        39 => Colors.amber,
+        _ => Colors.white,
+      };
 
-      if (fill != null) {
-        _drawStar(canvas, rect.center, c * 0.3, Paint()..color = Colors.white);
-      } else if (safeStars.contains(idx)) {
-        _drawStar(
+      canvas.drawCircle(
+        point,
+        unit * 0.022,
+        Paint()..color = cellColor,
+      );
+
+      canvas.drawCircle(
+        point,
+        unit * 0.022,
+        Paint()
+          ..color = Colors.black26
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
+
+    for (int p = 0; p < players.length; p++) {
+      final player = players[p];
+
+      for (int j = 0; j < player.pawns.length; j++) {
+        final position = player.pawns[j];
+        Offset point;
+
+        if (position == -1) {
+          final base = positions[p];
+          final offsetX = j % 2 == 0 ? 0.10 : 0.26;
+          final offsetY = j < 2 ? 0.10 : 0.26;
+
+          point = Offset(
+            (base.dx + offsetX) * width,
+            (base.dy + offsetY) * height,
+          );
+        } else if (position <= 51) {
+          final trackIndex = (player.start + position) % 52;
+          final angle = -pi / 2 + (2 * pi * trackIndex / 52);
+
+          point = Offset(
+            center.dx + radius * cos(angle),
+            center.dy + radius * sin(angle),
+          );
+        } else if (position < 57) {
+          final progress = position - 51;
+          final angle = -pi / 2 + (2 * pi * player.start / 52);
+          final distance = radius * (1 - progress / 7);
+
+          point = Offset(
+            center.dx + distance * cos(angle),
+            center.dy + distance * sin(angle),
+          );
+        } else {
+          point = center;
+        }
+
+        final pawnRadius = unit * 0.027;
+
+        canvas.drawCircle(
+          point,
+          pawnRadius,
+          Paint()..color = player.color,
+        );
+
+        canvas.drawCircle(
+          point,
+          pawnRadius,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5,
+        );
+
+        final numberPainter = TextPainter(
+          text: TextSpan(
+            text: '${j + 1}',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: unit * 0.022,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+
+        numberPainter.layout();
+        numberPainter.paint(
           canvas,
-          rect.center,
-          c * 0.34,
-          Paint()..color = const Color(0xFFFFB300),
+          Offset(
+            point.dx - numberPainter.width / 2,
+            point.dy - numberPainter.height / 2,
+          ),
         );
       }
     }
 
-    // Couloirs d'arrivée
-    for (int p = 0; p < 4; p++) {
-      for (final cell in lanes[p]) {
-        final rect = Rect.fromLTWH(cell[1] * c, cell[0] * c, c, c);
-        canvas.drawRect(rect, Paint()..color = colors[p]);
-        canvas.drawRect(rect, laneStroke);
-      }
-    }
-
-    // Centre : 4 triangles de couleur
-    final cx = 7.5 * c;
-    final cy = 7.5 * c;
-    final l = 6 * c;
-    final r = 9 * c;
-
-    void triangle(Color color, Offset a, Offset b) {
-      final path = Path()
-        ..moveTo(a.dx, a.dy)
-        ..lineTo(b.dx, b.dy)
-        ..lineTo(cx, cy)
-        ..close();
-      canvas.drawPath(path, Paint()..color = color);
-    }
-
-    triangle(colors[0], Offset(l, l), Offset(l, r)); // gauche
-    triangle(colors[1], Offset(l, l), Offset(r, l)); // haut
-    triangle(colors[2], Offset(r, l), Offset(r, r)); // droite
-    triangle(colors[3], Offset(l, r), Offset(r, r)); // bas
-
-    final lines = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = Colors.white70;
-    canvas.drawLine(Offset(l, l), Offset(r, r), lines);
-    canvas.drawLine(Offset(r, l), Offset(l, r), lines);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// ----------------------------------------------------------------------
-// Dessin d'un pion en relief
-// ----------------------------------------------------------------------
-
-class PawnPainter extends CustomPainter {
-  final Color color;
-  final bool highlight;
-
-  PawnPainter({required this.color, required this.highlight});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-
-    // Ombre au sol
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.5, h * 0.86),
-        width: w * 0.9,
-        height: h * 0.16,
-      ),
-      Paint()..color = Colors.black.withOpacity(0.28),
-    );
-
-    // Anneau lumineux : ce pion peut jouer
-    if (highlight) {
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(w * 0.5, h * 0.86),
-          width: w * 1.1,
-          height: h * 0.22,
+    final centerPainter = TextPainter(
+      text: const TextSpan(
+        text: 'LUDO',
+        style: TextStyle(
+          color: Colors.deepPurple,
+          fontWeight: FontWeight.bold,
+          fontSize: 20,
         ),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.2
-          ..color = Colors.white.withOpacity(0.9),
-      );
-    }
-
-    // Socle
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.5, h * 0.8),
-        width: w * 0.84,
-        height: h * 0.2,
       ),
-      Paint()..color = shade(color, -0.22),
+      textDirection: TextDirection.ltr,
     );
 
-    // Corps
-    final body = Path()
-      ..moveTo(w * 0.14, h * 0.8)
-      ..quadraticBezierTo(w * 0.3, h * 0.72, w * 0.4, h * 0.5)
-      ..lineTo(w * 0.6, h * 0.5)
-      ..quadraticBezierTo(w * 0.7, h * 0.72, w * 0.86, h * 0.8)
-      ..quadraticBezierTo(w * 0.5, h * 0.9, w * 0.14, h * 0.8)
-      ..close();
-    final bodyRect = Rect.fromLTWH(0, h * 0.5, w, h * 0.4);
-    canvas.drawPath(
-      body,
-      Paint()
-        ..shader = LinearGradient(
-          colors: [
-            shade(color, -0.15),
-            shade(color, 0.12),
-            shade(color, -0.2),
-          ],
-          stops: const [0.0, 0.45, 1.0],
-        ).createShader(bodyRect),
-    );
-
-    // Tête
-    final headCenter = Offset(w * 0.5, h * 0.33);
-    final headRadius = w * 0.27;
-    canvas.drawCircle(
-      headCenter,
-      headRadius,
-      Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(-0.35, -0.4),
-          radius: 0.9,
-          colors: [shade(color, 0.3), color, shade(color, -0.2)],
-          stops: const [0.0, 0.5, 1.0],
-        ).createShader(Rect.fromCircle(center: headCenter, radius: headRadius)),
-    );
-    canvas.drawCircle(
-      headCenter,
-      headRadius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8
-        ..color = shade(color, -0.3),
-    );
-
-    // Reflet
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.42, h * 0.26),
-        width: w * 0.16,
-        height: h * 0.1,
+    centerPainter.layout();
+    centerPainter.paint(
+      canvas,
+      Offset(
+        center.dx - centerPainter.width / 2,
+        center.dy - centerPainter.height / 2,
       ),
-      Paint()..color = Colors.white.withOpacity(0.55),
     );
   }
 
   @override
-  bool shouldRepaint(covariant PawnPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.highlight != highlight;
-}
-
-// ----------------------------------------------------------------------
-// Dessin du dé
-// ----------------------------------------------------------------------
-
-class DicePainter extends CustomPainter {
-  final int value;
-
-  DicePainter(this.value);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rr = RRect.fromRectAndRadius(
-      rect.deflate(2),
-      Radius.circular(size.width * 0.2),
-    );
-
-    canvas.drawRRect(
-      rr,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFD6DCEB)],
-        ).createShader(rect),
-    );
-    canvas.drawRRect(
-      rr,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..color = const Color(0xFFB0B8D0),
-    );
-
-    const patterns = <int, List<int>>{
-      1: [4],
-      2: [0, 8],
-      3: [0, 4, 8],
-      4: [0, 2, 6, 8],
-      5: [0, 2, 4, 6, 8],
-      6: [0, 2, 3, 5, 6, 8],
-    };
-
-    for (final i in patterns[value] ?? const <int>[]) {
-      final dx = (0.25 + (i % 3) * 0.25) * size.width;
-      final dy = (0.25 + (i ~/ 3) * 0.25) * size.height;
-      canvas.drawCircle(
-        Offset(dx, dy),
-        size.width * 0.075,
-        Paint()..color = const Color(0xFF1A1F3A),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant DicePainter oldDelegate) =>
-      oldDelegate.value != value;
+  bool shouldRepaint(covariant BoardPainter oldDelegate) => true;
 }
