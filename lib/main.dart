@@ -1,7 +1,5 @@
 import 'dart:math';
-import 'dart:typed_data';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 void main() {
@@ -34,131 +32,22 @@ class LudoProApp extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
-// Sons : générés par le code (aucun fichier audio à ajouter)
+// Sons (désactivés pour l'instant)
 // ----------------------------------------------------------------------
 
-const int _sampleRate = 22050;
-
-List<double> _tone(
-  double freq,
-  int ms, {
-  double vol = 0.6,
-  double decay = 6,
-  double endFreq = -1,
-}) {
-  final n = _sampleRate * ms ~/ 1000;
-  final out = List<double>.filled(n, 0.0);
-  double phase = 0;
-  for (int i = 0; i < n; i++) {
-    final t = i / n;
-    final f = endFreq < 0 ? freq : freq + (endFreq - freq) * t;
-    phase += 2 * pi * f / _sampleRate;
-    final attack = i < 80 ? i / 80 : 1.0;
-    out[i] = sin(phase) * vol * exp(-decay * t) * attack;
-  }
-  return out;
-}
-
-List<double> _noise(Random rnd, int ms, {double vol = 0.5, double decay = 12}) {
-  final n = _sampleRate * ms ~/ 1000;
-  return List<double>.generate(
-    n,
-    (i) => (rnd.nextDouble() * 2 - 1) * vol * exp(-decay * i / n),
-  );
-}
-
-List<double> _silence(int ms) =>
-    List<double>.filled(_sampleRate * ms ~/ 1000, 0.0);
-
-List<double> _cat(List<List<double>> parts) => [
-      for (final part in parts) ...part,
-    ];
-
-Uint8List _wav(List<double> samples) {
-  final data = ByteData(44 + samples.length * 2);
-
-  void writeText(int offset, String text) {
-    for (int i = 0; i < text.length; i++) {
-      data.setUint8(offset + i, text.codeUnitAt(i));
-    }
-  }
-
-  writeText(0, 'RIFF');
-  data.setUint32(4, 36 + samples.length * 2, Endian.little);
-  writeText(8, 'WAVE');
-  writeText(12, 'fmt ');
-  data.setUint32(16, 16, Endian.little);
-  data.setUint16(20, 1, Endian.little);
-  data.setUint16(22, 1, Endian.little);
-  data.setUint32(24, _sampleRate, Endian.little);
-  data.setUint32(28, _sampleRate * 2, Endian.little);
-  data.setUint16(32, 2, Endian.little);
-  data.setUint16(34, 16, Endian.little);
-  writeText(36, 'data');
-  data.setUint32(40, samples.length * 2, Endian.little);
-
-  for (int i = 0; i < samples.length; i++) {
-    final v = (samples[i].clamp(-1.0, 1.0) * 32767).round();
-    data.setInt16(44 + i * 2, v, Endian.little);
-  }
-  return data.buffer.asUint8List();
-}
-
+/// Sons désactivés pour l'instant : aucune extension audio n'est nécessaire.
+/// Les appels dans le jeu sont déjà en place, on pourra les brancher plus tard.
 class Sfx {
-  final Random _rnd = Random(7);
-  final List<AudioPlayer> _pool = List.generate(5, (_) => AudioPlayer());
-  int _next = 0;
   bool enabled = true;
 
-  late final Uint8List _stepSound = _wav(_tone(620, 60, decay: 9, vol: 0.5));
-  late final Uint8List _landSound = _wav(_tone(180, 130, decay: 9, vol: 0.8));
-  late final Uint8List _denySound = _wav(_tone(160, 150, decay: 5, vol: 0.7));
-  late final Uint8List _captureSound =
-      _wav(_tone(700, 320, decay: 4, vol: 0.7, endFreq: 180));
-  late final Uint8List _arriveSound = _wav(
-    _cat([_tone(523, 110), _tone(659, 110), _tone(784, 240, decay: 5)]),
-  );
-  late final Uint8List _winSound = _wav(
-    _cat([
-      _tone(523, 130),
-      _tone(659, 130),
-      _tone(784, 130),
-      _tone(1047, 420, decay: 4),
-    ]),
-  );
-  late final Uint8List _rollSound = _wav(
-    _cat([
-      for (int i = 0; i < 7; i++) ...[
-        _noise(_rnd, 35, vol: 0.45),
-        _silence(45),
-      ],
-    ]),
-  );
-
-  void _play(Uint8List bytes) {
-    if (!enabled) return;
-    try {
-      final player = _pool[_next];
-      _next = (_next + 1) % _pool.length;
-      player.play(BytesSource(bytes)).catchError((_) {});
-    } catch (_) {
-      // Le son ne doit jamais bloquer le jeu
-    }
-  }
-
-  void step() => _play(_stepSound);
-  void land() => _play(_landSound);
-  void deny() => _play(_denySound);
-  void capture() => _play(_captureSound);
-  void arrive() => _play(_arriveSound);
-  void win() => _play(_winSound);
-  void roll() => _play(_rollSound);
-
-  void dispose() {
-    for (final player in _pool) {
-      player.dispose();
-    }
-  }
+  void step() {}
+  void land() {}
+  void deny() {}
+  void capture() {}
+  void arrive() {}
+  void win() {}
+  void roll() {}
+  void dispose() {}
 }
 
 // ----------------------------------------------------------------------
