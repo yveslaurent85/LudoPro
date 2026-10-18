@@ -26,7 +26,7 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
-      home: const LudoGame(),
+      home: const HomeScreen(),
     );
   }
 }
@@ -78,6 +78,385 @@ class _PawnEntry {
   final int i;
   final List<double> center;
   _PawnEntry(this.p, this.i, this.center);
+}
+
+// ----------------------------------------------------------------------
+// Écran d'accueil : choix du mode de jeu
+// ----------------------------------------------------------------------
+
+const BoxDecoration _appBackground = BoxDecoration(
+  gradient: LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+  ),
+);
+
+TextStyle _logoStyle(Color color, double size) {
+  return TextStyle(
+    color: color,
+    fontSize: size,
+    fontWeight: FontWeight.w900,
+    fontStyle: FontStyle.italic,
+    height: 1.0,
+    shadows: const [
+      Shadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 3)),
+    ],
+  );
+}
+
+class _ModeCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ModeCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [shade(color, 0.08), shade(color, -0.12)],
+          ),
+          border: Border.all(color: Colors.white54, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.35),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.2),
+              ),
+              child: Icon(icon, color: Colors.white, size: 30),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                const Spacer(flex: 2),
+                const Text('👑', style: TextStyle(fontSize: 44)),
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'Ludo',
+                        style: _logoStyle(Colors.white, 52),
+                      ),
+                      TextSpan(
+                        text: 'Pro',
+                        style: _logoStyle(const Color(0xFFFFC21A), 52),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Jouez • Gagnez • Amusez-vous !',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                const Spacer(),
+                _ModeCard(
+                  color: const Color(0xFF22B14C),
+                  icon: Icons.groups,
+                  title: 'En présentiel',
+                  subtitle: 'Les joueurs jouent sur le même plateau',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LudoGame(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _ModeCard(
+                  color: const Color(0xFF1E6BFF),
+                  icon: Icons.public,
+                  title: 'En ligne',
+                  subtitle: 'Crée un compte pour jouer à distance',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const OnlineScreen(),
+                    ),
+                  ),
+                ),
+                const Spacer(flex: 2),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------
+// Jeu en ligne : création de compte / connexion
+// (le serveur n'est pas encore branché : l'écran est prêt, pas le compte)
+// ----------------------------------------------------------------------
+
+class OnlineScreen extends StatefulWidget {
+  const OnlineScreen({super.key});
+
+  @override
+  State<OnlineScreen> createState() => _OnlineScreenState();
+}
+
+class _OnlineScreenState extends State<OnlineScreen> {
+  bool creating = true;
+  bool hidePassword = true;
+
+  InputDecoration _field(String label, IconData icon, {Widget? suffix}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white70),
+      prefixIcon: Icon(icon, color: Colors.white70),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.12),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Colors.white30),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFFFC21A), width: 2),
+      ),
+    );
+  }
+
+  Widget _tab(String label, bool selected, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: selected
+                ? const Color(0xFFFFC21A)
+                : Colors.white.withOpacity(0.12),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? const Color(0xFF1A1F3A) : Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    const Text(
+                      'Jeu en ligne',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.black26,
+                    border: Border.all(
+                      color: const Color(0xFFFFC21A),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, color: Color(0xFFFFC21A)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Le serveur en ligne n'est pas encore branché. "
+                          'Les comptes et les parties à distance seront '
+                          'activés dès qu\'il sera prêt.',
+                          style: TextStyle(color: Colors.white, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    _tab('Créer un compte', creating, () {
+                      setState(() => creating = true);
+                    }),
+                    const SizedBox(width: 10),
+                    _tab('Se connecter', !creating, () {
+                      setState(() => creating = false);
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                if (creating) ...[
+                  TextField(
+                    style: const TextStyle(color: Colors.white),
+                    cursorColor: const Color(0xFFFFC21A),
+                    decoration: _field('Pseudo', Icons.person),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                TextField(
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: const Color(0xFFFFC21A),
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: _field('E-mail', Icons.email),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: const Color(0xFFFFC21A),
+                  obscureText: hidePassword,
+                  decoration: _field(
+                    'Mot de passe',
+                    Icons.lock,
+                    suffix: IconButton(
+                      onPressed: () =>
+                          setState(() => hidePassword = !hidePassword),
+                      icon: Icon(
+                        hidePassword ? Icons.visibility : Icons.visibility_off,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 22),
+                GestureDetector(
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Disponible dès que le serveur en ligne sera branché.',
+                        ),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    height: 50,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(25),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFF6B7396), Color(0xFF454C70)],
+                      ),
+                      border: Border.all(color: Colors.white24, width: 2),
+                    ),
+                    child: Text(
+                      creating ? 'Créer mon compte' : 'Me connecter',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class LudoGame extends StatefulWidget {
@@ -142,6 +521,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool isMoving = false;
   bool gameOver = false;
   bool soundOn = true;
+  bool forcedCapture = true; // capture obligatoire
+  bool autoPlay = true; // coup unique joué automatiquement
+  int stepMs = 170; // vitesse des pions (ms par case)
 
   // Dé : glissement et lancer
   bool diceDragging = false;
@@ -215,6 +597,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Règles du jeu
   // ---------------------------------------------------------------------
 
+  /// Progression d'un joueur : somme des cases parcourues par ses 4 pions,
+  /// sur un total de 4 x 56 cases.
+  double progressOf(Player player) {
+    int total = 0;
+    for (final pos in player.pawns) {
+      if (pos > 0) total += pos;
+    }
+    return total / 224.0;
+  }
+
   bool get canRollNow =>
       !hasRolled && !gameOver && !isRolling && !isMoving && flightPhase == 0;
 
@@ -256,7 +648,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         if (canPawnMove(player.pawns[i])) i,
     ];
     final captures = all.where(moveCaptures).toList();
-    return captures.isNotEmpty ? captures : all;
+    return (forcedCapture && captures.isNotEmpty) ? captures : all;
   }
 
   /// Retire les coups équivalents (pions au même endroit).
@@ -346,12 +738,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     final legal = legalMoves();
     final distinct = distinctMoves(legal);
-    final forced = legal.isNotEmpty && moveCaptures(legal.first);
+    final forced =
+        forcedCapture && legal.isNotEmpty && moveCaptures(legal.first);
 
     setState(() {
       if (legal.isEmpty) {
         message = '$dice ! Aucun déplacement possible.';
-      } else if (distinct.length == 1) {
+      } else if (autoPlay && distinct.length == 1) {
         message = forced
             ? 'Capture obligatoire ! Coup joué automatiquement.'
             : 'Un seul coup possible : joué automatiquement.';
@@ -383,7 +776,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted || rollToken != _token || gameOver) return;
       nextTurn();
-    } else if (distinct.length == 1) {
+    } else if (autoPlay && distinct.length == 1) {
       // Un seul choix possible : le jeu joue à ta place
       await Future.delayed(const Duration(milliseconds: 250));
       if (!mounted || rollToken != _token) return;
@@ -442,7 +835,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       setState(() {
         player.pawns[pawnIndex] = 0;
       });
-      await Future.delayed(const Duration(milliseconds: 260));
+      await Future.delayed(Duration(milliseconds: stepMs + 90));
       if (!mounted || token != _token) return;
     } else {
       // Le pion avance case par case
@@ -451,7 +844,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         setState(() {
           player.pawns[pawnIndex] = oldPosition + s;
         });
-        await Future.delayed(const Duration(milliseconds: 170));
+        await Future.delayed(Duration(milliseconds: stepMs));
         if (!mounted || token != _token) return;
       }
     }
@@ -649,7 +1042,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
       return AnimatedPositioned(
         key: ValueKey('pawn_${e.p}_${e.i}'),
-        duration: const Duration(milliseconds: 140),
+        duration: Duration(milliseconds: min(140, stepMs)),
         curve: Curves.easeOut,
         left: e.center[1] * c - w / 2 + dx,
         top: e.center[0] * c - h * 0.65,
@@ -744,12 +1137,20 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             color: const Color(0xFF14267A),
             onSelected: (value) {
               if (value == 'new') restartGame();
+              if (value == 'home') Navigator.of(context).pop();
             },
             itemBuilder: (context) => const [
               PopupMenuItem<String>(
                 value: 'new',
                 child: Text(
                   'Nouvelle partie',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'home',
+                child: Text(
+                  "Retour à l'accueil",
                   style: TextStyle(color: Colors.white),
                 ),
               ),
@@ -810,7 +1211,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Mode : Classique',
+                      'Mode : Présentiel',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 9,
@@ -839,6 +1240,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final player = players[index];
     final active = index == currentPlayer && !gameOver;
     final remaining = 4 - player.finished;
+    final progress = progressOf(player);
+    final percent = (progress * 100).round();
 
     final avatar = Container(
       width: 42,
@@ -860,6 +1263,32 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         ],
       ),
       child: Icon(player.avatar, color: Colors.white, size: 26),
+    );
+
+    // Anneau de progression autour de l'avatar
+    final avatarWithRing = SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 52,
+            height: 52,
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0, end: progress),
+              duration: const Duration(milliseconds: 400),
+              builder: (context, value, child) => CircularProgressIndicator(
+                value: value,
+                strokeWidth: 3.5,
+                backgroundColor: Colors.white24,
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+          ),
+          avatar,
+        ],
+      ),
     );
 
     final info = Column(
@@ -896,6 +1325,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             ),
           ],
         ),
+        const SizedBox(height: 2),
+        Text(
+          '$percent %',
+          style: const TextStyle(
+            color: Color(0xFFFFE082),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
       ],
     );
 
@@ -914,8 +1352,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: avatarOnRight
-              ? [info, const SizedBox(width: 6), avatar]
-              : [avatar, const SizedBox(width: 6), info],
+              ? [info, const SizedBox(width: 6), avatarWithRing]
+              : [avatarWithRing, const SizedBox(width: 6), info],
         ),
       ),
     );
@@ -1054,6 +1492,131 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  void showSettings() {
+    const speeds = <String, int>{'Lente': 300, 'Normale': 170, 'Rapide': 90};
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF14267A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            void update(VoidCallback change) {
+              setState(change);
+              setSheetState(() {});
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Paramètres',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Capture obligatoire',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: const Text(
+                        "Tu dois prendre un pion adverse quand c'est possible",
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      value: forcedCapture,
+                      onChanged: (value) =>
+                          update(() => forcedCapture = value),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Coup unique automatique',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: const Text(
+                        "Le jeu joue à ta place quand il n'y a qu'un seul choix",
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      value: autoPlay,
+                      onChanged: (value) => update(() => autoPlay = value),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Vitesse des pions',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final entry in speeds.entries)
+                          ChoiceChip(
+                            label: Text(entry.key),
+                            selected: stepMs == entry.value,
+                            onSelected: (_) =>
+                                update(() => stepMs = entry.value),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Mode : en présentiel (tous les joueurs sur le même plateau)',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              Navigator.of(this.context).pop();
+                            },
+                            child: const Text('Accueil'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF22B14C),
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              restartGame();
+                            },
+                            child: const Text('Nouvelle partie'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void showStats() {
     showDialog<void>(
       context: context,
@@ -1155,16 +1718,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(width: 8),
-          roundButton(
-            soundOn ? Icons.volume_up : Icons.volume_off,
-            () {
-              setState(() {
-                soundOn = !soundOn;
-                sfx.enabled = soundOn;
-              });
-              sfx.step();
-            },
-          ),
+          roundButton(Icons.settings, showSettings),
           const SizedBox(width: 8),
           roundButton(Icons.bar_chart, showStats),
         ],
@@ -1230,7 +1784,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   builder: (context, constraints) {
                     final boardSize = min(
                       constraints.maxWidth - 24,
-                      constraints.maxHeight - 420,
+                      constraints.maxHeight - 440,
                     ).clamp(180.0, 700.0).toDouble();
 
                     return Column(
