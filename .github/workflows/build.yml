@@ -20,8 +20,8 @@ jobs:
           channel: stable
 
       - name: Creer la structure Android
-        run: flutter create --platforms=android .
-
+        
+run: flutter create --org com.yveslaurent85 --platforms=android .
       - name: Installer les dependances
         run: flutter pub get
 
