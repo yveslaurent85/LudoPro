@@ -128,6 +128,32 @@ Widget _sectionTitle(String text) {
   );
 }
 
+Widget _switchRow(
+  String title,
+  String subtitle,
+  bool value,
+  void Function(bool) onChanged,
+) {
+  return SwitchListTile(
+    contentPadding: EdgeInsets.zero,
+    activeColor: const Color(0xFFFFC21A),
+    title: Text(
+      title,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 15,
+        fontWeight: FontWeight.w800,
+      ),
+    ),
+    subtitle: Text(
+      subtitle,
+      style: const TextStyle(color: Colors.white70, fontSize: 12),
+    ),
+    value: value,
+    onChanged: onChanged,
+  );
+}
+
 Widget _hint(String text) {
   return Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -201,6 +227,8 @@ class OnlineLobbyScreen extends StatefulWidget {
 class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int numPlayers = 2;
   int pawnCount = 4;
+  bool doorSafe = true;
+  bool starSafe = true;
   bool busy = false;
   String? error;
 
@@ -233,6 +261,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'hostName': _displayName(user),
         'maxPlayers': numPlayers,
         'pawnCount': pawnCount,
+        'doorSafe': doorSafe,
+        'starSafe': starSafe,
         'status': 'waiting',
         'players': [
           {'uid': user.uid, 'name': _displayName(user)},
@@ -434,7 +464,20 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 pawnCount,
                 (v) => setState(() => pawnCount = v),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 6),
+              _switchRow(
+                'Protection des portes',
+                'Un pion sur une case de départ ne peut pas être capturé',
+                doorSafe,
+                (v) => setState(() => doorSafe = v),
+              ),
+              _switchRow(
+                'Protection des étoiles',
+                'Un pion sur une étoile ne peut pas être capturé',
+                starSafe,
+                (v) => setState(() => starSafe = v),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 height: 50,
                 child: ElevatedButton(
@@ -680,6 +723,8 @@ class OnlineGameRoom extends StatelessWidget {
           key: ValueKey('game_$gameId'),
           numPlayers: (d['maxPlayers'] as num).toInt(),
           pawnCount: (d['pawnCount'] as num).toInt(),
+          doorSafe: d['doorSafe'] != false,
+          starSafe: d['starSafe'] != false,
           online: OnlineSession(
             gameId: gameId,
             uid: user.uid,
