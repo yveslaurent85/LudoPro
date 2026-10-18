@@ -22,6 +22,8 @@ jobs:
       - name: Creer la structure Android
         
         run: flutter create --org com.yveslaurent85 --platforms=android .
+      - name: Configurer Firebase
+        run: cp google-services.json android/app/google-services.json
       - name: Installer les dependances
         run: flutter pub get
 
