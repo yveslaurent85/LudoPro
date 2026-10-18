@@ -287,6 +287,30 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   int numPlayers = 4;
   int pawnCount = 4;
+  bool doorSafe = true; // protection des portes (cases de départ)
+  bool starSafe = true; // protection des étoiles
+
+  Widget _switch(String title, String subtitle, bool value,
+      void Function(bool) onChanged) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      activeColor: const Color(0xFFFFC21A),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
+      ),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
 
   Widget _picker(
     String title,
@@ -386,6 +410,19 @@ class _SetupScreenState extends State<SetupScreen> {
                   pawnCount,
                   (v) => setState(() => pawnCount = v),
                 ),
+                const SizedBox(height: 10),
+                _switch(
+                  'Protection des portes',
+                  'Un pion sur une case de départ ne peut pas être capturé',
+                  doorSafe,
+                  (v) => setState(() => doorSafe = v),
+                ),
+                _switch(
+                  "Protection des étoiles",
+                  'Un pion sur une étoile ne peut pas être capturé',
+                  starSafe,
+                  (v) => setState(() => starSafe = v),
+                ),
                 const Spacer(),
                 SizedBox(
                   width: double.infinity,
@@ -400,6 +437,8 @@ class _SetupScreenState extends State<SetupScreen> {
                         builder: (context) => LudoGame(
                           numPlayers: numPlayers,
                           pawnCount: pawnCount,
+                          doorSafe: doorSafe,
+                          starSafe: starSafe,
                         ),
                       ),
                     ),
@@ -865,11 +904,15 @@ class LudoGame extends StatefulWidget {
     super.key,
     this.numPlayers = 4,
     this.pawnCount = 4,
+    this.doorSafe = true,
+    this.starSafe = true,
     this.online,
   });
 
   final int numPlayers;
   final int pawnCount;
+  final bool doorSafe; // portes (cases de départ) protégées
+  final bool starSafe; // étoiles protégées
   final OnlineSession? online; // null = jeu en présentiel
 
   @override
@@ -879,7 +922,13 @@ class LudoGame extends StatefulWidget {
 class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Cases étoiles (8 cases après chaque départ) et cases sûres (départs + étoiles)
   static const Set<int> safeStars = {8, 21, 34, 47};
-  static const Set<int> safeCells = {0, 8, 13, 21, 26, 34, 39, 47};
+  static const Set<int> doorCells = {0, 13, 26, 39};
+
+  /// Cases protégées, selon les options choisies avant la partie.
+  Set<int> get safeCells => {
+        if (widget.doorSafe) ...doorCells,
+        if (widget.starSafe) ...safeStars,
+      };
 
   final Random random = Random();
   late int numPlayers = widget.numPlayers;
@@ -933,6 +982,27 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _idle = 0;
       _autoPlay();
     }
+  }
+
+  /// Valeur du prochain lancer. À l'arrivée, quand il ne reste qu'un pion
+  /// à finir et qu'un seul lancer suffit, le joueur gagne en 5 lancers
+  /// maximum : le 5e lancer donne exactement le nombre qu'il faut.
+  int _rollValue() {
+    final cp = currentPlayer;
+    final left = players[cp].pawns.where((x) => x != 56).toList();
+    if (left.length == 1 && left.first >= 0) {
+      final remaining = 56 - left.first;
+      if (remaining >= 1 && remaining <= 6) {
+        if (finishThrows[cp] >= maxFinishThrows - 1) {
+          finishThrows[cp] = 0;
+          return remaining;
+        }
+        finishThrows[cp]++;
+        return random.nextInt(6) + 1;
+      }
+    }
+    finishThrows[cp] = 0;
+    return random.nextInt(6) + 1;
   }
 
   void _autoPlay() {
@@ -1003,6 +1073,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
       message = (d['msg'] as String?) ?? message;
       gameOver = d['over'] == true;
+      if (((d['rev'] as num?) ?? 0) > 0) gameStarted = true;
       isRolling = false;
       isMoving = false;
       diceDragging = false;
@@ -1091,6 +1162,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool autoPlay = true; // coup unique joué automatiquement
   bool autoPilot = true; // pilotage automatique si le joueur tarde
   final int autoSeconds = 10; // délai avant le pilotage automatique
+  bool gameStarted = false; // devient vrai au premier lancer de dé
+  final int maxFinishThrows = 5; // à l'arrivée : 5 lancers maximum
+  final List<int> finishThrows = [0, 0, 0, 0];
   Timer? _autoTimer;
   String _lastSig = '';
   int _idle = 0;
@@ -1284,7 +1358,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   Future<void> throwDice(Offset from) async {
     if (!canRollNow) return;
 
-    final newDice = random.nextInt(6) + 1;
+    final newDice = _rollValue();
     final rollToken = ++_token;
 
     const flyingSize = 64.0;
@@ -1297,6 +1371,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
 
     setState(() {
+      gameStarted = true;
       isRolling = true;
       pendingDice = newDice;
       faceSeq = List<int>.generate(6, (i) => i + 1)..shuffle(random);
@@ -1511,7 +1586,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
       for (int i = 0; i < 4; i++) {
         lastRoll[i] = 1;
+        finishThrows[i] = 0;
       }
+      gameStarted = false;
       currentPlayer = 0;
       dice = 1;
       hasRolled = false;
@@ -1697,10 +1774,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ),
       // Bandeau « Victoire » au milieu du plateau
       Positioned(
-        left: 7.5 * c - c * 3.4,
-        top: 7.5 * c - c * 1.3,
-        width: c * 6.8,
-        height: c * 2.6,
+        left: 7.5 * c - c * 4.0,
+        top: 7.5 * c - c * 1.6,
+        width: c * 8.0,
+        height: c * 3.2,
         child: IgnorePointer(
           child: TweenAnimationBuilder<double>(
             tween: Tween<double>(begin: 0.0, end: 1.0),
@@ -1752,6 +1829,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Katika décharge les caisses',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 0.6,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1797,7 +1884,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         track: track,
                         lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
                         starts: players.map((p) => p.start).toList(),
-                        safeStars: safeStars,
+                        safeStars: widget.starSafe ? safeStars : const <int>{},
+                        showDoorStars: widget.doorSafe,
                       ),
                     ),
                   ),
@@ -2491,8 +2579,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          roundButton(Icons.settings, showSettings),
+          if (!gameStarted) ...[
+            const SizedBox(width: 8),
+            roundButton(Icons.settings, showSettings),
+          ],
           const SizedBox(width: 8),
           roundButton(Icons.bar_chart, showStats),
         ],
@@ -2600,6 +2690,7 @@ class BoardPainter extends CustomPainter {
   final List<List<List<int>>> lanes;
   final List<int> starts;
   final Set<int> safeStars;
+  final bool showDoorStars;
 
   BoardPainter({
     required this.colors,
@@ -2608,6 +2699,7 @@ class BoardPainter extends CustomPainter {
     required this.lanes,
     required this.starts,
     required this.safeStars,
+    required this.showDoorStars,
   });
 
   void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
@@ -2688,7 +2780,9 @@ class BoardPainter extends CustomPainter {
       canvas.drawRect(rect, cellStroke);
 
       if (fill != null) {
-        _drawStar(canvas, rect.center, c * 0.3, Paint()..color = Colors.white);
+        if (showDoorStars) {
+          _drawStar(canvas, rect.center, c * 0.3, Paint()..color = Colors.white);
+        }
       } else if (safeStars.contains(idx)) {
         _drawStar(
           canvas,
