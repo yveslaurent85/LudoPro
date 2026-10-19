@@ -1,22 +1,29 @@
-name: ludopro
-description: Jeu Ludo moderne et professionnel
-publish_to: "none"
-version: 0.1.0+1
-
-environment:
-  sdk: ">=3.0.0 <4.0.0"
-
-dependencies:
-url_launcher: ^6.3.0
-  flutter:
-    sdk: flutter
-  firebase_core: ^4.2.0
-  firebase_auth: ^6.1.0
-  cloud_firestore: ^6.0.0
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-
-flutter:
-  uses-material-design: true
+name: Deploy Katika
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: flutter build web --release --base-href "/LudoPro/"
+      - run: cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: github-pages
+    steps:
+      - uses: actions/deploy-pages@v4
