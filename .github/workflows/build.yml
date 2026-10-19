@@ -1,46 +1,19 @@
-name: Build LudoPro APK
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:url_launcher/url_launcher.dart';
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+class BoutonTelechargerApk extends StatelessWidget {
+  const BoutonTelechargerApk({super.key});
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Recuperer le projet
-        uses: actions/checkout@v6
-
-      - name: Installer Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Creer la structure Android
-        
-        run: flutter create --org com.yveslaurent85 --platforms=android .
-      - name: Configurer Firebase
-        run: cp google-services.json android/app/google-services.json
-      - name: Activer le plugin Google Services
-        run: |
-          if [ -f android/settings.gradle.kts ]; then
-            grep -q 'com.google.gms.google-services' android/settings.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
-            grep -q 'com.google.gms.google-services' android/app/build.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
-          else
-            echo "Fichiers Gradle Kotlin non trouves"
-            exit 1
-          fi
-      - name: Installer les dependances
-        run: flutter pub get
-
-      - name: Construire l APK
-        run: flutter build apk --release
-
-      - name: Recuperer l APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: LudoPro-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+  @override
+  Widget build(BuildContext context) {
+    if (!kIsWeb) return const SizedBox.shrink();
+    return ElevatedButton.icon(
+      onPressed: () => launchUrl(
+        Uri.base.resolve('katika.apk'),
+        webOnlyWindowName: '_self',
+      ),
+      icon: const Icon(Icons.android),
+      label: const Text("Télécharger l'application Android"),
+    );
+  }
+}
