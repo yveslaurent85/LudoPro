@@ -25,8 +25,8 @@ jobs:
           channel: stable
 
       - name: Creer la structure Android et Web
-        run: flutter create --org com.yveslaurent85 --platforms=android,web .
-
+        
+        run: flutter create --org com.yveslaurent85 --project-name ludopro --platforms=android,web .
       - name: Configurer Firebase
         run: cp google-services.json android/app/google-services.json
 
