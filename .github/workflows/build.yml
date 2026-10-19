@@ -1,19 +1,29 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:url_launcher/url_launcher.dart';
-
-class BoutonTelechargerApk extends StatelessWidget {
-  const BoutonTelechargerApk({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    if (!kIsWeb) return const SizedBox.shrink();
-    return ElevatedButton.icon(
-      onPressed: () => launchUrl(
-        Uri.base.resolve('katika.apk'),
-        webOnlyWindowName: '_self',
-      ),
-      icon: const Icon(Icons.android),
-      label: const Text("Télécharger l'application Android"),
-    );
-  }
-}
+name: Deploy Katika
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: flutter build web --release --base-href "/LudoPro/"
+      - run: cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: github-pages
+    steps:
+      - uses: actions/deploy-pages@v4
