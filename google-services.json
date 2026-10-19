@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:29829821712:android:efb988dcd1ec4381a4a195",
         "android_client_info": {
-          "package_name": ludopro
+          "package_name": com.yveslaurent85.ludopro
         }
       },
       "oauth_client": [],
