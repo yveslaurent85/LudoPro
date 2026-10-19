@@ -1,29 +1,72 @@
 name: Deploy Katika
+
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: Recuperer le projet
+        uses: actions/checkout@v6
+
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - run: flutter pub get
-      - run: flutter build apk --release
-      - run: flutter build web --release --base-href "/LudoPro/"
-      - run: cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
-      - uses: actions/upload-pages-artifact@v3
+
+      - name: Creer la structure Android et Web
+        run: flutter create --org com.yveslaurent85 --platforms=android,web .
+
+      - name: Configurer Firebase
+        run: cp google-services.json android/app/google-services.json
+
+      - name: Activer le plugin Google Services
+        run: |
+          if [ -f android/settings.gradle.kts ]; then
+            grep -q 'com.google.gms.google-services' android/settings.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
+            grep -q 'com.google.gms.google-services' android/app/build.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
+          else
+            echo "Fichiers Gradle Kotlin non trouves"
+            exit 1
+          fi
+
+      - name: Installer les dependances
+        run: flutter pub get
+
+      - name: Construire l APK
+        run: flutter build apk --release
+
+      - name: Construire la version web
+        run: flutter build web --release --base-href "/LudoPro/"
+
+      - name: Ajouter l APK au site
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
+
+      - name: Garder aussi l APK en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LudoPro-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Preparer le site
+        uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
     environment: github-pages
     steps:
-      - uses: actions/deploy-pages@v4
+      - name: Publier sur GitHub Pages
+        uses: actions/deploy-pages@v4
