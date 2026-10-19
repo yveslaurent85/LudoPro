@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'dart:math';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+
+import 'online.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -32,7 +36,7 @@ class LudoProApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'LudoPro',
+      title: 'Katika',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -216,11 +220,11 @@ class HomeScreen extends StatelessWidget {
                   text: TextSpan(
                     children: [
                       TextSpan(
-                        text: 'Ludo',
+                        text: 'Kati',
                         style: _logoStyle(Colors.white, 52),
                       ),
                       TextSpan(
-                        text: 'Pro',
+                        text: 'ka',
                         style: _logoStyle(const Color(0xFFFFC21A), 52),
                       ),
                     ],
@@ -228,11 +232,11 @@ class HomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Jouez • Gagnez • Amusez-vous !',
+                  'Ludo et Dés',
                   style: TextStyle(
                     color: Colors.white70,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
+                    fontSize: 11,
+                    letterSpacing: 1.2,
                   ),
                 ),
                 const Spacer(),
@@ -283,6 +287,30 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   int numPlayers = 4;
   int pawnCount = 4;
+  bool doorSafe = true; // protection des portes (cases de départ)
+  bool starSafe = true; // protection des étoiles
+
+  Widget _switch(String title, String subtitle, bool value,
+      void Function(bool) onChanged) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      activeColor: const Color(0xFFFFC21A),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
+      ),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
 
   Widget _picker(
     String title,
@@ -382,6 +410,19 @@ class _SetupScreenState extends State<SetupScreen> {
                   pawnCount,
                   (v) => setState(() => pawnCount = v),
                 ),
+                const SizedBox(height: 10),
+                _switch(
+                  'Protection des portes',
+                  'Un pion sur une case de départ ne peut pas être capturé',
+                  doorSafe,
+                  (v) => setState(() => doorSafe = v),
+                ),
+                _switch(
+                  "Protection des étoiles",
+                  'Un pion sur une étoile ne peut pas être capturé',
+                  starSafe,
+                  (v) => setState(() => starSafe = v),
+                ),
                 const Spacer(),
                 SizedBox(
                   width: double.infinity,
@@ -396,6 +437,8 @@ class _SetupScreenState extends State<SetupScreen> {
                         builder: (context) => LudoGame(
                           numPlayers: numPlayers,
                           pawnCount: pawnCount,
+                          doorSafe: doorSafe,
+                          starSafe: starSafe,
                         ),
                       ),
                     ),
@@ -701,13 +744,16 @@ class _OnlineScreenState extends State<OnlineScreen> {
         ),
       ),
       const SizedBox(height: 16),
-      _banner(
-        Icons.hourglass_top,
-        const Color(0xFFFFC21A),
-        'Ton compte est prêt. Les parties à distance (salles et invitations) '
-        'arrivent à la prochaine étape.',
+      const SizedBox(height: 6),
+      _primaryButton(
+        'Jouer en ligne',
+        () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (context) => const OnlineLobbyScreen(),
+          ),
+        ),
       ),
-      const SizedBox(height: 22),
+      const SizedBox(height: 12),
       _primaryButton('Se déconnecter', _signOut),
     ];
   }
@@ -854,10 +900,20 @@ class _OnlineScreenState extends State<OnlineScreen> {
 // ----------------------------------------------------------------------
 
 class LudoGame extends StatefulWidget {
-  const LudoGame({super.key, this.numPlayers = 4, this.pawnCount = 4});
+  const LudoGame({
+    super.key,
+    this.numPlayers = 4,
+    this.pawnCount = 4,
+    this.doorSafe = true,
+    this.starSafe = true,
+    this.online,
+  });
 
   final int numPlayers;
   final int pawnCount;
+  final bool doorSafe; // portes (cases de départ) protégées
+  final bool starSafe; // étoiles protégées
+  final OnlineSession? online; // null = jeu en présentiel
 
   @override
   State<LudoGame> createState() => _LudoGameState();
@@ -866,11 +922,186 @@ class LudoGame extends StatefulWidget {
 class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Cases étoiles (8 cases après chaque départ) et cases sûres (départs + étoiles)
   static const Set<int> safeStars = {8, 21, 34, 47};
-  static const Set<int> safeCells = {0, 8, 13, 21, 26, 34, 39, 47};
+  static const Set<int> doorCells = {0, 13, 26, 39};
+
+  /// Cases protégées, selon les options choisies avant la partie.
+  Set<int> get safeCells => {
+        if (widget.doorSafe) ...doorCells,
+        if (widget.starSafe) ...safeStars,
+      };
 
   final Random random = Random();
   late int numPlayers = widget.numPlayers;
   late int pawnCount = widget.pawnCount;
+
+  // --- Jeu en ligne ---------------------------------------------------
+  bool get isOnline => widget.online != null;
+  int get _myColor => isOnline ? activeIdx[widget.online!.mySeat] : -1;
+  bool get _isMyTurn => !isOnline || currentPlayer == _myColor;
+
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
+  bool _firstSnap = true;
+
+  /// Nom affiché pour une couleur (pseudo en ligne, « Joueur Rouge » sinon).
+  String nameOf(int colorIndex) {
+    final o = widget.online;
+    if (o != null) {
+      final seat = activeIdx.indexOf(colorIndex);
+      if (seat >= 0 && seat < o.names.length) return o.names[seat];
+    }
+    return 'Joueur ${players[colorIndex].display}';
+  }
+
+  /// Couleur du gagnant (null tant que la partie n'est pas finie).
+  int? get winnerColor {
+    if (!gameOver) return null;
+    for (final i in activeIdx) {
+      final pw = players[i].pawns;
+      if (pw.isNotEmpty && pw.every((p) => p == 56)) return i;
+    }
+    return null;
+  }
+
+  /// Appelé chaque seconde : si le joueur ne fait rien pendant
+  /// [autoSeconds] secondes, le jeu joue à sa place.
+  void _tickAutopilot() {
+    if (!mounted || !autoPilot || gameOver) {
+      _idle = 0;
+      return;
+    }
+    final busyNow = isRolling || isMoving || flightPhase != 0 || diceDragging;
+    final sig = '$currentPlayer|$hasRolled|'
+        '${players.map((p) => p.pawns.join(',')).join(';')}';
+    if (busyNow || sig != _lastSig || !_isMyTurn) {
+      _lastSig = sig;
+      _idle = 0;
+      return;
+    }
+    _idle++;
+    if (_idle >= autoSeconds) {
+      _idle = 0;
+      _autoPlay();
+    }
+  }
+
+  /// Valeur du prochain lancer. À l'arrivée, quand il ne reste qu'un pion
+  /// à finir et qu'un seul lancer suffit, le joueur gagne en 5 lancers
+  /// maximum : le 5e lancer donne exactement le nombre qu'il faut.
+  int _rollValue() {
+    final cp = currentPlayer;
+    final left = players[cp].pawns.where((x) => x != 56).toList();
+    if (left.length == 1 && left.first >= 0) {
+      final remaining = 56 - left.first;
+      if (remaining >= 1 && remaining <= 6) {
+        if (finishThrows[cp] >= maxFinishThrows - 1) {
+          finishThrows[cp] = 0;
+          return remaining;
+        }
+        finishThrows[cp]++;
+        return random.nextInt(6) + 1;
+      }
+    }
+    finishThrows[cp] = 0;
+    return random.nextInt(6) + 1;
+  }
+
+  void _autoPlay() {
+    if (!_isMyTurn || gameOver) return;
+
+    if (canRollNow) {
+      // Le dé n'a pas été lancé : on le lance
+      throwDice(_toRoot(diceKeys[currentPlayer]));
+      return;
+    }
+
+    if (hasRolled && !isRolling && !isMoving && flightPhase == 0) {
+      final legal = legalMoves();
+      if (legal.isEmpty) return;
+
+      // Priorité : capture > arrivée > sortir un pion > pion le plus avancé
+      int score(int i) {
+        final pos = players[currentPlayer].pawns[i];
+        if (moveCaptures(i)) return 1000;
+        if (pos != -1 && pos + dice == 56) return 500;
+        if (pos == -1) return 300;
+        return pos;
+      }
+
+      var best = legal.first;
+      for (final i in legal) {
+        if (score(i) > score(best)) best = i;
+      }
+      setState(() => message = 'Pilotage automatique : coup joué pour toi.');
+      movePawn(currentPlayer, best);
+    }
+  }
+
+  void _listenOnline() {
+    final o = widget.online;
+    if (o == null || !firebaseReady) return;
+    _sub = FirebaseFirestore.instance
+        .collection('games')
+        .doc(o.gameId)
+        .snapshots()
+        .listen((snap) {
+      final d = snap.data();
+      if (d == null || !mounted) return;
+      if (snap.metadata.hasPendingWrites) return;
+      final first = _firstSnap;
+      _firstSnap = false;
+      if (!first && d['writer'] == o.uid) return; // c'est mon propre coup
+      _applyRemote(d);
+    });
+  }
+
+  void _applyRemote(Map<String, dynamic> d) {
+    setState(() {
+      for (int i = 0; i < 4; i++) {
+        final l = d['p$i'];
+        if (l is List) {
+          players[i].pawns = l.map((e) => (e as num).toInt()).toList();
+        }
+      }
+      currentPlayer = (d['cur'] as num?)?.toInt() ?? currentPlayer;
+      hasRolled = d['hasRolled'] == true;
+      dice = (d['dice'] as num?)?.toInt() ?? dice;
+      final lr = d['lastRoll'];
+      if (lr is List && lr.length == 4) {
+        for (int i = 0; i < 4; i++) {
+          lastRoll[i] = (lr[i] as num).toInt();
+        }
+      }
+      message = (d['msg'] as String?) ?? message;
+      gameOver = d['over'] == true;
+      if (((d['rev'] as num?) ?? 0) > 0) gameStarted = true;
+      isRolling = false;
+      isMoving = false;
+      diceDragging = false;
+      flightPhase = 0;
+    });
+  }
+
+  /// Envoie l'état du plateau aux autres joueurs.
+  Future<void> _pushState() async {
+    final o = widget.online;
+    if (o == null || !firebaseReady) return;
+    try {
+      await FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
+        for (int i = 0; i < 4; i++) 'p$i': players[i].pawns,
+        'cur': currentPlayer,
+        'hasRolled': hasRolled,
+        'dice': dice,
+        'lastRoll': lastRoll,
+        'msg': message,
+        'over': gameOver,
+        'writer': o.uid,
+        'rev': FieldValue.increment(1),
+        if (gameOver) 'status': 'finished',
+      });
+    } catch (_) {
+      // Connexion perdue : le prochain coup renverra l'état complet.
+    }
+  }
 
   /// Joueurs qui participent : 2 = Rouge + Bleu (face à face),
   /// 3 = Rouge + Vert + Bleu, 4 = tous.
@@ -929,6 +1160,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool soundOn = true;
   bool forcedCapture = true; // capture obligatoire
   bool autoPlay = true; // coup unique joué automatiquement
+  bool autoPilot = true; // pilotage automatique si le joueur tarde
+  final int autoSeconds = 10; // délai avant le pilotage automatique
+  bool gameStarted = false; // devient vrai au premier lancer de dé
+  final int maxFinishThrows = 5; // à l'arrivée : 5 lancers maximum
+  final List<int> finishThrows = [0, 0, 0, 0];
+  Timer? _autoTimer;
+  String _lastSig = '';
+  int _idle = 0;
   int stepMs = 170; // vitesse des pions (ms par case)
 
   // Dé : glissement et lancer
@@ -984,6 +1223,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     for (final p in players) {
       p.pawns = List<int>.filled(pawnCount, -1);
     }
+    _listenOnline();
+    _autoTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _tickAutopilot(),
+    );
     _pulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 650),
@@ -996,6 +1240,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _sub?.cancel();
+    _autoTimer?.cancel();
     _pulse.dispose();
     _flight.dispose();
     sfx.dispose();
@@ -1017,7 +1263,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   bool get canRollNow =>
-      !hasRolled && !gameOver && !isRolling && !isMoving && flightPhase == 0;
+      _isMyTurn &&
+      !hasRolled &&
+      !gameOver &&
+      !isRolling &&
+      !isMoving &&
+      flightPhase == 0;
 
   bool canPawnMove(int position) {
     if (position == -1) return dice == 6;
@@ -1107,7 +1358,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   Future<void> throwDice(Offset from) async {
     if (!canRollNow) return;
 
-    final newDice = random.nextInt(6) + 1;
+    final newDice = _rollValue();
     final rollToken = ++_token;
 
     const flyingSize = 64.0;
@@ -1120,6 +1371,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
 
     setState(() {
+      gameStarted = true;
       isRolling = true;
       pendingDice = newDice;
       faceSeq = List<int>.generate(6, (i) => i + 1)..shuffle(random);
@@ -1165,6 +1417,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         message = 'Touche un pion pour le déplacer.';
       }
     });
+    _pushState();
 
     await Future.delayed(const Duration(milliseconds: 650));
     if (!mounted || rollToken != _token) return;
@@ -1200,7 +1453,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     message = 'Touche ton dé ou glisse-le pour le lancer !';
   }
 
-  void nextTurn() => setState(_advanceTurn);
+  void nextTurn() {
+    setState(_advanceTurn);
+    _pushState();
+  }
 
   Future<void> movePawn(int playerIndex, int pawnIndex) async {
     if (!hasRolled ||
@@ -1209,7 +1465,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         isMoving ||
         flightPhase != 0 ||
         diceDragging ||
-        playerIndex != currentPlayer) {
+        playerIndex != currentPlayer ||
+        !_isMyTurn) {
       return;
     }
 
@@ -1300,7 +1557,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
       if (won) {
         gameOver = true;
-        message = '🏆 Joueur ${player.display} remporte la partie !';
+        message = '🏆 ${nameOf(playerIndex)} remporte la partie !';
       } else if (dice == 6 || captured || newPosition == 56) {
         hasRolled = false;
         message = captured
@@ -1312,9 +1569,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         _advanceTurn();
       }
     });
+    _pushState();
   }
 
   void restartGame() {
+    if (isOnline) {
+      setState(() => message = 'Pas de nouvelle partie en ligne.');
+      return;
+    }
     _token++; // annule les animations en attente
     _flight.stop();
     _flight.value = 0;
@@ -1324,7 +1586,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
       for (int i = 0; i < 4; i++) {
         lastRoll[i] = 1;
+        finishThrows[i] = 0;
       }
+      gameStarted = false;
       currentPlayer = 0;
       dice = 1;
       hasRolled = false;
@@ -1410,7 +1674,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // ---------------------------------------------------------------------
 
   List<Widget> buildPawns(double c) {
-    final legal = (hasRolled &&
+    final legal = (_isMyTurn &&
+            hasRolled &&
             !isRolling &&
             !isMoving &&
             !gameOver &&
@@ -1477,6 +1742,114 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }).toList();
   }
 
+  /// Couronne dans la base du gagnant + « Victoire » au centre du plateau.
+  List<Widget> buildVictory(double c) {
+    final w = winnerColor;
+    if (w == null) return const <Widget>[];
+    final winner = players[w];
+
+    final rowStart = w < 2 ? 0 : 9;
+    final colStart = (w == 0 || w == 3) ? 0 : 9;
+    final crownBox = c * 3.2;
+
+    return [
+      // Couronne dans la case (base) du gagnant
+      Positioned(
+        left: (colStart + 3) * c - crownBox / 2,
+        top: (rowStart + 3) * c - crownBox / 2,
+        width: crownBox,
+        height: crownBox,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.2, end: 1.0),
+            duration: const Duration(milliseconds: 700),
+            curve: Curves.elasticOut,
+            builder: (context, value, child) =>
+                Transform.scale(scale: value, child: child),
+            child: Center(
+              child: Text('👑', style: TextStyle(fontSize: c * 2.3)),
+            ),
+          ),
+        ),
+      ),
+      // Bandeau « Victoire » au milieu du plateau
+      Positioned(
+        left: 7.5 * c - c * 4.0,
+        top: 7.5 * c - c * 1.6,
+        width: c * 8.0,
+        height: c * 3.2,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutBack,
+            builder: (context, value, child) =>
+                Transform.scale(scale: value, child: child),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(c * 0.7),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [shade(winner.color, 0.1), shade(winner.color, -0.15)],
+                ),
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.45),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'VICTOIRE',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 1.15,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2,
+                          shadows: const [
+                            Shadow(color: Colors.black54, blurRadius: 4),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        'Joueur ${winner.display}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 0.8,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Katika décharge les caisses',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 0.6,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   Widget buildBoard(double size) {
     return Container(
       key: boardKey,
@@ -1511,11 +1884,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         track: track,
                         lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
                         starts: players.map((p) => p.start).toList(),
-                        safeStars: safeStars,
+                        safeStars: widget.starSafe ? safeStars : const <int>{},
+                        showDoorStars: widget.doorSafe,
                       ),
                     ),
                   ),
                   ...buildPawns(c),
+                  ...buildVictory(c),
                 ],
               ),
             );
@@ -1584,9 +1959,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 RichText(
                   text: TextSpan(
                     children: [
-                      TextSpan(text: 'Ludo', style: logoStyle(Colors.white)),
+                      TextSpan(text: 'Kati', style: logoStyle(Colors.white)),
                       TextSpan(
-                        text: 'Pro',
+                        text: 'ka',
                         style: logoStyle(const Color(0xFFFFC21A)),
                       ),
                     ],
@@ -1594,11 +1969,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 2),
                 const Text(
-                  'Jouez • Gagnez • Amusez-vous !',
+                  'Ludo et Dés',
                   style: TextStyle(
                     color: Colors.white70,
-                    fontSize: 10,
-                    fontStyle: FontStyle.italic,
+                    fontSize: 9,
+                    letterSpacing: 1.0,
                   ),
                 ),
               ],
@@ -1624,8 +1999,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Mode : Présentiel',
+                    Text(
+                      isOnline ? 'Mode : En ligne' : 'Mode : Présentiel',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 9,
@@ -1713,7 +2088,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           avatarOnRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Text(
-          'Joueur ${player.display}',
+          nameOf(index),
           style: const TextStyle(
             color: Colors.white,
             fontSize: 12,
@@ -1971,6 +2346,23 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       value: autoPlay,
                       onChanged: (value) => update(() => autoPlay = value),
                     ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Pilotage automatique',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        'Si tu ne joues pas pendant $autoSeconds secondes, '
+                        'le jeu joue à ta place',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      value: autoPilot,
+                      onChanged: (value) => update(() => autoPilot = value),
+                    ),
                     const SizedBox(height: 4),
                     const Text(
                       'Vitesse des pions',
@@ -2002,10 +2394,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           ChoiceChip(
                             label: Text('$n'),
                             selected: pawnCount == n,
-                            onSelected: (_) {
-                              update(() => pawnCount = n);
-                              restartGame();
-                            },
+                            onSelected: isOnline
+                                ? null
+                                : (_) {
+                                    update(() => pawnCount = n);
+                                    restartGame();
+                                  },
                           ),
                       ],
                     ),
@@ -2022,10 +2416,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           ChoiceChip(
                             label: Text('$n'),
                             selected: numPlayers == n,
-                            onSelected: (_) {
-                              update(() => numPlayers = n);
-                              restartGame();
-                            },
+                            onSelected: isOnline
+                                ? null
+                                : (_) {
+                                    update(() => numPlayers = n);
+                                    restartGame();
+                                  },
                           ),
                       ],
                     ),
@@ -2035,8 +2431,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       style: TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
-                      'Mode : en présentiel (tous les joueurs sur le même plateau)',
+                    Text(
+                      isOnline
+                          ? 'Mode : en ligne'
+                          : 'Mode : en présentiel (tous les joueurs sur le même plateau)',
                       style: TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                     const SizedBox(height: 12),
@@ -2128,4 +2526,480 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
       child: Row(
-        c
+        children: [
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A1B66),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white24, width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  const Text('👑', style: TextStyle(fontSize: 22)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        RichText(
+                          text: TextSpan(
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            children: [
+                              const TextSpan(text: 'Au tour de : '),
+                              TextSpan(
+                                text: nameOf(currentPlayer),
+                                style: TextStyle(
+                                  color: shade(player.color, 0.12),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          message,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (!gameStarted) ...[
+            const SizedBox(width: 8),
+            roundButton(Icons.settings, showSettings),
+          ],
+          const SizedBox(width: 8),
+          roundButton(Icons.bar_chart, showStats),
+        ],
+      ),
+    );
+  }
+
+  Widget badgesRow(int left, int right) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      child: Row(
+        children: [
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: playerBadge(left, avatarOnRight: false),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: playerBadge(right, avatarOnRight: true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget diceRow(int left, int right) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [diceSlot(left), diceSlot(right)],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        key: rootKey,
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFF1F5BFF),
+                    Color(0xFF0B2FA6),
+                    Color(0xFF061A66),
+                  ],
+                ),
+              ),
+              child: SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final boardSize = min(
+                      constraints.maxWidth - 24,
+                      constraints.maxHeight - 440,
+                    ).clamp(180.0, 700.0).toDouble();
+
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        buildHeader(),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [badgesRow(0, 1), diceRow(0, 1)],
+                        ),
+                        buildBoard(boardSize),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [diceRow(3, 2), badgesRow(3, 2)],
+                        ),
+                        buildStatusBar(),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+          buildFlyingDie(),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------
+// Dessin du plateau
+// ----------------------------------------------------------------------
+
+class BoardPainter extends CustomPainter {
+  final List<Color> colors;
+  final List<Color> lights;
+  final List<List<int>> track;
+  final List<List<List<int>>> lanes;
+  final List<int> starts;
+  final Set<int> safeStars;
+  final bool showDoorStars;
+
+  BoardPainter({
+    required this.colors,
+    required this.lights,
+    required this.track,
+    required this.lanes,
+    required this.starts,
+    required this.safeStars,
+    required this.showDoorStars,
+  });
+
+  void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
+    final path = Path();
+    for (int i = 0; i < 10; i++) {
+      final r = i.isEven ? radius : radius * 0.45;
+      final angle = -pi / 2 + i * pi / 5;
+      final x = center.dx + r * cos(angle);
+      final y = center.dy + r * sin(angle);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.width / 15;
+
+    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
+
+    // Les 4 bases colorées
+    for (int p = 0; p < 4; p++) {
+      final rowStart = p < 2 ? 0 : 9;
+      final colStart = (p == 0 || p == 3) ? 0 : 9;
+      final rect = Rect.fromLTWH(colStart * c, rowStart * c, 6 * c, 6 * c);
+
+      final outer = RRect.fromRectAndRadius(rect, Radius.circular(c * 0.6));
+      canvas.drawRRect(
+        outer,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              shade(colors[p], 0.12),
+              colors[p],
+              shade(colors[p], -0.12),
+            ],
+          ).createShader(rect),
+      );
+
+      final inner = RRect.fromRectAndRadius(
+        rect.deflate(c * 0.6),
+        Radius.circular(c * 0.45),
+      );
+      canvas.drawRRect(
+        inner.shift(Offset(0, c * 0.08)),
+        Paint()..color = Colors.black.withOpacity(0.2),
+      );
+      canvas.drawRRect(inner, Paint()..color = lights[p]);
+    }
+
+    final cellStroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = const Color(0xFFB8C2DD);
+    final laneStroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = Colors.white.withOpacity(0.55);
+
+    // Circuit commun
+    for (int idx = 0; idx < track.length; idx++) {
+      final cell = track[idx];
+      final rect = Rect.fromLTWH(cell[1] * c, cell[0] * c, c, c);
+
+      Color? fill;
+      for (int p = 0; p < 4; p++) {
+        if (starts[p] == idx) fill = colors[p];
+      }
+
+      canvas.drawRect(rect, Paint()..color = fill ?? Colors.white);
+      canvas.drawRect(rect, cellStroke);
+
+      if (fill != null) {
+        if (showDoorStars) {
+          _drawStar(canvas, rect.center, c * 0.3, Paint()..color = Colors.white);
+        }
+      } else if (safeStars.contains(idx)) {
+        _drawStar(
+          canvas,
+          rect.center,
+          c * 0.34,
+          Paint()..color = const Color(0xFFFFB300),
+        );
+      }
+    }
+
+    // Couloirs d'arrivée
+    for (int p = 0; p < 4; p++) {
+      for (final cell in lanes[p]) {
+        final rect = Rect.fromLTWH(cell[1] * c, cell[0] * c, c, c);
+        canvas.drawRect(rect, Paint()..color = colors[p]);
+        canvas.drawRect(rect, laneStroke);
+      }
+    }
+
+    // Centre : 4 triangles de couleur
+    final cx = 7.5 * c;
+    final cy = 7.5 * c;
+    final l = 6 * c;
+    final r = 9 * c;
+
+    void triangle(Color color, Offset a, Offset b) {
+      final path = Path()
+        ..moveTo(a.dx, a.dy)
+        ..lineTo(b.dx, b.dy)
+        ..lineTo(cx, cy)
+        ..close();
+      canvas.drawPath(path, Paint()..color = color);
+    }
+
+    triangle(colors[0], Offset(l, l), Offset(l, r)); // gauche
+    triangle(colors[1], Offset(l, l), Offset(r, l)); // haut
+    triangle(colors[2], Offset(r, l), Offset(r, r)); // droite
+    triangle(colors[3], Offset(l, r), Offset(r, r)); // bas
+
+    final lines = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white70;
+    canvas.drawLine(Offset(l, l), Offset(r, r), lines);
+    canvas.drawLine(Offset(r, l), Offset(l, r), lines);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ----------------------------------------------------------------------
+// Dessin d'un pion en relief
+// ----------------------------------------------------------------------
+
+class PawnPainter extends CustomPainter {
+  final Color color;
+  final bool highlight;
+
+  PawnPainter({required this.color, required this.highlight});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Ombre au sol
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(w * 0.5, h * 0.86),
+        width: w * 0.9,
+        height: h * 0.16,
+      ),
+      Paint()..color = Colors.black.withOpacity(0.28),
+    );
+
+    // Anneau lumineux : ce pion peut jouer
+    if (highlight) {
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(w * 0.5, h * 0.86),
+          width: w * 1.1,
+          height: h * 0.22,
+        ),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2
+          ..color = Colors.white.withOpacity(0.9),
+      );
+    }
+
+    // Socle
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(w * 0.5, h * 0.8),
+        width: w * 0.84,
+        height: h * 0.2,
+      ),
+      Paint()..color = shade(color, -0.22),
+    );
+
+    // Corps
+    final body = Path()
+      ..moveTo(w * 0.14, h * 0.8)
+      ..quadraticBezierTo(w * 0.3, h * 0.72, w * 0.4, h * 0.5)
+      ..lineTo(w * 0.6, h * 0.5)
+      ..quadraticBezierTo(w * 0.7, h * 0.72, w * 0.86, h * 0.8)
+      ..quadraticBezierTo(w * 0.5, h * 0.9, w * 0.14, h * 0.8)
+      ..close();
+    final bodyRect = Rect.fromLTWH(0, h * 0.5, w, h * 0.4);
+    canvas.drawPath(
+      body,
+      Paint()
+        ..shader = LinearGradient(
+          colors: [
+            shade(color, -0.15),
+            shade(color, 0.12),
+            shade(color, -0.2),
+          ],
+          stops: const [0.0, 0.45, 1.0],
+        ).createShader(bodyRect),
+    );
+
+    // Tête
+    final headCenter = Offset(w * 0.5, h * 0.33);
+    final headRadius = w * 0.27;
+    canvas.drawCircle(
+      headCenter,
+      headRadius,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-0.35, -0.4),
+          radius: 0.9,
+          colors: [shade(color, 0.3), color, shade(color, -0.2)],
+          stops: const [0.0, 0.5, 1.0],
+        ).createShader(Rect.fromCircle(center: headCenter, radius: headRadius)),
+    );
+    canvas.drawCircle(
+      headCenter,
+      headRadius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.8
+        ..color = shade(color, -0.3),
+    );
+
+    // Reflet
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(w * 0.42, h * 0.26),
+        width: w * 0.16,
+        height: h * 0.1,
+      ),
+      Paint()..color = Colors.white.withOpacity(0.55),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant PawnPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.highlight != highlight;
+}
+
+// ----------------------------------------------------------------------
+// Dessin du dé
+// ----------------------------------------------------------------------
+
+class DicePainter extends CustomPainter {
+  final int value;
+
+  DicePainter(this.value);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rr = RRect.fromRectAndRadius(
+      rect.deflate(2),
+      Radius.circular(size.width * 0.2),
+    );
+
+    canvas.drawRRect(
+      rr,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white, Color(0xFFD6DCEB)],
+        ).createShader(rect),
+    );
+    canvas.drawRRect(
+      rr,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = const Color(0xFFB0B8D0),
+    );
+
+    const patterns = <int, List<int>>{
+      1: [4],
+      2: [0, 8],
+      3: [0, 4, 8],
+      4: [0, 2, 6, 8],
+      5: [0, 2, 4, 6, 8],
+      6: [0, 2, 3, 5, 6, 8],
+    };
+
+    for (final i in patterns[value] ?? const <int>[]) {
+      final dx = (0.25 + (i % 3) * 0.25) * size.width;
+      final dy = (0.25 + (i ~/ 3) * 0.25) * size.height;
+      canvas.drawCircle(
+        Offset(dx, dy),
+        size.width * 0.075,
+        Paint()..color = const Color(0xFF1A1F3A),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant DicePainter oldDelegate) =>
+      oldDelegate.value != value;
+}
