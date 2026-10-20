@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
+import 'accounts.dart';
 import 'online.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
@@ -270,7 +271,7 @@ class HomeScreen extends StatelessWidget {
                     color: const Color(0xFF22B14C),
                     icon: Icons.groups,
                     title: 'En présentiel',
-                    subtitle: 'Connecte-toi, puis jouez sur le même plateau',
+                    subtitle: 'Chaque joueur se connecte à son compte',
                     onTap: () => _openLocal(context),
                   ),
                   const SizedBox(height: 14),
@@ -297,7 +298,7 @@ class HomeScreen extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
-// Préparation de la partie : joueurs (pseudo + avatar) et pions
+// Préparation de la partie : joueurs (compte + avatar) et pions
 // ----------------------------------------------------------------------
 
 class SetupScreen extends StatefulWidget {
@@ -343,6 +344,13 @@ class _SetupScreenState extends State<SetupScreen> {
     Icons.person_outline,
   ];
 
+  /// Comptes connectés, indexés par couleur (0 = Rouge = joueur principal).
+  final Map<int, PlayerAccount> accounts = {};
+
+  /// Tous les joueurs de la partie sont connectés (ou Firebase absent).
+  bool get allConnected =>
+      !firebaseReady || seats.every((s) => accounts.containsKey(s));
+
   /// Couleurs utilisées selon le nombre de joueurs (comme dans LudoGame).
   List<int> get seats =>
       numPlayers == 2 ? [0, 2] : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
@@ -351,10 +359,10 @@ class _SetupScreenState extends State<SetupScreen> {
   void initState() {
     super.initState();
     nameCtrls = List.generate(4, (_) => TextEditingController());
-    // Le premier joueur reprend le pseudo du compte connecté.
+    // Le premier joueur est le compte déjà connecté.
     if (firebaseReady) {
-      final n = FirebaseAuth.instance.currentUser?.displayName;
-      if (n != null && n.isNotEmpty) nameCtrls[0].text = n;
+      final u = FirebaseAuth.instance.currentUser;
+      if (u != null) _loadHost(u);
     }
   }
 
@@ -364,6 +372,42 @@ class _SetupScreenState extends State<SetupScreen> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _loadHost(User u) async {
+    int bal = 0;
+    try {
+      bal = await Wallet.ensure(FirebaseFirestore.instance, u);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      accounts[0] = PlayerAccount(
+        uid: u.uid,
+        name: (u.displayName != null && u.displayName!.isNotEmpty)
+            ? u.displayName!
+            : (u.email ?? 'Joueur'),
+        email: u.email ?? '',
+        balance: bal,
+      );
+    });
+  }
+
+  Future<void> _connect(int color) async {
+    final acc = await showPlayerLogin(
+      context,
+      colorName: colorNames[color],
+      color: colorList[color],
+    );
+    if (acc == null || !mounted) return;
+    final already = accounts.entries
+        .any((e) => e.key != color && e.value.uid == acc.uid);
+    if (already) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ce compte joue déjà dans la partie.')),
+      );
+      return;
+    }
+    setState(() => accounts[color] = acc);
   }
 
   Future<void> _pickAvatar(int color) async {
@@ -411,6 +455,7 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   Widget _playerRow(int color) {
+    final acc = accounts[color];
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -430,32 +475,79 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: TextField(
-              controller: nameCtrls[color],
-              maxLength: 12,
-              style: const TextStyle(color: Colors.white),
-              cursorColor: const Color(0xFFFFC21A),
-              decoration: InputDecoration(
-                counterText: '',
-                isDense: true,
-                hintText: 'Joueur ${colorNames[color]}',
-                hintStyle: const TextStyle(color: Colors.white54),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.12),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide:
-                      const BorderSide(color: Color(0xFFFFC21A), width: 2),
-                ),
-              ),
-            ),
+            child: acc != null
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      color: Colors.white.withOpacity(0.12),
+                      border: Border.all(color: colorList[color], width: 1.5),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          acc.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          '💰 ${Wallet.format(acc.balance)}',
+                          style: const TextStyle(
+                            color: Color(0xFFFFE082),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : (firebaseReady
+                    ? OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(color: colorList[color], width: 2),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () => _connect(color),
+                        icon: const Icon(Icons.login),
+                        label: Text(
+                            'Joueur ${colorNames[color]} : se connecter'),
+                      )
+                    : TextField(
+                        controller: nameCtrls[color],
+                        maxLength: 12,
+                        style: const TextStyle(color: Colors.white),
+                        cursorColor: const Color(0xFFFFC21A),
+                        decoration: InputDecoration(
+                          counterText: '',
+                          isDense: true,
+                          hintText: 'Joueur ${colorNames[color]}',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.12),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: const BorderSide(
+                                color: Color(0xFFFFC21A), width: 2),
+                          ),
+                        ),
+                      )),
           ),
+          if (acc != null && color != 0)
+            IconButton(
+              tooltip: 'Changer de compte',
+              onPressed: () => setState(() => accounts.remove(color)),
+              icon: const Icon(Icons.logout, color: Colors.white70),
+            ),
         ],
       ),
     );
@@ -582,9 +674,11 @@ class _SetupScreenState extends State<SetupScreen> {
                   (v) => setState(() => pawnCount = v),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Joueurs (touche le rond pour changer d\'avatar)',
-                  style: TextStyle(
+                Text(
+                  firebaseReady
+                      ? 'Joueurs (chacun se connecte à son compte)'
+                      : 'Joueurs (touche le rond pour changer d\'avatar)',
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
@@ -614,23 +708,29 @@ class _SetupScreenState extends State<SetupScreen> {
                       backgroundColor: const Color(0xFF22B14C),
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => LudoGame(
-                          numPlayers: numPlayers,
-                          pawnCount: pawnCount,
-                          doorSafe: doorSafe,
-                          starSafe: starSafe,
-                          names: [
-                            for (int i = 0; i < 4; i++) nameCtrls[i].text.trim(),
-                          ],
-                          avatars: List<IconData>.from(avatars),
-                        ),
-                      ),
-                    ),
-                    child: const Text(
-                      'Lancer la partie',
-                      style: TextStyle(
+                    onPressed: !allConnected
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (context) => LudoGame(
+                                  numPlayers: numPlayers,
+                                  pawnCount: pawnCount,
+                                  doorSafe: doorSafe,
+                                  starSafe: starSafe,
+                                  names: [
+                                    for (int i = 0; i < 4; i++)
+                                      accounts[i]?.name ??
+                                          nameCtrls[i].text.trim(),
+                                  ],
+                                  avatars: List<IconData>.from(avatars),
+                                ),
+                              ),
+                            ),
+                    child: Text(
+                      allConnected
+                          ? 'Lancer la partie'
+                          : 'Tous les joueurs doivent se connecter',
+                      style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
                       ),
@@ -751,6 +851,16 @@ class _OnlineScreenState extends State<OnlineScreen> {
         );
         await cred.user?.updateDisplayName(pseudo);
         await cred.user?.reload();
+        // Création du compte d'argent (solde 0).
+        if (cred.user != null) {
+          try {
+            await Wallet.ensure(
+              FirebaseFirestore.instance,
+              cred.user!,
+              pseudo: pseudo,
+            );
+          } catch (_) {}
+        }
       } else {
         await auth.signInWithEmailAndPassword(
           email: email,
@@ -940,8 +1050,17 @@ class _OnlineScreenState extends State<OnlineScreen> {
           ],
         ),
       ),
+      const SizedBox(height: 12),
+      StreamBuilder<int>(
+        stream: Wallet.watch(current.uid),
+        builder: (context, snap) => _banner(
+          Icons.account_balance_wallet,
+          const Color(0xFFFFC21A),
+          'Mon compte : ${Wallet.format(snap.data ?? 0)}\n'
+          'La recharge sera disponible bientôt.',
+        ),
+      ),
       const SizedBox(height: 16),
-      const SizedBox(height: 6),
       _primaryButton(
         'Jouer en ligne',
         () => Navigator.of(context).push(
