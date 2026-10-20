@@ -1,0 +1,279 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+
+/// Un joueur connecté à une place (couleur) autour de l'appareil.
+class SeatAccount {
+  final String uid;
+  final String name;
+  final String email;
+  final int balance; // en unités (ex : FCFA). Modifié UNIQUEMENT par le serveur.
+  final FirebaseApp app;
+
+  const SeatAccount({
+    required this.uid,
+    required this.name,
+    required this.email,
+    required this.balance,
+    required this.app,
+  });
+}
+
+class SeatAuth {
+  /// Chaque place utilise sa propre "app" Firebase : on peut donc avoir
+  /// 4 comptes connectés en même temps sur le même appareil.
+  static Future<FirebaseApp> _appFor(int seat) async {
+    final name = 'seat$seat';
+    try {
+      return Firebase.app(name);
+    } catch (_) {
+      return Firebase.initializeApp(name: name, options: Firebase.app().options);
+    }
+  }
+
+  /// Lit (ou crée à 0) le portefeuille du compte.
+  static Future<SeatAccount> _load(FirebaseApp app, User u, String name) async {
+    final ref = FirebaseFirestore.instanceFor(app: app)
+        .collection('wallets')
+        .doc(u.uid);
+    int balance = 0;
+    try {
+      final snap = await ref.get();
+      if (snap.exists) {
+        balance = (snap.data()?['balance'] as num?)?.toInt() ?? 0;
+      } else {
+        await ref.set({
+          'balance': 0,
+          'name': name,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (_) {
+      // Portefeuille indisponible : on joue quand même, solde affiché à 0.
+    }
+    return SeatAccount(
+      uid: u.uid,
+      name: name,
+      email: u.email ?? '',
+      balance: balance,
+      app: app,
+    );
+  }
+
+  /// Compte déjà connecté sur l'appli (session principale).
+  static Future<SeatAccount?> fromCurrent() async {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return null;
+    final name = (u.displayName?.isNotEmpty ?? false)
+        ? u.displayName!
+        : (u.email ?? 'Joueur');
+    return _load(Firebase.app(), u, name);
+  }
+
+  static Future<SeatAccount> signIn(
+      int seat, String email, String pass) async {
+    final app = await _appFor(seat);
+    final auth = FirebaseAuth.instanceFor(app: app);
+    final cred =
+        await auth.signInWithEmailAndPassword(email: email, password: pass);
+    final u = cred.user!;
+    final name = (u.displayName?.isNotEmpty ?? false) ? u.displayName! : email;
+    return _load(app, u, name);
+  }
+
+  static Future<SeatAccount> signUp(
+      int seat, String pseudo, String email, String pass) async {
+    final app = await _appFor(seat);
+    final auth = FirebaseAuth.instanceFor(app: app);
+    final cred = await auth.createUserWithEmailAndPassword(
+        email: email, password: pass);
+    await cred.user!.updateDisplayName(pseudo);
+    await cred.user!.reload();
+    return _load(app, auth.currentUser!, pseudo);
+  }
+
+  static Future<void> signOut(int seat) async {
+    try {
+      await FirebaseAuth.instanceFor(app: await _appFor(seat)).signOut();
+    } catch (_) {}
+  }
+}
+
+String _err(Object e) {
+  if (e is FirebaseAuthException) {
+    switch (e.code) {
+      case 'email-already-in-use':
+        return 'Cet e-mail est déjà utilisé.';
+      case 'invalid-email':
+        return 'E-mail invalide.';
+      case 'weak-password':
+        return 'Mot de passe trop faible (6 caractères min).';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'E-mail ou mot de passe incorrect.';
+      case 'network-request-failed':
+        return 'Pas de connexion internet.';
+      default:
+        return 'Erreur : ${e.code}';
+    }
+  }
+  return 'Une erreur est survenue.';
+}
+
+/// Fenêtre de connexion / création de compte pour une place.
+/// [takenUids] : comptes déjà assis (un compte ne peut occuper qu'une place).
+Future<SeatAccount?> showSeatLogin(
+  BuildContext context, {
+  required int seat,
+  required String colorName,
+  required Color color,
+  required Set<String> takenUids,
+}) {
+  return showDialog<SeatAccount>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) {
+      final pseudo = TextEditingController();
+      final email = TextEditingController();
+      final pass = TextEditingController();
+      bool creating = false, busy = false;
+      String? error;
+
+      return StatefulBuilder(builder: (ctx, setS) {
+        Future<void> submit() async {
+          final em = email.text.trim();
+          if (creating && pseudo.text.trim().isEmpty) {
+            setS(() => error = 'Choisis un pseudo.');
+            return;
+          }
+          if (!em.contains('@') || pass.text.length < 6) {
+            setS(() => error = 'E-mail ou mot de passe invalide.');
+            return;
+          }
+          setS(() {
+            busy = true;
+            error = null;
+          });
+          try {
+            final acc = creating
+                ? await SeatAuth.signUp(seat, pseudo.text.trim(), em, pass.text)
+                : await SeatAuth.signIn(seat, em, pass.text);
+            if (takenUids.contains(acc.uid)) {
+              await SeatAuth.signOut(seat);
+              setS(() {
+                busy = false;
+                error = 'Ce compte joue déjà à une autre place.';
+              });
+              return;
+            }
+            if (ctx.mounted) Navigator.pop(ctx, acc);
+          } catch (e) {
+            setS(() {
+              busy = false;
+              error = _err(e);
+            });
+          }
+        }
+
+        InputDecoration deco(String l) => InputDecoration(
+              labelText: l,
+              labelStyle: const TextStyle(color: Colors.white70),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            );
+
+        return AlertDialog(
+          backgroundColor: const Color(0xFF14267A),
+          title: Row(children: [
+            CircleAvatar(radius: 10, backgroundColor: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Joueur $colorName',
+                  style: const TextStyle(color: Colors.white)),
+            ),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                for (final t in [true, false])
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: busy ? null : () => setS(() => creating = !t),
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: creating == !t
+                              ? const Color(0xFFFFC21A)
+                              : Colors.white12,
+                        ),
+                        child: Text(
+                          t ? 'Se connecter' : 'Créer un compte',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: creating == !t
+                                ? const Color(0xFF1A1F3A)
+                                : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ]),
+              const SizedBox(height: 12),
+              if (creating) ...[
+                TextField(
+                  controller: pseudo,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: deco('Pseudo'),
+                ),
+                const SizedBox(height: 8),
+              ],
+              TextField(
+                controller: email,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: Colors.white),
+                decoration: deco('E-mail'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: pass,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: deco('Mot de passe'),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 8),
+                Text(error!,
+                    style: const TextStyle(
+                        color: Color(0xFFFF8A80),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12)),
+              ],
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: busy ? null : submit,
+              child: Text(busy ? '...' : 'Valider',
+                  style: const TextStyle(color: Color(0xFFFFC21A))),
+            ),
+          ],
+        );
+      });
+    },
+  );
+}
