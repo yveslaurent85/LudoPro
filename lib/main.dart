@@ -984,6 +984,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  /// Face aléatoire avec un 6 plus fréquent : 30 % de chances
+  /// (45 % si tous les pions du joueur sont encore à la base).
+  /// Pour régler la difficulté, change les deux pourcentages ci-dessous.
+  int _randomFace() {
+    final allHome = players[currentPlayer].pawns.every((x) => x == -1);
+    final sixChance = allHome ? 45 : 30;
+    if (random.nextInt(100) < sixChance) return 6;
+    return random.nextInt(5) + 1;
+  }
+
   /// Valeur du prochain lancer. À l'arrivée, quand il ne reste qu'un pion
   /// à finir et qu'un seul lancer suffit, le joueur gagne en 5 lancers
   /// maximum : le 5e lancer donne exactement le nombre qu'il faut.
@@ -998,11 +1008,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           return remaining;
         }
         finishThrows[cp]++;
-        return random.nextInt(6) + 1;
+        return _randomFace();
       }
     }
     finishThrows[cp] = 0;
-    return random.nextInt(6) + 1;
+    return _randomFace();
   }
 
   void _autoPlay() {
@@ -1169,6 +1179,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   String _lastSig = '';
   int _idle = 0;
   int stepMs = 170; // vitesse des pions (ms par case)
+  DateTime? _lastBack; // dernier appui sur « retour » (double retour pour quitter)
 
   // Dé : glissement et lancer
   bool diceDragging = false;
@@ -2623,57 +2634,80 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  /// Double retour : un 1er appui affiche un message, un 2e appui
+  /// dans les 2 secondes quitte la partie.
+  void _onBackPressed(bool didPop, Object? result) {
+    if (didPop) return;
+    final now = DateTime.now();
+    if (_lastBack != null &&
+        now.difference(_lastBack!) < const Duration(seconds: 2)) {
+      Navigator.of(context).pop();
+    } else {
+      _lastBack = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Appuie encore sur retour pour quitter la partie'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        key: rootKey,
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0xFF1F5BFF),
-                    Color(0xFF0B2FA6),
-                    Color(0xFF061A66),
-                  ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: _onBackPressed,
+      child: Scaffold(
+        body: Stack(
+          key: rootKey,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF1F5BFF),
+                      Color(0xFF0B2FA6),
+                      Color(0xFF061A66),
+                    ],
+                  ),
                 ),
-              ),
-              child: SafeArea(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final boardSize = min(
-                      constraints.maxWidth - 24,
-                      constraints.maxHeight - 440,
-                    ).clamp(180.0, 700.0).toDouble();
+                child: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final boardSize = min(
+                        constraints.maxWidth - 24,
+                        constraints.maxHeight - 440,
+                      ).clamp(180.0, 700.0).toDouble();
 
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        buildHeader(),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [badgesRow(0, 1), diceRow(0, 1)],
-                        ),
-                        buildBoard(boardSize),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [diceRow(3, 2), badgesRow(3, 2)],
-                        ),
-                        buildStatusBar(),
-                      ],
-                    );
-                  },
+                      return Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          buildHeader(),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [badgesRow(0, 1), diceRow(0, 1)],
+                          ),
+                          buildBoard(boardSize),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [diceRow(3, 2), badgesRow(3, 2)],
+                          ),
+                          buildStatusBar(),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
-          ),
-          buildFlyingDie(),
-        ],
+            buildFlyingDie(),
+          ],
+        ),
       ),
     );
   }
