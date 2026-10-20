@@ -1381,7 +1381,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         message = 'Pilotage automatique : $v.';
       });
       if (legalMoves().isEmpty) {
-        nextTurn();
+        if (v == 6) {
+          setState(() {
+            hasRolled = false;
+            message = 'Un 6 ! Tu rejoues.';
+          });
+          _pushState();
+        } else {
+          nextTurn();
+        }
       } else {
         _pushState();
       }
@@ -1948,7 +1956,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     setState(() {
       if (legal.isEmpty) {
-        message = '$dice ! Aucun déplacement possible.';
+        message = dice == 6
+            ? '6 ! Aucun déplacement possible, mais tu rejoues.'
+            : '$dice ! Aucun déplacement possible.';
       } else if (autoPlay && distinct.length == 1) {
         message = forced
             ? 'Capture obligatoire ! Coup joué automatiquement.'
@@ -1981,7 +1991,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       sfx.deny();
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted || rollToken != _token || gameOver) return;
-      nextTurn();
+      if (dice == 6) {
+        // Un 6 donne toujours un nouveau lancer, même pendant la finition.
+        setState(() {
+          hasRolled = false;
+          message = 'Un 6 ! Tu rejoues.';
+        });
+        _pushState();
+      } else {
+        nextTurn();
+      }
     } else if (autoPlay && distinct.length == 1) {
       // Un seul choix possible : le jeu joue à ta place
       await Future.delayed(const Duration(milliseconds: 250));
@@ -2249,8 +2268,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final entries = <_PawnEntry>[];
     for (final p in activeIdx) {
       for (int i = 0; i < players[p].pawns.length; i++) {
-        final center = pawnCenter(p, i);
-        if (center != null) entries.add(_PawnEntry(p, i, center));
+        // Un pion arrivé (56) reste visible dans sa base.
+        final center = pawnCenter(p, i) ?? homeCenter(p, i);
+        entries.add(_PawnEntry(p, i, center));
       }
     }
 
@@ -2269,10 +2289,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final n = group.length;
       final k = group.indexOf(e);
       final position = players[e.p].pawns[e.i];
-      final atHome = position == -1;
+      final done = position == 56;
+      final atHome = position == -1 || done;
       final stacked = n > 1 && !atHome;
 
-      final w = (atHome ? c * 1.5 : c * 1.0) * (stacked ? 0.8 : 1.0);
+      final w = (done ? c * 1.35 : (atHome ? c * 1.5 : c * 1.0)) *
+          (stacked ? 0.8 : 1.0);
       final h = w * 1.25;
       final dx = stacked ? (k - (n - 1) / 2) * c * 0.3 : 0.0;
 
@@ -2297,6 +2319,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               painter: PawnPainter(
                 color: players[e.p].color,
                 highlight: movable,
+                done: done,
               ),
             ),
           ),
@@ -3775,8 +3798,13 @@ class BoardPainter extends CustomPainter {
 class PawnPainter extends CustomPainter {
   final Color color;
   final bool highlight;
+  final bool done; // pion arrivé : halo doré + étoile
 
-  PawnPainter({required this.color, required this.highlight});
+  PawnPainter({
+    required this.color,
+    required this.highlight,
+    this.done = false,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -3792,6 +3820,26 @@ class PawnPainter extends CustomPainter {
       ),
       Paint()..color = Colors.black.withOpacity(0.28),
     );
+
+    // Pion arrivé : halo doré sous le pion
+    if (done) {
+      final halo = Rect.fromCenter(
+        center: Offset(w * 0.5, h * 0.86),
+        width: w * 1.15,
+        height: h * 0.26,
+      );
+      canvas.drawOval(
+        halo,
+        Paint()..color = const Color(0xFFFFC21A).withOpacity(0.55),
+      );
+      canvas.drawOval(
+        halo,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = const Color(0xFFFFC21A),
+      );
+    }
 
     // Anneau lumineux : ce pion peut jouer
     if (highlight) {
@@ -3872,11 +3920,40 @@ class PawnPainter extends CustomPainter {
       ),
       Paint()..color = Colors.white.withOpacity(0.55),
     );
+
+    // Pion arrivé : petite étoile dorée au-dessus de la tête
+    if (done) {
+      final sc = Offset(w * 0.5, h * 0.09);
+      final sr = w * 0.22;
+      final star = Path();
+      for (int i = 0; i < 10; i++) {
+        final r = i.isEven ? sr : sr * 0.45;
+        final a = -pi / 2 + i * pi / 5;
+        final x = sc.dx + r * cos(a);
+        final y = sc.dy + r * sin(a);
+        if (i == 0) {
+          star.moveTo(x, y);
+        } else {
+          star.lineTo(x, y);
+        }
+      }
+      star.close();
+      canvas.drawPath(star, Paint()..color = const Color(0xFFFFC21A));
+      canvas.drawPath(
+        star,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.8
+          ..color = Colors.white,
+      );
+    }
   }
 
   @override
   bool shouldRepaint(covariant PawnPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.highlight != highlight;
+      oldDelegate.color != color ||
+      oldDelegate.highlight != highlight ||
+      oldDelegate.done != done;
 }
 
 // ----------------------------------------------------------------------
