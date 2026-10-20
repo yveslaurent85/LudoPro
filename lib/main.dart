@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'accounts.dart';
 import 'online.dart';
+import 'recharge.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -1060,7 +1061,16 @@ class _OnlineScreenState extends State<OnlineScreen> {
           'La recharge sera disponible bientôt.',
         ),
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 12),
+      _primaryButton(
+        'Recharger mon compte',
+        () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (context) => const RechargeScreen(),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
       _primaryButton(
         'Jouer en ligne',
         () => Navigator.of(context).push(
