@@ -76,7 +76,7 @@ class Player {
   final Color color;
   final Color lightColor;
   final int start;
-  final IconData avatar;
+  IconData avatar; // modifiable : le joueur choisit son avatar
   List<int> pawns = [-1, -1, -1, -1];
 
   Player({
@@ -205,6 +205,20 @@ class HomeScreen extends StatelessWidget {
   /// Vrai quand une partie est en cours : on propose de la reprendre.
   final bool resumable;
 
+  /// Présentiel : il faut d'abord être connecté à son compte.
+  /// Si Firebase n'a pas démarré, on laisse jouer quand même.
+  void _openLocal(BuildContext context) {
+    final loggedIn =
+        !firebaseReady || FirebaseAuth.instance.currentUser != null;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => loggedIn
+            ? const SetupScreen()
+            : OnlineScreen(onSignedIn: (context) => const SetupScreen()),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -256,12 +270,8 @@ class HomeScreen extends StatelessWidget {
                     color: const Color(0xFF22B14C),
                     icon: Icons.groups,
                     title: 'En présentiel',
-                    subtitle: 'Les joueurs jouent sur le même plateau',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => const SetupScreen(),
-                      ),
-                    ),
+                    subtitle: 'Connecte-toi, puis jouez sur le même plateau',
+                    onTap: () => _openLocal(context),
                   ),
                   const SizedBox(height: 14),
                   _ModeCard(
@@ -287,7 +297,7 @@ class HomeScreen extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
-// Préparation de la partie : nombre de joueurs et de pions
+// Préparation de la partie : joueurs (pseudo + avatar) et pions
 // ----------------------------------------------------------------------
 
 class SetupScreen extends StatefulWidget {
@@ -302,6 +312,154 @@ class _SetupScreenState extends State<SetupScreen> {
   int pawnCount = 4;
   bool doorSafe = true; // protection des portes (cases de départ)
   bool starSafe = true; // protection des étoiles
+
+  static const List<IconData> avatarChoices = [
+    Icons.person,
+    Icons.face,
+    Icons.face_3,
+    Icons.person_outline,
+    Icons.sports_esports,
+    Icons.pets,
+    Icons.rocket_launch,
+    Icons.star,
+    Icons.emoji_emotions,
+    Icons.android,
+    Icons.local_fire_department,
+    Icons.music_note,
+  ];
+  static const List<String> colorNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
+  static const List<Color> colorList = [
+    Color(0xFFE5262B),
+    Color(0xFF22B14C),
+    Color(0xFF1E6BFF),
+    Color(0xFFFFC21A),
+  ];
+
+  late final List<TextEditingController> nameCtrls;
+  final List<IconData> avatars = [
+    Icons.person,
+    Icons.face,
+    Icons.face_3,
+    Icons.person_outline,
+  ];
+
+  /// Couleurs utilisées selon le nombre de joueurs (comme dans LudoGame).
+  List<int> get seats =>
+      numPlayers == 2 ? [0, 2] : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+
+  @override
+  void initState() {
+    super.initState();
+    nameCtrls = List.generate(4, (_) => TextEditingController());
+    // Le premier joueur reprend le pseudo du compte connecté.
+    if (firebaseReady) {
+      final n = FirebaseAuth.instance.currentUser?.displayName;
+      if (n != null && n.isNotEmpty) nameCtrls[0].text = n;
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in nameCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar(int color) async {
+    final choice = await showDialog<IconData>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Choisis ton avatar',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: SizedBox(
+          width: 280,
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final a in avatarChoices)
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx, a),
+                  child: CircleAvatar(
+                    radius: 24,
+                    backgroundColor: colorList[color],
+                    child: Container(
+                      decoration: a == avatars[color]
+                          ? BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 3,
+                              ),
+                            )
+                          : null,
+                      alignment: Alignment.center,
+                      child: Icon(a, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice != null) setState(() => avatars[color] = choice);
+  }
+
+  Widget _playerRow(int color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => _pickAvatar(color),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: colorList[color],
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(avatars[color], color: Colors.white),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: nameCtrls[color],
+              maxLength: 12,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: const Color(0xFFFFC21A),
+              decoration: InputDecoration(
+                counterText: '',
+                isDense: true,
+                hintText: 'Joueur ${colorNames[color]}',
+                hintStyle: const TextStyle(color: Colors.white54),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide:
+                      const BorderSide(color: Color(0xFFFFC21A), width: 2),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _switch(String title, String subtitle, bool value,
       void Function(bool) onChanged) {
@@ -388,7 +546,7 @@ class _SetupScreenState extends State<SetupScreen> {
         height: double.infinity,
         decoration: _appBackground,
         child: SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -423,7 +581,18 @@ class _SetupScreenState extends State<SetupScreen> {
                   pawnCount,
                   (v) => setState(() => pawnCount = v),
                 ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Joueurs (touche le rond pour changer d\'avatar)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 10),
+                for (final s in seats) _playerRow(s),
+                const SizedBox(height: 6),
                 _switch(
                   'Protection des portes',
                   'Un pion sur une case de départ ne peut pas être capturé',
@@ -436,7 +605,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   starSafe,
                   (v) => setState(() => starSafe = v),
                 ),
-                const Spacer(),
+                const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 52,
@@ -452,6 +621,10 @@ class _SetupScreenState extends State<SetupScreen> {
                           pawnCount: pawnCount,
                           doorSafe: doorSafe,
                           starSafe: starSafe,
+                          names: [
+                            for (int i = 0; i < 4; i++) nameCtrls[i].text.trim(),
+                          ],
+                          avatars: List<IconData>.from(avatars),
                         ),
                       ),
                     ),
@@ -479,7 +652,11 @@ class _SetupScreenState extends State<SetupScreen> {
 // ----------------------------------------------------------------------
 
 class OnlineScreen extends StatefulWidget {
-  const OnlineScreen({super.key});
+  const OnlineScreen({super.key, this.onSignedIn});
+
+  /// Si renseigné (mode présentiel) : après la connexion, on ouvre
+  /// directement cet écran à la place de celui-ci.
+  final WidgetBuilder? onSignedIn;
 
   @override
   State<OnlineScreen> createState() => _OnlineScreenState();
@@ -585,6 +762,13 @@ class _OnlineScreenState extends State<OnlineScreen> {
         user = auth.currentUser;
         passCtrl.clear();
       });
+      // Mode présentiel : connexion réussie, on passe à la préparation.
+      final next = widget.onSignedIn;
+      if (next != null && auth.currentUser != null) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(builder: next),
+        );
+      }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() => errorText = _errorMessage(e.code));
@@ -852,6 +1036,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
   @override
   Widget build(BuildContext context) {
     final current = user;
+    final forLocal = widget.onSignedIn != null;
 
     return Scaffold(
       body: Container(
@@ -870,9 +1055,9 @@ class _OnlineScreenState extends State<OnlineScreen> {
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                     ),
-                    const Text(
-                      'Jeu en ligne',
-                      style: TextStyle(
+                    Text(
+                      forLocal ? 'Connexion' : 'Jeu en ligne',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
@@ -892,7 +1077,10 @@ class _OnlineScreenState extends State<OnlineScreen> {
                   _banner(
                     Icons.info_outline,
                     const Color(0xFFFFC21A),
-                    'Crée un compte ou connecte-toi pour jouer en ligne.',
+                    forLocal
+                        ? 'Connecte-toi à ton compte avant de lancer une '
+                            'partie en présentiel.'
+                        : 'Crée un compte ou connecte-toi pour jouer en ligne.',
                   ),
                 const SizedBox(height: 20),
                 if (current != null)
@@ -920,6 +1108,8 @@ class LudoGame extends StatefulWidget {
     this.doorSafe = true,
     this.starSafe = true,
     this.online,
+    this.names,
+    this.avatars,
   });
 
   final int numPlayers;
@@ -927,6 +1117,13 @@ class LudoGame extends StatefulWidget {
   final bool doorSafe; // portes (cases de départ) protégées
   final bool starSafe; // étoiles protégées
   final OnlineSession? online; // null = jeu en présentiel
+
+  /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
+  /// Une chaîne vide = nom par défaut.
+  final List<String>? names;
+
+  /// Avatars choisis, indexés par couleur.
+  final List<IconData>? avatars;
 
   @override
   State<LudoGame> createState() => _LudoGameState();
@@ -968,8 +1165,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
 
-  /// Nom affiché pour une couleur (pseudo en ligne, « Joueur Rouge » sinon).
+  /// Nom affiché pour une couleur (pseudo choisi, pseudo en ligne,
+  /// « Joueur Rouge » sinon).
   String nameOf(int colorIndex) {
+    final custom = widget.names;
+    if (widget.online == null &&
+        custom != null &&
+        colorIndex < custom.length &&
+        custom[colorIndex].isNotEmpty) {
+      return custom[colorIndex];
+    }
     final o = widget.online;
     if (o != null) {
       final seat = baseIdx.indexOf(colorIndex);
@@ -987,6 +1192,21 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       if (pw.isNotEmpty && pw.every((p) => p == 56)) return i;
     }
     return null;
+  }
+
+  /// Classement en direct : pions arrivés, puis progression.
+  /// Le gagnant est toujours premier une fois la partie finie.
+  List<int> get ranking {
+    final list = [...activeIdx];
+    list.sort((a, b) {
+      final fa = players[a].finished;
+      final fb = players[b].finished;
+      if (fa != fb) return fb.compareTo(fa);
+      return progressOf(players[b]).compareTo(progressOf(players[a]));
+    });
+    final w = winnerColor;
+    if (w != null && list.remove(w)) list.insert(0, w);
+    return list;
   }
 
   /// Appelé chaque seconde : si le joueur ne fait rien pendant
@@ -1354,6 +1574,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   int stepMs = 170; // vitesse des pions (ms par case)
   DateTime? _lastBack; // dernier appui sur « retour » (double retour pour aller à l'accueil)
 
+  // Animation d'arrivée à la maison
+  int? arrivalColor; // couleur du joueur dont un pion vient d'arriver
+  int arrivalKey = 0; // change à chaque arrivée pour relancer l'animation
+
   // Dé : glissement et lancer
   bool diceDragging = false;
   Offset dragPos = Offset.zero;
@@ -1406,6 +1630,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     super.initState();
     for (final p in players) {
       p.pawns = List<int>.filled(pawnCount, -1);
+    }
+    // Avatars choisis avant la partie
+    final av = widget.avatars;
+    if (av != null) {
+      for (int i = 0; i < 4 && i < av.length; i++) {
+        players[i].avatar = av[i];
+      }
     }
     _listenOnline();
     _autoTimer = Timer.periodic(
@@ -1740,6 +1971,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     setState(() {
       isMoving = false;
 
+      // Animation d'arrivée à la maison
+      if (newPosition == 56) {
+        arrivalColor = playerIndex;
+        arrivalKey++;
+      }
+
       if (won) {
         gameOver = true;
         message = '🏆 ${nameOf(playerIndex)} remporte la partie !';
@@ -1755,10 +1992,17 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     });
     _pushState();
+
+    if (newPosition == 56) {
+      final k = arrivalKey;
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted && k == arrivalKey) setState(() => arrivalColor = null);
+      });
+    }
   }
 
   /// Remet la partie à zéro (utilisé quand on change le nombre de joueurs
-  /// ou de pions dans les paramètres, avant le début de la partie).
+  /// ou de pions dans les paramètres, ou avec « Rejouer » en fin de partie).
   void restartGame() {
     if (isOnline) {
       setState(() => message = 'Pas de nouvelle partie en ligne.');
@@ -1777,6 +2021,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
       forfeited.clear();
       winnerOverride = null;
+      arrivalColor = null;
       gameStarted = false;
       currentPlayer = 0;
       dice = 1;
@@ -1931,6 +2176,36 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }).toList();
   }
 
+  /// Explosion d'étincelles au centre du plateau quand un pion arrive à la maison.
+  List<Widget> buildArrival(double c) {
+    final a = arrivalColor;
+    if (a == null || gameOver) return const <Widget>[];
+
+    // Centre du triangle d'arrivée de chaque couleur (en cases)
+    const xs = [6.75, 7.5, 8.25, 7.5];
+    const ys = [7.5, 6.75, 7.5, 8.25];
+    final size = c * 5.0;
+
+    return [
+      Positioned(
+        left: xs[a] * c - size / 2,
+        top: ys[a] * c - size / 2,
+        width: size,
+        height: size,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey('arrival_$arrivalKey'),
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 1300),
+            builder: (context, t, child) => CustomPaint(
+              painter: BurstPainter(t, players[a].color),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   /// Couronne dans la base du gagnant + « Victoire » au centre du plateau.
   List<Widget> buildVictory(double c) {
     final w = winnerColor;
@@ -2011,7 +2286,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         ),
                       ),
                       Text(
-                        'Joueur ${winner.display}',
+                        nameOf(w),
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: c * 0.8,
@@ -2040,14 +2315,22 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   Widget buildBoard(double size) {
+    // Le cadre du plateau prend la couleur du joueur dont c'est le tour.
+    final turnColor = players[currentPlayer].color;
     return Container(
       key: boardKey,
       width: size,
       height: size,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: turnColor, width: 5),
         boxShadow: [
+          BoxShadow(
+            color: turnColor.withOpacity(0.65),
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
           BoxShadow(
             color: Colors.black.withOpacity(0.5),
             blurRadius: 20,
@@ -2056,7 +2339,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(13),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final c = constraints.maxWidth / 15;
@@ -2079,6 +2362,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     ),
                   ),
                   ...buildPawns(c),
+                  ...buildArrival(c),
                   ...buildVictory(c),
                 ],
               ),
@@ -2214,6 +2498,47 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  /// Classement en direct, affiché sous l'en-tête pendant toute la partie.
+  Widget buildRanking() {
+    final order = ranking;
+    const medals = ['🥇', '🥈', '🥉', '4️⃣'];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      child: Row(
+        children: [
+          for (int k = 0; k < order.length; k++)
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: players[order[k]].color.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: players[order[k]].color,
+                    width: order[k] == currentPlayer && !gameOver ? 2 : 1,
+                  ),
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${medals[k]} ${nameOf(order[k])} '
+                    '${(progressOf(players[order[k]]) * 100).round()} %',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget playerBadge(int index, {required bool avatarOnRight}) {
     if (!activeIdx.contains(index)) return const SizedBox(height: 52);
 
@@ -2307,7 +2632,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         ),
         const SizedBox(height: 2),
         Text(
-          '$percent %',
+          active ? '▶ À TOI · $percent %' : '$percent %',
           style: const TextStyle(
             color: Color(0xFFFFE082),
             fontSize: 12,
@@ -2317,23 +2642,36 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ],
     );
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-      decoration: BoxDecoration(
-        color: player.color.withOpacity(active ? 0.55 : 0.3),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(
-          color: active ? Colors.white : player.color.withOpacity(0.8),
-          width: active ? 2 : 1.5,
+    // Le badge du joueur actif pulse et brille.
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, _) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        decoration: BoxDecoration(
+          color: player.color.withOpacity(active ? 0.6 : 0.3),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: active ? Colors.white : player.color.withOpacity(0.8),
+            width: active ? 2.5 : 1.5,
+          ),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: player.color.withOpacity(0.9),
+                    blurRadius: 8 + _pulse.value * 14,
+                    spreadRadius: 1 + _pulse.value * 3,
+                  ),
+                ]
+              : null,
         ),
-      ),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: avatarOnRight
-              ? [info, const SizedBox(width: 6), avatarWithRing]
-              : [avatarWithRing, const SizedBox(width: 6), info],
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: avatarOnRight
+                ? [info, const SizedBox(width: 6), avatarWithRing]
+                : [avatarWithRing, const SizedBox(width: 6), info],
+          ),
         ),
       ),
     );
@@ -2659,11 +2997,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF14267A),
-        title: const Text('Score', style: TextStyle(color: Colors.white)),
+        title: const Text('Classement', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final p in activeIdx.map((i) => players[i]))
+            for (final p in ranking.map((i) => players[i]))
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
@@ -2672,7 +3010,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Joueur ${p.display}',
+                        nameOf(players.indexOf(p)),
                         style: const TextStyle(color: Colors.white),
                       ),
                     ),
@@ -2708,11 +3046,19 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               decoration: BoxDecoration(
                 color: const Color(0xFF0A1B66),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white24, width: 1.5),
+                // Bordure à la couleur du joueur dont c'est le tour
+                border: Border.all(
+                  color: gameOver ? Colors.white24 : player.color,
+                  width: 2.5,
+                ),
               ),
               child: Row(
                 children: [
-                  const Text('👑', style: TextStyle(fontSize: 22)),
+                  CircleAvatar(
+                    radius: 15,
+                    backgroundColor: player.color,
+                    child: Icon(player.avatar, color: Colors.white, size: 18),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -2761,6 +3107,89 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           const SizedBox(width: 8),
           roundButton(Icons.bar_chart, showStats),
         ],
+      ),
+    );
+  }
+
+  /// Panneau de fin de match : gagnant + boutons Rejouer / Accueil.
+  Widget buildEndPanel() {
+    final w = winnerColor;
+    final color = w == null ? const Color(0xFFFFC21A) : players[w].color;
+
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 10,
+      child: SafeArea(
+        top: false,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0.0, end: 1.0),
+          duration: const Duration(milliseconds: 700),
+          curve: Curves.easeOutBack,
+          builder: (context, v, child) => Transform.translate(
+            offset: Offset(0, (1 - v) * 140),
+            child: Opacity(opacity: v.clamp(0.0, 1.0).toDouble(), child: child),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A1B66),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: color, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.7),
+                  blurRadius: 18,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  w == null
+                      ? '🏁 Partie terminée'
+                      : '🏆 ${nameOf(w)} remporte la partie !',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFFFC21A),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    if (!isOnline) ...[
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF22B14C),
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: restartGame,
+                          child: const Text('Rejouer'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white54),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Accueil'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2845,13 +3274,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     builder: (context, constraints) {
                       final boardSize = min(
                         constraints.maxWidth - 24,
-                        constraints.maxHeight - 440,
+                        constraints.maxHeight - 470,
                       ).clamp(180.0, 700.0).toDouble();
 
                       return Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           buildHeader(),
+                          buildRanking(),
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [badgesRow(0, 1), diceRow(0, 1)],
@@ -2870,11 +3300,188 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ),
             ),
             buildFlyingDie(),
+            // Fin de match : confettis + panneau de résultat
+            if (gameOver)
+              const Positioned.fill(
+                child: IgnorePointer(child: _Confetti()),
+              ),
+            if (gameOver) buildEndPanel(),
           ],
         ),
       ),
     );
   }
+}
+
+// ----------------------------------------------------------------------
+// Animation : confettis de fin de match
+// ----------------------------------------------------------------------
+
+const List<Color> _confettiColors = [
+  Color(0xFFE5262B),
+  Color(0xFF22B14C),
+  Color(0xFF1E6BFF),
+  Color(0xFFFFC21A),
+  Colors.white,
+  Color(0xFFFF7AC6),
+];
+
+class _Piece {
+  final double x;
+  final double speed;
+  final double phase;
+  final double size;
+  final double spin;
+  final Color color;
+
+  _Piece(Random r)
+      : x = r.nextDouble(),
+        speed = 0.6 + r.nextDouble() * 0.8,
+        phase = r.nextDouble(),
+        size = 6 + r.nextDouble() * 8,
+        spin = 2 + r.nextDouble() * 6,
+        color = _confettiColors[r.nextInt(_confettiColors.length)];
+}
+
+class _Confetti extends StatefulWidget {
+  const _Confetti();
+
+  @override
+  State<_Confetti> createState() => _ConfettiState();
+}
+
+class _ConfettiState extends State<_Confetti>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 5),
+  )..repeat();
+  final Random rnd = Random();
+  late final List<_Piece> pieces = List.generate(80, (_) => _Piece(rnd));
+
+  @override
+  void dispose() {
+    ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: ctrl,
+      builder: (context, _) => CustomPaint(
+        size: Size.infinite,
+        painter: _ConfettiPainter(pieces, ctrl.value),
+      ),
+    );
+  }
+}
+
+class _ConfettiPainter extends CustomPainter {
+  final List<_Piece> pieces;
+  final double progress;
+
+  _ConfettiPainter(this.pieces, this.progress);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final p in pieces) {
+      final t = (progress * p.speed + p.phase) % 1.0;
+      final y = t * (size.height + 40) - 20;
+      final x = (p.x + sin(t * 6 + p.phase * 6) * 0.03) * size.width;
+
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(p.spin * t * 2 * pi);
+      canvas.drawRect(
+        Rect.fromCenter(
+          center: Offset.zero,
+          width: p.size,
+          height: p.size * 0.55,
+        ),
+        Paint()..color = p.color,
+      );
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ConfettiPainter oldDelegate) => true;
+}
+
+// ----------------------------------------------------------------------
+// Animation : arrivée d'un pion à la maison
+// ----------------------------------------------------------------------
+
+class BurstPainter extends CustomPainter {
+  final double t; // 0 -> 1
+  final Color color;
+
+  BurstPainter(this.t, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final maxR = size.width / 2;
+    final e = Curves.easeOut.transform(t);
+    final fade = (1 - t).clamp(0.0, 1.0).toDouble();
+
+    // Deux anneaux qui s'étendent
+    canvas.drawCircle(
+      center,
+      maxR * 0.9 * e,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6 * fade + 1
+        ..color = color.withOpacity(0.85 * fade),
+    );
+    canvas.drawCircle(
+      center,
+      maxR * 0.55 * e,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..color = Colors.white.withOpacity(0.9 * fade),
+    );
+
+    // Étincelles qui partent dans toutes les directions
+    for (int i = 0; i < 12; i++) {
+      final ang = i * pi / 6;
+      final r = maxR * (0.2 + 0.75 * e);
+      final pos = center + Offset(cos(ang) * r, sin(ang) * r);
+      canvas.drawCircle(
+        pos,
+        size.width * 0.035 * (1 - t) + 1.5,
+        Paint()
+          ..color = (i.isEven ? const Color(0xFFFFC21A) : Colors.white)
+              .withOpacity(fade),
+      );
+    }
+
+    // Étoile dorée au centre
+    final starR = size.width * 0.14 * Curves.elasticOut.transform(min(1.0, t * 1.6));
+    final path = Path();
+    for (int i = 0; i < 10; i++) {
+      final r = i.isEven ? starR : starR * 0.45;
+      final a = -pi / 2 + i * pi / 5;
+      final x = center.dx + r * cos(a);
+      final y = center.dy + r * sin(a);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    path.close();
+    canvas.drawPath(
+      path,
+      Paint()..color = const Color(0xFFFFC21A).withOpacity(fade.clamp(0.0, 1.0)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant BurstPainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.color != color;
 }
 
 // ----------------------------------------------------------------------
