@@ -1,6 +1,9 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'main.dart';
 
@@ -51,6 +54,13 @@ String _displayName(User u) {
   final n = u.displayName;
   if (n != null && n.isNotEmpty) return n;
   return u.email ?? 'Joueur';
+}
+
+/// Code de salle à 6 caractères (sans 0/O/1/I pour éviter les confusions).
+String _newCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  final r = Random.secure();
+  return List.generate(6, (_) => chars[r.nextInt(chars.length)]).join();
 }
 
 List<Map<String, dynamic>> _playersOf(Map<String, dynamic> d) {
@@ -214,7 +224,7 @@ Widget _tile(
 }
 
 // ----------------------------------------------------------------------
-// Salon : créer une partie, rejoindre une partie ouverte
+// Salon : créer une partie, rejoindre une partie ouverte ou avec un code
 // ----------------------------------------------------------------------
 
 class OnlineLobbyScreen extends StatefulWidget {
@@ -229,8 +239,11 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int pawnCount = 4;
   bool doorSafe = true;
   bool starSafe = true;
+  bool privateRoom = false;
   bool busy = false;
   String? error;
+
+  final TextEditingController codeCtrl = TextEditingController();
 
   late final String uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
@@ -238,6 +251,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       _games.where('status', isEqualTo: 'waiting').limit(30).snapshots();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
       _games.where('uids', arrayContains: uid).snapshots();
+
+  @override
+  void dispose() {
+    codeCtrl.dispose();
+    super.dispose();
+  }
 
   void _openRoom(String id) {
     Navigator.of(context).push(
@@ -263,6 +282,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'pawnCount': pawnCount,
         'doorSafe': doorSafe,
         'starSafe': starSafe,
+        'private': privateRoom,
+        'code': _newCode(),
         'status': 'waiting',
         'players': [
           {'uid': user.uid, 'name': _displayName(user)},
@@ -339,6 +360,33 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     }
   }
 
+  /// Rejoindre une salle (privée ou non) grâce à son code.
+  Future<void> _joinByCode() async {
+    final code = codeCtrl.text.trim().toUpperCase();
+    if (busy) return;
+    if (code.length != 6) {
+      setState(() => error = 'Entre le code à 6 caractères.');
+      return;
+    }
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    String? id;
+    try {
+      final q = await _games.where('code', isEqualTo: code).limit(1).get();
+      if (q.docs.isEmpty) {
+        error = 'Aucune partie avec ce code.';
+      } else {
+        id = q.docs.first.id;
+      }
+    } catch (_) {
+      error = 'Impossible de chercher la partie.';
+    }
+    if (mounted) setState(() => busy = false);
+    if (id != null && mounted) await _join(id);
+  }
+
   int _createdMs(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final t = doc.data()['createdAt'];
     return t is Timestamp ? t.millisecondsSinceEpoch : 0;
@@ -364,8 +412,9 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final n = _playersOf(d).length;
                   final max = (d['maxPlayers'] as num).toInt();
                   final waiting = d['status'] == 'waiting';
+                  final priv = d['private'] == true ? ' 🔒' : '';
                   return _tile(
-                    'Partie de ${d['hostName']}',
+                    'Partie de ${d['hostName']}$priv',
                     waiting ? 'En attente ($n/$max joueurs)' : 'En cours',
                     waiting ? 'Ouvrir' : 'Reprendre',
                     busy ? null : () => _openRoom(doc.id),
@@ -395,6 +444,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         }
         final docs = snap.data!.docs
             .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+            .where((d) => d.data()['private'] != true)
             .toList()
           ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
         if (docs.isEmpty) {
@@ -420,6 +470,60 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           ],
         );
       },
+    );
+  }
+
+  Widget _codeSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('Rejoindre avec un code'),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: codeCtrl,
+                textCapitalization: TextCapitalization.characters,
+                maxLength: 6,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  letterSpacing: 4,
+                ),
+                cursorColor: const Color(0xFFFFC21A),
+                decoration: InputDecoration(
+                  counterText: '',
+                  hintText: 'CODE',
+                  hintStyle: const TextStyle(color: Colors.white38),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.12),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Colors.white30),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide:
+                        const BorderSide(color: Color(0xFFFFC21A), width: 2),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 56,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF22B14C),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: busy ? null : _joinByCode,
+                child: const Text('Rejoindre'),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -477,6 +581,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 starSafe,
                 (v) => setState(() => starSafe = v),
               ),
+              _switchRow(
+                'Partie privée',
+                'Invisible dans la liste : on la rejoint avec un code',
+                privateRoom,
+                (v) => setState(() => privateRoom = v),
+              ),
               const SizedBox(height: 8),
               SizedBox(
                 height: 50,
@@ -507,6 +617,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                     ),
                   ),
                 ),
+              _codeSection(),
               _mineSection(),
               _sectionTitle('Parties ouvertes'),
               _openSection(),
@@ -585,6 +696,53 @@ class OnlineGameRoom extends StatelessWidget {
     } catch (_) {}
   }
 
+  Widget _codeCard(BuildContext context, Map<String, dynamic> d) {
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.black26,
+        border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  d['private'] == true
+                      ? 'Code de la salle privée'
+                      : 'Code de la salle',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                Text(
+                  '${d['code']}',
+                  style: const TextStyle(
+                    color: Color(0xFFFFC21A),
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 6,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy, color: Colors.white),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: '${d['code']}'));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Code copié')),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _waiting(
     BuildContext context,
     Map<String, dynamic> d,
@@ -624,6 +782,7 @@ class OnlineGameRoom extends StatelessWidget {
                   'La partie démarre dès que tout le monde est là.',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
+                if (d['code'] != null) _codeCard(context, d),
                 const SizedBox(height: 20),
                 for (int i = 0; i < max; i++)
                   Container(
