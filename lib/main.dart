@@ -200,7 +200,10 @@ class _ModeCard extends StatelessWidget {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.resumable = false});
+
+  /// Vrai quand une partie est en cours : on propose de la reprendre.
+  final bool resumable;
 
   @override
   Widget build(BuildContext context) {
@@ -240,29 +243,39 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                _ModeCard(
-                  color: const Color(0xFF22B14C),
-                  icon: Icons.groups,
-                  title: 'En présentiel',
-                  subtitle: 'Les joueurs jouent sur le même plateau',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (context) => const SetupScreen(),
+                if (resumable)
+                  _ModeCard(
+                    color: const Color(0xFFE5262B),
+                    icon: Icons.play_arrow,
+                    title: 'Reprendre la partie',
+                    subtitle: 'Le pilote automatique joue en attendant',
+                    onTap: () => Navigator.of(context).pop(),
+                  )
+                else ...[
+                  _ModeCard(
+                    color: const Color(0xFF22B14C),
+                    icon: Icons.groups,
+                    title: 'En présentiel',
+                    subtitle: 'Les joueurs jouent sur le même plateau',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => const SetupScreen(),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                _ModeCard(
-                  color: const Color(0xFF1E6BFF),
-                  icon: Icons.public,
-                  title: 'En ligne',
-                  subtitle: 'Crée un compte pour jouer à distance',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (context) => const OnlineScreen(),
+                  const SizedBox(height: 14),
+                  _ModeCard(
+                    color: const Color(0xFF1E6BFF),
+                    icon: Icons.public,
+                    title: 'En ligne',
+                    subtitle: 'Crée un compte pour jouer à distance',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => const OnlineScreen(),
+                      ),
                     ),
                   ),
-                ),
+                ],
                 const Spacer(flex: 2),
               ],
             ),
@@ -934,9 +947,22 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   late int numPlayers = widget.numPlayers;
   late int pawnCount = widget.pawnCount;
 
+  // --- Abandon et retour à l'accueil ----------------------------------
+  /// Couleurs des joueurs qui ont abandonné (ils perdent la partie).
+  final Set<int> forfeited = {};
+
+  /// Gagnant désigné par abandon (null = gagnant normal par les pions).
+  int? winnerOverride;
+
+  /// Vrai quand le joueur est revenu à l'accueil : le jeu joue à sa place.
+  bool away = false;
+
+  /// Un lancer, un déplacement ou un glisser de dé est en cours.
+  bool get _busy => isRolling || isMoving || flightPhase != 0 || diceDragging;
+
   // --- Jeu en ligne ---------------------------------------------------
   bool get isOnline => widget.online != null;
-  int get _myColor => isOnline ? activeIdx[widget.online!.mySeat] : -1;
+  int get _myColor => isOnline ? baseIdx[widget.online!.mySeat] : -1;
   bool get _isMyTurn => !isOnline || currentPlayer == _myColor;
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
@@ -946,7 +972,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   String nameOf(int colorIndex) {
     final o = widget.online;
     if (o != null) {
-      final seat = activeIdx.indexOf(colorIndex);
+      final seat = baseIdx.indexOf(colorIndex);
       if (seat >= 0 && seat < o.names.length) return o.names[seat];
     }
     return 'Joueur ${players[colorIndex].display}';
@@ -955,6 +981,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Couleur du gagnant (null tant que la partie n'est pas finie).
   int? get winnerColor {
     if (!gameOver) return null;
+    if (winnerOverride != null) return winnerOverride;
     for (final i in activeIdx) {
       final pw = players[i].pawns;
       if (pw.isNotEmpty && pw.every((p) => p == 56)) return i;
@@ -964,8 +991,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
   /// Appelé chaque seconde : si le joueur ne fait rien pendant
   /// [autoSeconds] secondes, le jeu joue à sa place.
+  /// Quand le joueur est à l'accueil, le jeu joue au hasard, sans attendre.
   void _tickAutopilot() {
-    if (!mounted || !autoPilot || gameOver) {
+    if (!mounted) return;
+    if (away && !gameOver) {
+      _bgPlay();
+      return;
+    }
+    if (!autoPilot || gameOver) {
       _idle = 0;
       return;
     }
@@ -982,6 +1015,132 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _idle = 0;
       _autoPlay();
     }
+  }
+
+  /// Joue un coup au hasard, sans animation (joueur à l'accueil).
+  void _bgPlay() {
+    if (!_isMyTurn || gameOver || _busy) return;
+
+    if (!hasRolled) {
+      final v = _rollValue();
+      setState(() {
+        dice = v;
+        pendingDice = v;
+        lastRoll[currentPlayer] = v;
+        hasRolled = true;
+        gameStarted = true;
+        message = 'Pilotage automatique : $v.';
+      });
+      if (legalMoves().isEmpty) {
+        nextTurn();
+      } else {
+        _pushState();
+      }
+      return;
+    }
+
+    final legal = legalMoves();
+    if (legal.isEmpty) {
+      nextTurn();
+      return;
+    }
+    movePawn(currentPlayer, legal[random.nextInt(legal.length)]);
+  }
+
+  void _snack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  /// Retour à l'accueil : la partie reste en mémoire, le jeu joue au hasard
+  /// à ta place jusqu'à ce que tu reviennes avec « Reprendre la partie ».
+  Future<void> _goHome() async {
+    if (gameOver) {
+      Navigator.of(context).pop(); // partie finie : on quitte vraiment
+      return;
+    }
+    if (_busy) {
+      _snack('Attends la fin du coup en cours.');
+      return;
+    }
+    _token++; // annule les suites d'animation en attente
+    setState(() => away = true);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const HomeScreen(resumable: true),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      away = false;
+      _idle = 0;
+    });
+  }
+
+  /// Abandon : le joueur qui abandonne perd la partie.
+  /// À 2 joueurs, l'autre gagne. À 3 ou 4, il est éliminé et la partie continue.
+  Future<void> abandonGame() async {
+    if (gameOver) return;
+    if (_busy) {
+      _snack('Attends la fin du coup en cours.');
+      return;
+    }
+    final who = isOnline ? _myColor : currentPlayer;
+    if (forfeited.contains(who)) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Abandonner la partie ?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          '${nameOf(who)} perdra la partie.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Abandonner',
+              style: TextStyle(color: Color(0xFFFF8A80)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted || gameOver || _busy) return;
+    if (forfeited.contains(who)) return;
+
+    final act = activeIdx;
+    final next = act[(act.indexOf(who) + 1) % act.length];
+
+    setState(() {
+      forfeited.add(who);
+      players[who].pawns = List<int>.filled(pawnCount, -1);
+      _token++;
+      if (activeIdx.length == 1) {
+        winnerOverride = activeIdx.first;
+        gameOver = true;
+        message = '🏆 ${nameOf(winnerOverride!)} gagne : '
+            '${nameOf(who)} a abandonné.';
+      } else if (currentPlayer == who) {
+        currentPlayer = next;
+        hasRolled = false;
+        message = '${nameOf(who)} a abandonné. Au tour de ${nameOf(next)}.';
+      } else {
+        message = '${nameOf(who)} a abandonné.';
+        if (hasRolled && legalMoves().isEmpty) _advanceTurn();
+      }
+    });
+    _pushState();
   }
 
   /// Face aléatoire avec un 6 plus fréquent : 30 % de chances
@@ -1081,6 +1240,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           lastRoll[i] = (lr[i] as num).toInt();
         }
       }
+      final f = d['forfeited'];
+      if (f is List) {
+        forfeited
+          ..clear()
+          ..addAll(f.map((e) => (e as num).toInt()));
+      }
+      final w = (d['winner'] as num?)?.toInt() ?? -1;
+      winnerOverride = w >= 0 ? w : null;
       message = (d['msg'] as String?) ?? message;
       gameOver = d['over'] == true;
       if (((d['rev'] as num?) ?? 0) > 0) gameStarted = true;
@@ -1104,6 +1271,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'lastRoll': lastRoll,
         'msg': message,
         'over': gameOver,
+        'forfeited': forfeited.toList(),
+        'winner': winnerOverride ?? -1,
         'writer': o.uid,
         'rev': FieldValue.increment(1),
         if (gameOver) 'status': 'finished',
@@ -1113,11 +1282,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
-  /// Joueurs qui participent : 2 = Rouge + Bleu (face à face),
+  /// Joueurs de la partie au départ : 2 = Rouge + Bleu (face à face),
   /// 3 = Rouge + Vert + Bleu, 4 = tous.
-  List<int> get activeIdx => numPlayers == 2
+  List<int> get baseIdx => numPlayers == 2
       ? [0, 2]
       : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+
+  /// Joueurs encore en jeu (sans ceux qui ont abandonné).
+  List<int> get activeIdx =>
+      baseIdx.where((i) => !forfeited.contains(i)).toList();
 
   final Sfx sfx = Sfx();
   late final AnimationController _pulse;
@@ -1179,7 +1352,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   String _lastSig = '';
   int _idle = 0;
   int stepMs = 170; // vitesse des pions (ms par case)
-  DateTime? _lastBack; // dernier appui sur « retour » (double retour pour quitter)
+  DateTime? _lastBack; // dernier appui sur « retour » (double retour pour aller à l'accueil)
 
   // Dé : glissement et lancer
   bool diceDragging = false;
@@ -1477,6 +1650,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         flightPhase != 0 ||
         diceDragging ||
         playerIndex != currentPlayer ||
+        forfeited.contains(playerIndex) ||
         !_isMyTurn) {
       return;
     }
@@ -1583,6 +1757,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _pushState();
   }
 
+  /// Remet la partie à zéro (utilisé quand on change le nombre de joueurs
+  /// ou de pions dans les paramètres, avant le début de la partie).
   void restartGame() {
     if (isOnline) {
       setState(() => message = 'Pas de nouvelle partie en ligne.');
@@ -1599,6 +1775,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         lastRoll[i] = 1;
         finishThrows[i] = 0;
       }
+      forfeited.clear();
+      winnerOverride = null;
       gameStarted = false;
       currentPlayer = 0;
       dice = 1;
@@ -1608,7 +1786,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       gameOver = false;
       diceDragging = false;
       flightPhase = 0;
-      message = 'Nouvelle partie ! Touche ton dé pour commencer.';
+      message = 'Touche ton dé ou glisse-le pour le lancer !';
     });
   }
 
@@ -1932,22 +2110,22 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           PopupMenuButton<String>(
             color: const Color(0xFF14267A),
             onSelected: (value) {
-              if (value == 'new') restartGame();
-              if (value == 'home') Navigator.of(context).pop();
+              if (value == 'quit') abandonGame();
+              if (value == 'home') _goHome();
             },
             itemBuilder: (context) => const [
-              PopupMenuItem<String>(
-                value: 'new',
-                child: Text(
-                  'Nouvelle partie',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
               PopupMenuItem<String>(
                 value: 'home',
                 child: Text(
                   "Retour à l'accueil",
                   style: TextStyle(color: Colors.white),
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'quit',
+                child: Text(
+                  'Abandonner la partie',
+                  style: TextStyle(color: Color(0xFFFF8A80)),
                 ),
               ),
             ],
@@ -2438,7 +2616,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Changer ces deux réglages relance une nouvelle partie.',
+                      'Changer ces deux réglages remet la partie à zéro.',
                       style: TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                     const SizedBox(height: 14),
@@ -2459,23 +2637,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                             ),
                             onPressed: () {
                               Navigator.pop(sheetContext);
-                              Navigator.of(this.context).pop();
+                              _goHome();
                             },
                             child: const Text('Accueil'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF22B14C),
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () {
-                              Navigator.pop(sheetContext);
-                              restartGame();
-                            },
-                            child: const Text('Nouvelle partie'),
                           ),
                         ),
                       ],
@@ -2635,18 +2799,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   /// Double retour : un 1er appui affiche un message, un 2e appui
-  /// dans les 2 secondes quitte la partie.
+  /// dans les 2 secondes ramène à l'accueil (la partie reste en mémoire).
   void _onBackPressed(bool didPop, Object? result) {
     if (didPop) return;
     final now = DateTime.now();
     if (_lastBack != null &&
         now.difference(_lastBack!) < const Duration(seconds: 2)) {
-      Navigator.of(context).pop();
+      _goHome();
     } else {
       _lastBack = now;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Appuie encore sur retour pour quitter la partie'),
+          content: Text("Appuie encore sur retour pour aller à l'accueil"),
           duration: Duration(seconds: 2),
         ),
       );
