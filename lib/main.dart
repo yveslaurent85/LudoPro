@@ -7,7 +7,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import 'online.dart';
-import 'setup_screen.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -206,11 +205,17 @@ class HomeScreen extends StatelessWidget {
   /// Vrai quand une partie est en cours : on propose de la reprendre.
   final bool resumable;
 
-  /// Présentiel : chaque joueur se connecte à sa place dans l'écran de
-  /// préparation (SetupScreen), avec son compte et son portefeuille.
+  /// Présentiel : il faut d'abord être connecté à son compte.
+  /// Si Firebase n'a pas démarré, on laisse jouer quand même.
   void _openLocal(BuildContext context) {
+    final loggedIn =
+        !firebaseReady || FirebaseAuth.instance.currentUser != null;
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (context) => const SetupScreen()),
+      MaterialPageRoute<void>(
+        builder: (context) => loggedIn
+            ? const SetupScreen()
+            : OnlineScreen(onSignedIn: (context) => const SetupScreen()),
+      ),
     );
   }
 
@@ -265,7 +270,7 @@ class HomeScreen extends StatelessWidget {
                     color: const Color(0xFF22B14C),
                     icon: Icons.groups,
                     title: 'En présentiel',
-                    subtitle: 'Chaque joueur se connecte, même plateau',
+                    subtitle: 'Connecte-toi, puis jouez sur le même plateau',
                     onTap: () => _openLocal(context),
                   ),
                   const SizedBox(height: 14),
@@ -292,6 +297,356 @@ class HomeScreen extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
+// Préparation de la partie : joueurs (pseudo + avatar) et pions
+// ----------------------------------------------------------------------
+
+class SetupScreen extends StatefulWidget {
+  const SetupScreen({super.key});
+
+  @override
+  State<SetupScreen> createState() => _SetupScreenState();
+}
+
+class _SetupScreenState extends State<SetupScreen> {
+  int numPlayers = 4;
+  int pawnCount = 4;
+  bool doorSafe = true; // protection des portes (cases de départ)
+  bool starSafe = true; // protection des étoiles
+
+  static const List<IconData> avatarChoices = [
+    Icons.person,
+    Icons.face,
+    Icons.face_3,
+    Icons.person_outline,
+    Icons.sports_esports,
+    Icons.pets,
+    Icons.rocket_launch,
+    Icons.star,
+    Icons.emoji_emotions,
+    Icons.android,
+    Icons.local_fire_department,
+    Icons.music_note,
+  ];
+  static const List<String> colorNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
+  static const List<Color> colorList = [
+    Color(0xFFE5262B),
+    Color(0xFF22B14C),
+    Color(0xFF1E6BFF),
+    Color(0xFFFFC21A),
+  ];
+
+  late final List<TextEditingController> nameCtrls;
+  final List<IconData> avatars = [
+    Icons.person,
+    Icons.face,
+    Icons.face_3,
+    Icons.person_outline,
+  ];
+
+  /// Couleurs utilisées selon le nombre de joueurs (comme dans LudoGame).
+  List<int> get seats =>
+      numPlayers == 2 ? [0, 2] : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+
+  @override
+  void initState() {
+    super.initState();
+    nameCtrls = List.generate(4, (_) => TextEditingController());
+    // Le premier joueur reprend le pseudo du compte connecté.
+    if (firebaseReady) {
+      final n = FirebaseAuth.instance.currentUser?.displayName;
+      if (n != null && n.isNotEmpty) nameCtrls[0].text = n;
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in nameCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar(int color) async {
+    final choice = await showDialog<IconData>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Choisis ton avatar',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: SizedBox(
+          width: 280,
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final a in avatarChoices)
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx, a),
+                  child: CircleAvatar(
+                    radius: 24,
+                    backgroundColor: colorList[color],
+                    child: Container(
+                      decoration: a == avatars[color]
+                          ? BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 3,
+                              ),
+                            )
+                          : null,
+                      alignment: Alignment.center,
+                      child: Icon(a, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice != null) setState(() => avatars[color] = choice);
+  }
+
+  Widget _playerRow(int color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => _pickAvatar(color),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: colorList[color],
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(avatars[color], color: Colors.white),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: nameCtrls[color],
+              maxLength: 12,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: const Color(0xFFFFC21A),
+              decoration: InputDecoration(
+                counterText: '',
+                isDense: true,
+                hintText: 'Joueur ${colorNames[color]}',
+                hintStyle: const TextStyle(color: Colors.white54),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide:
+                      const BorderSide(color: Color(0xFFFFC21A), width: 2),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _switch(String title, String subtitle, bool value,
+      void Function(bool) onChanged) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      activeColor: const Color(0xFFFFC21A),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
+      ),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _picker(
+    String title,
+    List<int> values,
+    int current,
+    void Function(int) onPick,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            for (final v in values)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: () => onPick(v),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        color: v == current
+                            ? const Color(0xFFFFC21A)
+                            : Colors.white.withOpacity(0.12),
+                      ),
+                      child: Text(
+                        '$v',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: v == current
+                              ? const Color(0xFF1A1F3A)
+                              : Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    const Text(
+                      'Préparer la partie',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                _picker(
+                  'Nombre de joueurs',
+                  const [2, 3, 4],
+                  numPlayers,
+                  (v) => setState(() => numPlayers = v),
+                ),
+                const SizedBox(height: 24),
+                _picker(
+                  'Nombre de pions par joueur',
+                  const [1, 2, 3, 4],
+                  pawnCount,
+                  (v) => setState(() => pawnCount = v),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Joueurs (touche le rond pour changer d\'avatar)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                for (final s in seats) _playerRow(s),
+                const SizedBox(height: 6),
+                _switch(
+                  'Protection des portes',
+                  'Un pion sur une case de départ ne peut pas être capturé',
+                  doorSafe,
+                  (v) => setState(() => doorSafe = v),
+                ),
+                _switch(
+                  "Protection des étoiles",
+                  'Un pion sur une étoile ne peut pas être capturé',
+                  starSafe,
+                  (v) => setState(() => starSafe = v),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF22B14C),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => LudoGame(
+                          numPlayers: numPlayers,
+                          pawnCount: pawnCount,
+                          doorSafe: doorSafe,
+                          starSafe: starSafe,
+                          names: [
+                            for (int i = 0; i < 4; i++) nameCtrls[i].text.trim(),
+                          ],
+                          avatars: List<IconData>.from(avatars),
+                        ),
+                      ),
+                    ),
+                    child: const Text(
+                      'Lancer la partie',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------
 // Jeu en ligne : création de compte / connexion
 // (comptes gérés par Firebase Authentication)
 // ----------------------------------------------------------------------
@@ -299,8 +654,8 @@ class HomeScreen extends StatelessWidget {
 class OnlineScreen extends StatefulWidget {
   const OnlineScreen({super.key, this.onSignedIn});
 
-  /// Si renseigné : après la connexion, on ouvre directement
-  /// cet écran à la place de celui-ci.
+  /// Si renseigné (mode présentiel) : après la connexion, on ouvre
+  /// directement cet écran à la place de celui-ci.
   final WidgetBuilder? onSignedIn;
 
   @override
@@ -407,6 +762,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
         user = auth.currentUser;
         passCtrl.clear();
       });
+      // Mode présentiel : connexion réussie, on passe à la préparation.
       final next = widget.onSignedIn;
       if (next != null && auth.currentUser != null) {
         Navigator.of(context).pushReplacement(
@@ -2118,7 +2474,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   children: [
                     Text(
                       isOnline ? 'Mode : En ligne' : 'Mode : Présentiel',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
                         fontSize: 9,
                         fontWeight: FontWeight.bold,
@@ -2606,7 +2962,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       isOnline
                           ? 'Mode : en ligne'
                           : 'Mode : en présentiel (tous les joueurs sur le même plateau)',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                     const SizedBox(height: 12),
                     Row(
