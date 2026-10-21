@@ -1,4 +1,3 @@
-import 'package:katika/deux_des.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -289,6 +288,18 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  _ModeCard(
+                    color: const Color(0xFFFFA000),
+                    icon: Icons.casino,
+                    title: 'Deux dés',
+                    subtitle: 'Lance deux dés',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => const DeuxDesPage(),
+                      ),
+                    ),
+                  ),
                 ],
                 const Spacer(flex: 2),
               ],
@@ -316,6 +327,161 @@ class _SetupScreenState extends State<SetupScreen> {
   int pawnCount = 4;
   bool doorSafe = true; // protection des portes (cases de départ)
   bool starSafe = true; // protection des étoiles
+
+  // --- Mode équipe (2 contre 2) ---------------------------------------
+  bool teamMode = false;
+
+  /// Binôme de chaque couleur (-1 = pas encore de binôme).
+  final List<int> partners = [-1, -1, -1, -1];
+
+  bool get teamsReady => !teamMode || partners.every((p) => p != -1);
+
+  void _resetTeams() {
+    for (int i = 0; i < 4; i++) {
+      partners[i] = -1;
+    }
+  }
+
+  String _label(int c) {
+    if (accounts[c] != null) return accounts[c]!.name;
+    final t = nameCtrls[c].text.trim();
+    return t.isNotEmpty ? t : 'Joueur ${colorNames[c]}';
+  }
+
+  /// Le joueur [from] invite un autre joueur libre comme binôme.
+  /// L'invité peut accepter ou refuser.
+  Future<void> _invite(int from) async {
+    final free = [
+      for (final s in seats)
+        if (s != from && partners[s] == -1) s,
+    ];
+    if (free.isEmpty) return;
+
+    final target = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: Text(
+          '${_label(from)} : inviter qui ?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final f in free)
+              ListTile(
+                leading:
+                    CircleAvatar(backgroundColor: colorList[f], radius: 12),
+                title: Text(
+                  _label(f),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () => Navigator.pop(ctx, f),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (target == null || !mounted) return;
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: Text(
+          '${_label(target)}, invitation !',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          "${_label(from)} t'invite comme binôme. Tu acceptes ?",
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Refuser',
+              style: TextStyle(color: Color(0xFFFF8A80)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Accepter'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+
+    if (accepted == true) {
+      setState(() {
+        partners[from] = target;
+        partners[target] = from;
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_label(target)} a refusé le binôme avec ${_label(from)}.',
+          ),
+        ),
+      );
+    }
+  }
+
+  void _breakTeam(int c) {
+    setState(() {
+      final m = partners[c];
+      partners[c] = -1;
+      if (m != -1) partners[m] = -1;
+    });
+  }
+
+  Widget _teamSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 10),
+        const Text(
+          'Binômes',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final c in seats)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: [
+                CircleAvatar(radius: 10, backgroundColor: colorList[c]),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    partners[c] == -1
+                        ? '${_label(c)} : sans binôme'
+                        : '${_label(c)} + ${_label(partners[c])}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+                partners[c] == -1
+                    ? TextButton(
+                        onPressed: () => _invite(c),
+                        child: const Text('Inviter'),
+                      )
+                    : TextButton(
+                        onPressed: () => _breakTeam(c),
+                        child: const Text('Annuler'),
+                      ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 
   static const List<IconData> avatarChoices = [
     Icons.person,
@@ -522,6 +688,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     : TextField(
                         controller: nameCtrls[color],
                         maxLength: 12,
+                        onChanged: (_) => setState(() {}),
                         style: const TextStyle(color: Colors.white),
                         cursorColor: const Color(0xFFFFC21A),
                         decoration: InputDecoration(
@@ -667,7 +834,13 @@ class _SetupScreenState extends State<SetupScreen> {
                   'Nombre de joueurs',
                   const [2, 3, 4],
                   numPlayers,
-                  (v) => setState(() => numPlayers = v),
+                  (v) => setState(() {
+                    numPlayers = v;
+                    if (v != 4) {
+                      teamMode = false;
+                      _resetTeams();
+                    }
+                  }),
                 ),
                 const SizedBox(height: 24),
                 _picker(
@@ -689,6 +862,18 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
                 const SizedBox(height: 10),
                 for (final s in seats) _playerRow(s),
+                if (numPlayers == 4)
+                  _switch(
+                    'Jouer en équipe (2 contre 2)',
+                    "Les binômes ne se capturent pas. L'équipe gagne quand "
+                        'les deux ont fini.',
+                    teamMode,
+                    (v) => setState(() {
+                      teamMode = v;
+                      _resetTeams();
+                    }),
+                  ),
+                if (teamMode) _teamSection(),
                 const SizedBox(height: 6),
                 _switch(
                   'Protection des portes',
@@ -711,7 +896,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       backgroundColor: const Color(0xFF22B14C),
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: !allConnected
+                    onPressed: (!allConnected || !teamsReady)
                         ? null
                         : () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -720,6 +905,9 @@ class _SetupScreenState extends State<SetupScreen> {
                                   pawnCount: pawnCount,
                                   doorSafe: doorSafe,
                                   starSafe: starSafe,
+                                  partners: teamMode
+                                      ? List<int>.from(partners)
+                                      : null,
                                   names: [
                                     for (int i = 0; i < 4; i++)
                                       accounts[i]?.name ??
@@ -730,9 +918,11 @@ class _SetupScreenState extends State<SetupScreen> {
                               ),
                             ),
                     child: Text(
-                      allConnected
-                          ? 'Lancer la partie'
-                          : 'Tous les joueurs doivent se connecter',
+                      !allConnected
+                          ? 'Tous les joueurs doivent se connecter'
+                          : (!teamsReady
+                              ? 'Forme les binômes'
+                              : 'Lancer la partie'),
                       style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
@@ -1241,6 +1431,7 @@ class LudoGame extends StatefulWidget {
     this.online,
     this.names,
     this.avatars,
+    this.partners,
   });
 
   final int numPlayers;
@@ -1255,6 +1446,9 @@ class LudoGame extends StatefulWidget {
 
   /// Avatars choisis, indexés par couleur.
   final List<IconData>? avatars;
+
+  /// Binôme de chaque couleur (-1 = aucun). null = pas de mode équipe.
+  final List<int>? partners;
 
   @override
   State<LudoGame> createState() => _LudoGameState();
@@ -1295,6 +1489,32 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
+
+  // --- Mode équipe (2 contre 2) ---------------------------------------
+  /// Binôme d'une couleur (-1 = aucun).
+  int _mateOf(int c) => widget.partners == null ? -1 : widget.partners![c];
+
+  /// a et b sont-ils dans la même équipe ?
+  bool _isMate(int a, int b) =>
+      widget.partners != null && widget.partners![a] == b;
+
+  /// « Anna & Paul » en mode équipe, sinon juste le nom.
+  String teamLabel(int c) {
+    final m = _mateOf(c);
+    return m == -1 ? nameOf(c) : '${nameOf(c)} & ${nameOf(m)}';
+  }
+
+  /// Ce joueur a fini tous ses pions (utilisé en mode équipe seulement :
+  /// son binôme continue de jouer, on saute son tour).
+  bool _finishedAll(int c) =>
+      widget.partners != null && players[c].pawns.every((x) => x == 56);
+
+  /// Il ne reste qu'un camp en jeu (un joueur, ou deux binômes).
+  bool get _oneSideLeft {
+    final a = activeIdx;
+    return a.length == 1 ||
+        (widget.partners != null && a.length == 2 && _mateOf(a[0]) == a[1]);
+  }
 
   /// Nom affiché pour une couleur (pseudo choisi, pseudo en ligne,
   /// « Joueur Rouge » sinon).
@@ -1439,6 +1659,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
   /// Abandon : le joueur qui abandonne perd la partie.
   /// À 2 joueurs, l'autre gagne. À 3 ou 4, il est éliminé et la partie continue.
+  /// En mode équipe, c'est toute l'équipe qui perd.
   Future<void> abandonGame() async {
     if (gameOver) return;
     if (_busy) {
@@ -1457,7 +1678,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           style: TextStyle(color: Colors.white),
         ),
         content: Text(
-          '${nameOf(who)} perdra la partie.',
+          widget.partners != null
+              ? "${teamLabel(who)} perdront la partie."
+              : '${nameOf(who)} perdra la partie.',
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -1478,19 +1701,34 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (ok != true || !mounted || gameOver || _busy) return;
     if (forfeited.contains(who)) return;
 
-    final act = activeIdx;
-    final next = act[(act.indexOf(who) + 1) % act.length];
+    final mate = _mateOf(who);
+    int next = who;
 
     setState(() {
       forfeited.add(who);
       players[who].pawns = List<int>.filled(pawnCount, -1);
+      if (mate != -1) {
+        forfeited.add(mate);
+        players[mate].pawns = List<int>.filled(pawnCount, -1);
+      }
       _token++;
-      if (activeIdx.length == 1) {
+
+      // Prochain joueur encore en jeu, dans l'ordre des tours
+      final order = baseIdx;
+      for (int k = 1; k <= order.length; k++) {
+        final c = order[(order.indexOf(who) + k) % order.length];
+        if (!forfeited.contains(c)) {
+          next = c;
+          break;
+        }
+      }
+
+      if (_oneSideLeft) {
         winnerOverride = activeIdx.first;
         gameOver = true;
-        message = '🏆 ${nameOf(winnerOverride!)} gagne : '
-            '${nameOf(who)} a abandonné.';
-      } else if (currentPlayer == who) {
+        message = '🏆 ${teamLabel(winnerOverride!)} gagne : '
+            '${teamLabel(who)} a abandonné.';
+      } else if (forfeited.contains(currentPlayer)) {
         currentPlayer = next;
         hasRolled = false;
         message = '${nameOf(who)} a abandonné. Au tour de ${nameOf(next)}.';
@@ -1829,7 +2067,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return position + dice <= 56;
   }
 
-  /// Ce coup capture-t-il un pion adverse ?
+  /// Ce coup capture-t-il un pion adverse ? (jamais un pion du binôme)
   bool moveCaptures(int pawnIndex) {
     final player = players[currentPlayer];
     final from = player.pawns[pawnIndex];
@@ -1842,7 +2080,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (safeCells.contains(absolutePosition)) return false;
 
     for (int p = 0; p < players.length; p++) {
-      if (p == currentPlayer) continue;
+      if (p == currentPlayer || _isMate(p, currentPlayer)) continue;
       for (final pos in players[p].pawns) {
         if (pos >= 0 &&
             pos < 51 &&
@@ -2011,9 +2249,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  /// Passe au joueur suivant, en sautant ceux qui ont déjà fini
+  /// tous leurs pions (mode équipe : leur binôme continue).
   void _advanceTurn() {
     final act = activeIdx;
-    currentPlayer = act[(act.indexOf(currentPlayer) + 1) % act.length];
+    var next = currentPlayer;
+    for (int k = 0; k < act.length; k++) {
+      next = act[(act.indexOf(next) + 1) % act.length];
+      if (!_finishedAll(next)) break;
+    }
+    currentPlayer = next;
     hasRolled = false;
     message = 'Touche ton dé ou glisse-le pour le lancer !';
   }
@@ -2086,12 +2331,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     bool captured = false;
 
     // Capture possible uniquement sur le circuit commun (0..50), hors cases sûres
+    // et jamais contre le binôme.
     if (newPosition < 51) {
       final absolutePosition = (player.start + newPosition) % 52;
 
       if (!safeCells.contains(absolutePosition)) {
         for (int p = 0; p < players.length; p++) {
-          if (p == playerIndex) continue;
+          if (p == playerIndex || _isMate(p, playerIndex)) continue;
 
           for (int i = 0; i < players[p].pawns.length; i++) {
             final opponentPosition = players[p].pawns[i];
@@ -2108,7 +2354,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     }
 
-    final won = player.pawns.every((p) => p == 56);
+    // Victoire : seul, tous ses pions arrivés ; en équipe, les deux binômes.
+    final mate = _mateOf(playerIndex);
+    final selfDone = player.pawns.every((p) => p == 56);
+    final won = selfDone &&
+        (mate == -1 || players[mate].pawns.every((p) => p == 56));
 
     if (won) {
       sfx.win();
@@ -2129,7 +2379,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
       if (won) {
         gameOver = true;
-        message = '🏆 ${nameOf(playerIndex)} remporte la partie !';
+        message = '🏆 ${teamLabel(playerIndex)} remporte la partie !';
+      } else if (selfDone) {
+        // Il a fini, son binôme continue : on passe la main.
+        _advanceTurn();
       } else if (dice == 6 || captured || newPosition == 56) {
         hasRolled = false;
         message = captured
@@ -2440,7 +2693,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         ),
                       ),
                       Text(
-                        nameOf(w),
+                        teamLabel(w),
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: c * 0.8,
@@ -2627,8 +2880,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isOnline ? 'Mode : En ligne' : 'Mode : Présentiel',
-                      style: TextStyle(
+                      isOnline
+                          ? 'Mode : En ligne'
+                          : (widget.partners != null
+                              ? 'Mode : Équipes 2v2'
+                              : 'Mode : Présentiel'),
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 9,
                         fontWeight: FontWeight.bold,
@@ -3097,7 +3354,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           ChoiceChip(
                             label: Text('$n'),
                             selected: numPlayers == n,
-                            onSelected: isOnline
+                            // En mode équipe : toujours 4 joueurs.
+                            onSelected: (isOnline || widget.partners != null)
                                 ? null
                                 : (_) {
                                     update(() => numPlayers = n);
@@ -3115,8 +3373,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     Text(
                       isOnline
                           ? 'Mode : en ligne'
-                          : 'Mode : en présentiel (tous les joueurs sur le même plateau)',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                          : (widget.partners != null
+                              ? 'Mode : équipes 2 contre 2 (même plateau)'
+                              : 'Mode : en présentiel (tous les joueurs sur le même plateau)'),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12),
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -3304,7 +3565,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 Text(
                   w == null
                       ? '🏁 Partie terminée'
-                      : '🏆 ${nameOf(w)} remporte la partie !',
+                      : '🏆 ${teamLabel(w)} remporte la partie !',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Color(0xFFFFC21A),
@@ -3781,238 +4042,5 @@ class BoardPainter extends CustomPainter {
     triangle(colors[2], Offset(r, l), Offset(r, r)); // droite
     triangle(colors[3], Offset(l, r), Offset(r, r)); // bas
 
-    final lines = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = Colors.white70;
-    canvas.drawLine(Offset(l, l), Offset(r, r), lines);
-    canvas.drawLine(Offset(r, l), Offset(l, r), lines);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// ----------------------------------------------------------------------
-// Dessin d'un pion en relief
-// ----------------------------------------------------------------------
-
-class PawnPainter extends CustomPainter {
-  final Color color;
-  final bool highlight;
-  final bool done; // pion arrivé : halo doré + étoile
-
-  PawnPainter({
-    required this.color,
-    required this.highlight,
-    this.done = false,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-
-    // Ombre au sol
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.5, h * 0.86),
-        width: w * 0.9,
-        height: h * 0.16,
-      ),
-      Paint()..color = Colors.black.withOpacity(0.28),
-    );
-
-    // Pion arrivé : halo doré sous le pion
-    if (done) {
-      final halo = Rect.fromCenter(
-        center: Offset(w * 0.5, h * 0.86),
-        width: w * 1.15,
-        height: h * 0.26,
-      );
-      canvas.drawOval(
-        halo,
-        Paint()..color = const Color(0xFFFFC21A).withOpacity(0.55),
-      );
-      canvas.drawOval(
-        halo,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = const Color(0xFFFFC21A),
-      );
-    }
-
-    // Anneau lumineux : ce pion peut jouer
-    if (highlight) {
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(w * 0.5, h * 0.86),
-          width: w * 1.1,
-          height: h * 0.22,
-        ),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.2
-          ..color = Colors.white.withOpacity(0.9),
-      );
-    }
-
-    // Socle
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.5, h * 0.8),
-        width: w * 0.84,
-        height: h * 0.2,
-      ),
-      Paint()..color = shade(color, -0.22),
-    );
-
-    // Corps
-    final body = Path()
-      ..moveTo(w * 0.14, h * 0.8)
-      ..quadraticBezierTo(w * 0.3, h * 0.72, w * 0.4, h * 0.5)
-      ..lineTo(w * 0.6, h * 0.5)
-      ..quadraticBezierTo(w * 0.7, h * 0.72, w * 0.86, h * 0.8)
-      ..quadraticBezierTo(w * 0.5, h * 0.9, w * 0.14, h * 0.8)
-      ..close();
-    final bodyRect = Rect.fromLTWH(0, h * 0.5, w, h * 0.4);
-    canvas.drawPath(
-      body,
-      Paint()
-        ..shader = LinearGradient(
-          colors: [
-            shade(color, -0.15),
-            shade(color, 0.12),
-            shade(color, -0.2),
-          ],
-          stops: const [0.0, 0.45, 1.0],
-        ).createShader(bodyRect),
-    );
-
-    // Tête
-    final headCenter = Offset(w * 0.5, h * 0.33);
-    final headRadius = w * 0.27;
-    canvas.drawCircle(
-      headCenter,
-      headRadius,
-      Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(-0.35, -0.4),
-          radius: 0.9,
-          colors: [shade(color, 0.3), color, shade(color, -0.2)],
-          stops: const [0.0, 0.5, 1.0],
-        ).createShader(Rect.fromCircle(center: headCenter, radius: headRadius)),
-    );
-    canvas.drawCircle(
-      headCenter,
-      headRadius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8
-        ..color = shade(color, -0.3),
-    );
-
-    // Reflet
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(w * 0.42, h * 0.26),
-        width: w * 0.16,
-        height: h * 0.1,
-      ),
-      Paint()..color = Colors.white.withOpacity(0.55),
-    );
-
-    // Pion arrivé : petite étoile dorée au-dessus de la tête
-    if (done) {
-      final sc = Offset(w * 0.5, h * 0.09);
-      final sr = w * 0.22;
-      final star = Path();
-      for (int i = 0; i < 10; i++) {
-        final r = i.isEven ? sr : sr * 0.45;
-        final a = -pi / 2 + i * pi / 5;
-        final x = sc.dx + r * cos(a);
-        final y = sc.dy + r * sin(a);
-        if (i == 0) {
-          star.moveTo(x, y);
-        } else {
-          star.lineTo(x, y);
-        }
-      }
-      star.close();
-      canvas.drawPath(star, Paint()..color = const Color(0xFFFFC21A));
-      canvas.drawPath(
-        star,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 0.8
-          ..color = Colors.white,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant PawnPainter oldDelegate) =>
-      oldDelegate.color != color ||
-      oldDelegate.highlight != highlight ||
-      oldDelegate.done != done;
-}
-
-// ----------------------------------------------------------------------
-// Dessin du dé
-// ----------------------------------------------------------------------
-
-class DicePainter extends CustomPainter {
-  final int value;
-
-  DicePainter(this.value);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rr = RRect.fromRectAndRadius(
-      rect.deflate(2),
-      Radius.circular(size.width * 0.2),
-    );
-
-    canvas.drawRRect(
-      rr,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFD6DCEB)],
-        ).createShader(rect),
-    );
-    canvas.drawRRect(
-      rr,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..color = const Color(0xFFB0B8D0),
-    );
-
-    const patterns = <int, List<int>>{
-      1: [4],
-      2: [0, 8],
-      3: [0, 4, 8],
-      4: [0, 2, 6, 8],
-      5: [0, 2, 4, 6, 8],
-      6: [0, 2, 3, 5, 6, 8],
-    };
-
-    for (final i in patterns[value] ?? const <int>[]) {
-      final dx = (0.25 + (i % 3) * 0.25) * size.width;
-      final dy = (0.25 + (i ~/ 3) * 0.25) * size.height;
-      canvas.drawCircle(
-        Offset(dx, dy),
-        size.width * 0.075,
-        Paint()..color = const Color(0xFF1A1F3A),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant DicePainter oldDelegate) =>
-      oldDelegate.value != value;
-}
+    final lines = Pa
+Aperçu tronqué pour fichier volumineux
