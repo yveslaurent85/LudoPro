@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'accounts.dart';
 import 'online.dart';
 import 'recharge.dart';
+import 'deux_des.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
