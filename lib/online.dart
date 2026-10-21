@@ -69,6 +69,65 @@ List<Map<String, dynamic>> _playersOf(Map<String, dynamic> d) {
       .toList();
 }
 
+// --- Mode équipe (2 contre 2) -----------------------------------------
+// Avec 4 joueurs, la place (seat) est égale à la couleur : 0 Rouge,
+// 1 Vert, 2 Bleu, 3 Jaune. « partners » donne le binôme de chaque place
+// (-1 = pas encore de binôme). « invites » = invitations en attente.
+
+List<int> _partnersOf(Map<String, dynamic> d) {
+  final l = d['partners'];
+  if (l is List && l.length == 4) {
+    return l.map((e) => (e as num).toInt()).toList();
+  }
+  return [-1, -1, -1, -1];
+}
+
+List<Map<String, int>> _invitesOf(Map<String, dynamic> d) {
+  return ((d['invites'] as List?) ?? const []).map((e) {
+    final m = e as Map;
+    return <String, int>{
+      'from': (m['from'] as num).toInt(),
+      'to': (m['to'] as num).toInt(),
+    };
+  }).toList();
+}
+
+/// Modifie les binômes / invitations dans une transaction (salle d'attente).
+/// Quand les 4 joueurs sont là et que tous ont un binôme, la partie démarre.
+Future<void> _teamTx(
+  String gameId,
+  String uid,
+  void Function(
+    int seat,
+    List<int> partners,
+    List<Map<String, int>> invites,
+  ) change,
+) async {
+  final ref = _games.doc(gameId);
+  await FirebaseFirestore.instance.runTransaction<void>((tx) async {
+    final snap = await tx.get(ref);
+    final d = snap.data();
+    if (d == null || d['status'] != 'waiting' || d['teamMode'] != true) {
+      return;
+    }
+    final players = _playersOf(d);
+    final seat = players.indexWhere((p) => p['uid'] == uid);
+    if (seat < 0) return;
+
+    final partners = _partnersOf(d);
+    final invites = _invitesOf(d);
+    change(seat, partners, invites);
+
+    final max = (d['maxPlayers'] as num).toInt();
+    final ready = players.length >= max && partners.every((p) => p != -1);
+    tx.update(ref, {
+      'partners': partners,
+      'invites': invites,
+      if (ready) 'status': 'playing',
+    });
+  });
+}
+
 Widget _pickerRow(
   String title,
   List<int> values,
@@ -240,6 +299,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   bool doorSafe = true;
   bool starSafe = true;
   bool privateRoom = false;
+  bool teamMode = false; // 2 contre 2 (4 joueurs seulement)
   bool busy = false;
   String? error;
 
@@ -274,6 +334,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       error = null;
     });
     try {
+      final team = teamMode && numPlayers == 4;
       final ref = _games.doc();
       await ref.set({
         'hostUid': user.uid,
@@ -283,6 +344,9 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'doorSafe': doorSafe,
         'starSafe': starSafe,
         'private': privateRoom,
+        'teamMode': team,
+        'partners': [-1, -1, -1, -1],
+        'invites': <Map<String, int>>[],
         'code': _newCode(),
         'status': 'waiting',
         'players': [
@@ -338,10 +402,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           return 'Cette partie est déjà complète.';
         }
         players.add({'uid': user.uid, 'name': _displayName(user)});
+        // En mode équipe, la partie ne démarre qu'une fois les binômes formés.
+        final start = players.length >= max && d['teamMode'] != true;
         tx.update(ref, {
           'players': players,
           'uids': FieldValue.arrayUnion([user.uid]),
-          if (players.length >= max) 'status': 'playing',
+          if (start) 'status': 'playing',
         });
         return null;
       });
@@ -413,9 +479,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final max = (d['maxPlayers'] as num).toInt();
                   final waiting = d['status'] == 'waiting';
                   final priv = d['private'] == true ? ' 🔒' : '';
+                  final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
                     'Partie de ${d['hostName']}$priv',
-                    waiting ? 'En attente ($n/$max joueurs)' : 'En cours',
+                    waiting
+                        ? 'En attente ($n/$max joueurs)$team'
+                        : 'En cours$team',
                     waiting ? 'Ouvrir' : 'Reprendre',
                     busy ? null : () => _openRoom(doc.id),
                   );
@@ -459,9 +528,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final n = _playersOf(d).length;
                   final max = (d['maxPlayers'] as num).toInt();
                   final pawns = (d['pawnCount'] as num).toInt();
+                  final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
                     'Partie de ${d['hostName']}',
-                    '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}',
+                    '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team',
                     'Rejoindre',
                     busy ? null : () => _join(doc.id),
                   );
@@ -559,7 +629,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 'Nombre de joueurs',
                 const [2, 3, 4],
                 numPlayers,
-                (v) => setState(() => numPlayers = v),
+                (v) => setState(() {
+                  numPlayers = v;
+                  if (v != 4) teamMode = false;
+                }),
               ),
               const SizedBox(height: 14),
               _pickerRow(
@@ -569,6 +642,14 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 (v) => setState(() => pawnCount = v),
               ),
               const SizedBox(height: 6),
+              if (numPlayers == 4)
+                _switchRow(
+                  'Jouer en équipe (2 contre 2)',
+                  'Les binômes se choisissent par invitation et ne se '
+                      'capturent pas',
+                  teamMode,
+                  (v) => setState(() => teamMode = v),
+                ),
               _switchRow(
                 'Protection des portes',
                 'Un pion sur une case de départ ne peut pas être capturé',
@@ -690,6 +771,11 @@ class OnlineGameRoom extends StatelessWidget {
           tx.update(ref, {
             'players': players,
             'uids': FieldValue.arrayRemove([uid]),
+            // Les places changent : on efface binômes et invitations.
+            if (data['teamMode'] == true) ...{
+              'partners': [-1, -1, -1, -1],
+              'invites': <Map<String, int>>[],
+            },
           });
         });
       }
@@ -743,6 +829,179 @@ class OnlineGameRoom extends StatelessWidget {
     );
   }
 
+  /// Section « Binômes » de la salle d'attente (mode 2 contre 2).
+  /// Chaque joueur peut inviter un autre joueur libre ; l'invité
+  /// accepte ou refuse depuis son propre téléphone.
+  Widget _teamSection(
+    BuildContext context,
+    Map<String, dynamic> d,
+    List<Map<String, dynamic>> players,
+    String uid,
+  ) {
+    final me = players.indexWhere((p) => p['uid'] == uid);
+    if (me < 0) return const SizedBox.shrink();
+
+    final partners = _partnersOf(d);
+    final invites = _invitesOf(d);
+    String nameOfSeat(int s) =>
+        s >= 0 && s < players.length ? '${players[s]['name']}' : '?';
+
+    TextStyle white([double size = 14, FontWeight w = FontWeight.w700]) =>
+        TextStyle(color: Colors.white, fontSize: size, fontWeight: w);
+
+    Widget card(List<Widget> children) => Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: Colors.white.withOpacity(0.12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(children: children),
+        );
+
+    void run(
+      void Function(
+        int seat,
+        List<int> partners,
+        List<Map<String, int>> invites,
+      ) change,
+    ) {
+      _teamTx(gameId, uid, change).catchError((_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Action impossible. Réessaie.')),
+          );
+        }
+      });
+    }
+
+    final widgets = <Widget>[
+      const SizedBox(height: 6),
+      const Text(
+        'Binômes (2 contre 2)',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 8),
+    ];
+
+    if (partners[me] != -1) {
+      // J'ai déjà un binôme.
+      widgets.add(
+        card([
+          Expanded(
+            child: Text(
+              '🤝 Ton binôme : ${nameOfSeat(partners[me])}',
+              style: white(),
+            ),
+          ),
+          TextButton(
+            onPressed: () => run((seat, p, inv) {
+              final m = p[seat];
+              p[seat] = -1;
+              if (m != -1) p[m] = -1;
+            }),
+            child: const Text('Annuler'),
+          ),
+        ]),
+      );
+    } else {
+      // Invitations reçues : accepter ou refuser.
+      for (final inv in invites.where((i) => i['to'] == me)) {
+        final from = inv['from']!;
+        if (partners[from] != -1) continue;
+        widgets.add(
+          card([
+            Expanded(
+              child: Text(
+                "${nameOfSeat(from)} t'invite comme binôme",
+                style: white(),
+              ),
+            ),
+            TextButton(
+              onPressed: () => run((seat, p, i) {
+                i.removeWhere(
+                  (x) => x['from'] == from && x['to'] == seat,
+                );
+              }),
+              child: const Text(
+                'Refuser',
+                style: TextStyle(color: Color(0xFFFF8A80)),
+              ),
+            ),
+            TextButton(
+              onPressed: () => run((seat, p, i) {
+                final valid = p[seat] == -1 &&
+                    p[from] == -1 &&
+                    i.any((x) => x['from'] == from && x['to'] == seat);
+                if (!valid) return;
+                p[seat] = from;
+                p[from] = seat;
+                i.removeWhere(
+                  (x) =>
+                      x['from'] == seat ||
+                      x['to'] == seat ||
+                      x['from'] == from ||
+                      x['to'] == from,
+                );
+              }),
+              child: const Text('Accepter'),
+            ),
+          ]),
+        );
+      }
+
+      // Inviter les autres joueurs encore libres.
+      for (int s = 0; s < players.length; s++) {
+        if (s == me || partners[s] != -1) continue;
+        final sent = invites.any((i) => i['from'] == me && i['to'] == s);
+        widgets.add(
+          card([
+            CircleAvatar(radius: 8, backgroundColor: _seatPalette[s]),
+            const SizedBox(width: 10),
+            Expanded(child: Text(nameOfSeat(s), style: white())),
+            sent
+                ? TextButton(
+                    onPressed: () => run((seat, p, i) {
+                      i.removeWhere(
+                        (x) => x['from'] == seat && x['to'] == s,
+                      );
+                    }),
+                    child: const Text('Invitation envoyée · Annuler'),
+                  )
+                : TextButton(
+                    onPressed: () => run((seat, p, i) {
+                      if (p[seat] != -1 || p[s] != -1) return;
+                      // Une seule invitation envoyée à la fois.
+                      i.removeWhere((x) => x['from'] == seat);
+                      i.add({'from': seat, 'to': s});
+                    }),
+                    child: const Text('Inviter'),
+                  ),
+          ]),
+        );
+      }
+
+      if (players.length < 2) {
+        widgets.add(
+          const Text(
+            "Attends que d'autres joueurs rejoignent pour inviter un binôme.",
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
+    );
+  }
+
   Widget _waiting(
     BuildContext context,
     Map<String, dynamic> d,
@@ -752,6 +1011,8 @@ class OnlineGameRoom extends StatelessWidget {
     final max = (d['maxPlayers'] as num).toInt();
     final pawns = (d['pawnCount'] as num).toInt();
     final colors = _colorsFor(max);
+    final teamOn = d['teamMode'] == true;
+    final partners = _partnersOf(d);
 
     return Scaffold(
       body: Container(
@@ -759,7 +1020,7 @@ class OnlineGameRoom extends StatelessWidget {
         height: double.infinity,
         decoration: _bg,
         child: SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -774,13 +1035,17 @@ class OnlineGameRoom extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '${players.length}/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''} chacun',
+                  '${players.length}/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''} chacun'
+                  '${teamOn ? ' • 2 contre 2' : ''}',
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'La partie démarre dès que tout le monde est là.',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                Text(
+                  teamOn
+                      ? 'La partie démarre quand les 4 joueurs sont là et que '
+                          'les binômes sont formés.'
+                      : 'La partie démarre dès que tout le monde est là.',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 if (d['code'] != null) _codeCard(context, d),
                 const SizedBox(height: 20),
@@ -807,6 +1072,7 @@ class OnlineGameRoom extends StatelessWidget {
                           child: Text(
                             i < players.length
                                 ? '${players[i]['name']}'
+                                    '${teamOn && partners[i] != -1 && partners[i] < players.length ? '  🤝 ${players[partners[i]]['name']}' : ''}'
                                 : "En attente d'un joueur...",
                             style: TextStyle(
                               color: i < players.length
@@ -827,7 +1093,8 @@ class OnlineGameRoom extends StatelessWidget {
                       ],
                     ),
                   ),
-                const Spacer(),
+                if (teamOn) _teamSection(context, d, players, uid),
+                const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -884,6 +1151,7 @@ class OnlineGameRoom extends StatelessWidget {
           pawnCount: (d['pawnCount'] as num).toInt(),
           doorSafe: d['doorSafe'] != false,
           starSafe: d['starSafe'] != false,
+          partners: d['teamMode'] == true ? _partnersOf(d) : null,
           online: OnlineSession(
             gameId: gameId,
             uid: user.uid,
