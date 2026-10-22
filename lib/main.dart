@@ -501,6 +501,8 @@ class _SetupScreenState extends State<SetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const JackpotBanner(),
+        const SizedBox(height: 14),
         const Text(
           'Mise de chaque joueur (jetons)',
           style: TextStyle(
@@ -552,7 +554,11 @@ class _SetupScreenState extends State<SetupScreen> {
             tokens.add(a.idToken ?? '');
           }
         }
-        localId = await Wallet.startLocalGame(stake: stake, tokens: tokens);
+        localId = await Wallet.startLocalGame(
+          stake: stake,
+          tokens: tokens,
+          names: [for (final s in seats) accounts[s]!.name],
+        );
       } catch (e) {
         if (!mounted) return;
         setState(() => starting = false);
@@ -1133,10 +1139,33 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   int get _myColor =>
       (isOnline && !isSpectator) ? baseIdx[widget.online!.mySeat] : -1;
   bool get _isMyTurn =>
-      !isOnline || (!isSpectator && currentPlayer == _myColor);
+      !isOnline ||
+      _proxy ||
+      (!isSpectator && currentPlayer == _myColor && _connected);
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
+
+  // --- Connexion perdue : pilotage automatique, puis forfait ------------
+  /// Coups joués à la place d'un joueur déconnecté avant son forfait.
+  static const int maxAutoPlays = 15;
+
+  /// Silence (en secondes) avant de considérer un joueur comme déconnecté.
+  static const int staleSeconds = 20;
+
+  final Map<String, int> autoCounts = {}; // uid -> coups joués à sa place
+  final Map<String, Object?> _presenceVal = {};
+  final Map<String, DateTime> _presenceAt = {};
+  final DateTime _presenceStart = DateTime.now();
+  DateTime _lastAck = DateTime.now(); // dernière écriture confirmée serveur
+  Timer? _beat;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _presenceSub;
+  bool _proxy = false; // vrai pendant qu'on joue à la place d'un absent
+
+  /// Ma connexion fonctionne (sinon je ne joue pas : mes écritures seraient
+  /// en attente et écraseraient la partie au retour).
+  bool get _connected =>
+      DateTime.now().difference(_lastAck) < const Duration(seconds: 15);
 
   // --- Mode équipe (2 contre 2) ---------------------------------------
   /// Binôme d'une couleur (-1 = aucun).
@@ -1213,6 +1242,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Quand le joueur est à l'accueil, le jeu joue au hasard, sans attendre.
   void _tickAutopilot() {
     if (!mounted) return;
+    _watchDisconnected();
     if (away && !gameOver) {
       _bgPlay();
       return;
@@ -1353,6 +1383,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (ok != true || !mounted || gameOver || _busy) return;
     if (forfeited.contains(who)) return;
 
+    _applyForfeit(who);
+  }
+
+  /// Applique l'abandon d'un joueur (et de son binôme en équipe) :
+  /// abandon volontaire, ou forfait après une longue déconnexion.
+  void _applyForfeit(int who, {String? reason}) {
+    if (forfeited.contains(who)) return;
+    final verb = reason ?? 'a abandonné';
     final mate = _mateOf(who);
     int next = who;
 
@@ -1379,13 +1417,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         winnerOverride = activeIdx.first;
         gameOver = true;
         message = '🏆 ${teamLabel(winnerOverride!)} gagne : '
-            '${teamLabel(who)} a abandonné.';
+            '${teamLabel(who)} $verb.';
       } else if (forfeited.contains(currentPlayer)) {
         currentPlayer = next;
         hasRolled = false;
-        message = '${nameOf(who)} a abandonné. Au tour de ${nameOf(next)}.';
+        message = '${nameOf(who)} $verb. Au tour de ${nameOf(next)}.';
       } else {
-        message = '${nameOf(who)} a abandonné.';
+        message = '${nameOf(who)} $verb.';
         if (hasRolled && legalMoves().isEmpty) _advanceTurn();
       }
     });
@@ -1465,6 +1503,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final d = snap.data();
       if (d == null || !mounted) return;
       if (snap.metadata.hasPendingWrites) return;
+      final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
+      if (jp > 0 && jp != jackpotWon) setState(() => jackpotWon = jp);
       final first = _firstSnap;
       _firstSnap = false;
       if (!first && d['writer'] == o.uid) return; // c'est mon propre coup
@@ -1495,6 +1535,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           ..clear()
           ..addAll(f.map((e) => (e as num).toInt()));
       }
+      final au = d['auto'];
+      if (au is Map) {
+        autoCounts
+          ..clear()
+          ..addAll(au.map((k, v) => MapEntry('$k', (v as num).toInt())));
+      }
       final w = (d['winner'] as num?)?.toInt() ?? -1;
       winnerOverride = w >= 0 ? w : null;
       message = (d['msg'] as String?) ?? message;
@@ -1508,7 +1554,92 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (gameOver) _settle();
   }
 
+  /// « Je suis là » toutes les 5 s, et écoute des autres joueurs.
+  void _startPresence() {
+    final o = widget.online;
+    if (o == null || o.spectator || !firebaseReady) return;
+    final col = FirebaseFirestore.instance
+        .collection('games')
+        .doc(o.gameId)
+        .collection('presence');
+
+    void beat() {
+      col.doc(o.uid).set({'t': DateTime.now().millisecondsSinceEpoch}).then(
+        (_) => _lastAck = DateTime.now(),
+        onError: (_) {},
+      );
+    }
+
+    beat();
+    _beat = Timer.periodic(const Duration(seconds: 5), (_) => beat());
+
+    // On note quand la présence de chacun a changé pour la dernière fois
+    // (horloge locale : pas de décalage entre téléphones).
+    _presenceSub = col.snapshots().listen((snap) {
+      for (final d in snap.docs) {
+        final t = d.data()['t'];
+        if (_presenceVal[d.id] != t) {
+          _presenceVal[d.id] = t;
+          _presenceAt[d.id] = DateTime.now();
+        }
+      }
+    }, onError: (_) {});
+  }
+
+  bool _isStale(String uid) {
+    final at = _presenceAt[uid] ?? _presenceStart;
+    return DateTime.now().difference(at) > const Duration(seconds: staleSeconds);
+  }
+
+  /// Si le joueur dont c'est le tour est déconnecté, le joueur connecté de
+  /// plus petite couleur joue à sa place (au hasard). Après 15 coups, il est
+  /// déclaré forfait et la partie continue sans lui. S'il revient avant,
+  /// sa présence redevient fraîche et il reprend son jeu.
+  void _watchDisconnected() {
+    final o = widget.online;
+    if (o == null || o.spectator || gameOver || o.uids.isEmpty) return;
+    if (!_connected || _busy) return;
+
+    final cur = currentPlayer;
+    if (forfeited.contains(cur)) return;
+    final seat = baseIdx.indexOf(cur);
+    if (seat < 0 || seat >= o.uids.length) return;
+    final targetUid = o.uids[seat];
+    if (targetUid == o.uid || !_isStale(targetUid)) return;
+
+    // Arbitre : le premier joueur connecté (hors absent) par ordre de couleur.
+    int? arbiter;
+    for (final c in activeIdx) {
+      if (c == cur) continue;
+      final s = baseIdx.indexOf(c);
+      if (s < 0 || s >= o.uids.length) continue;
+      final u = o.uids[s];
+      if (u == o.uid || !_isStale(u)) {
+        arbiter = c;
+        break;
+      }
+    }
+    if (arbiter != _myColor) return;
+
+    final count = autoCounts[targetUid] ?? 0;
+    if (count >= maxAutoPlays) {
+      _applyForfeit(cur, reason: 'est déclaré forfait (connexion perdue)');
+      return;
+    }
+    if (!hasRolled) autoCounts[targetUid] = count + 1; // un lancer = un coup
+
+    _proxy = true;
+    try {
+      _bgPlay();
+    } finally {
+      _proxy = false;
+    }
+  }
+
   bool _settled = false;
+
+  /// Jackpot gagné à la fin de cette partie (0 = pas de jackpot).
+  int jackpotWon = 0;
 
   /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants.
   Future<void> _settle() async {
@@ -1533,7 +1664,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             winners.add(uids[c]!);
           }
         }
-        await Wallet.settleLocal(localId!, winners.toList());
+        final jp = await Wallet.settleLocal(localId!, winners.toList());
+        if (mounted && jp > 0) setState(() => jackpotWon = jp);
       }
     } catch (_) {
       _settled = false; // on réessaiera au prochain événement
@@ -1548,6 +1680,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       return;
     }
     if (o.spectator || !firebaseReady) return;
+    autoCounts[o.uid] = 0; // je suis là : mon compteur repart à zéro
     try {
       await FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
         for (int i = 0; i < 4; i++) 'p$i': players[i].pawns,
@@ -1558,6 +1691,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'msg': message,
         'over': gameOver,
         'forfeited': forfeited.toList(),
+        'auto': autoCounts,
         'winner': winnerOverride ?? -1,
         'writer': o.uid,
         'rev': FieldValue.increment(1),
@@ -1706,6 +1840,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     }
     _listenOnline();
+    _startPresence();
     _autoTimer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _tickAutopilot(),
@@ -1723,6 +1858,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   @override
   void dispose() {
     _sub?.cancel();
+    _beat?.cancel();
+    _presenceSub?.cancel();
     _autoTimer?.cancel();
     _pulse.dispose();
     _flight.dispose();
@@ -3268,6 +3405,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
+                if (jackpotWon > 0) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '🎰 JACKPOT gagné : ${Wallet.format(jackpotWon)} !',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Row(
                   children: [
