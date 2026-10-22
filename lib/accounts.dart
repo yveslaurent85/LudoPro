@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -10,19 +11,39 @@ class PlayerAccount {
   final String email;
   final int balance;
 
+  /// Jeton de connexion, utilisé par le serveur pour débiter la mise d'un
+  /// joueur connecté sur le même téléphone (mode présentiel).
+  final String? idToken;
+
   const PlayerAccount({
     required this.uid,
     required this.name,
     required this.email,
     required this.balance,
+    this.idToken,
   });
 }
 
-/// Compte d'argent de chaque joueur : document Firestore `users/{uid}`.
+/// Compte de jetons de chaque joueur : document Firestore `users/{uid}`.
 /// Le solde ne se modifie PAS depuis l'appli (voir les règles Firestore) :
-/// la recharge passera plus tard par un serveur / paiement.
+/// crédit de départ, mises, gains et recharges passent par le serveur
+/// (Cloud Functions).
 class Wallet {
   static const String currency = 'FCFA';
+
+  /// Jetons offerts à chaque compte.
+  static const int welcomeBonus = 10000;
+
+  /// Mise minimale, et mises proposées.
+  static const int minStake = 100;
+  static const List<int> stakes = [100, 200, 500, 1000, 2000, 5000];
+
+  /// Commission de l'application sur la cagnotte (doit être la même que
+  /// COMMISSION_PERCENT dans functions/stakes.js).
+  static const int commissionPercent = 5;
+
+  /// Gain du gagnant pour une cagnotte donnée (après commission).
+  static int prize(int pot) => pot * (100 - commissionPercent) ~/ 100;
 
   static String format(int amount) => '$amount $currency';
 
@@ -32,28 +53,47 @@ class Wallet {
   ) =>
       db.collection('users').doc(uid);
 
-  /// Crée le compte d'argent (solde 0) s'il n'existe pas, renvoie le solde.
+  static FirebaseFunctions _fn([FirebaseApp? app]) =>
+      FirebaseFunctions.instanceFor(
+        app: app ?? Firebase.app(),
+        region: 'europe-west1',
+      );
+
+  /// Message lisible à partir d'une erreur serveur.
+  static String errorText(Object e) {
+    if (e is FirebaseFunctionsException) {
+      return e.message ?? 'Erreur : ${e.code}';
+    }
+    return 'Pas de connexion. Réessaie.';
+  }
+
+  /// Crée le compte de jetons s'il n'existe pas (10 000 offerts) et renvoie
+  /// le solde. Les comptes déjà existants reçoivent le crédit une seule fois.
   static Future<int> ensure(
     FirebaseFirestore db,
     User user, {
     String? pseudo,
+    FirebaseApp? app,
   }) async {
-    final ref = _ref(db, user.uid);
-    final snap = await ref.get();
-    if (snap.exists) {
-      final b = snap.data()?['balance'];
+    try {
+      final res = await _fn(app).httpsCallable('ensureWallet').call(
+        <String, dynamic>{'pseudo': pseudo ?? user.displayName ?? ''},
+      );
+      final b = (res.data as Map)['balance'];
       return b is num ? b.toInt() : 0;
+    } catch (_) {
+      // Serveur injoignable : on lit simplement le solde existant.
+      try {
+        final snap = await _ref(db, user.uid).get();
+        final b = snap.data()?['balance'];
+        return b is num ? b.toInt() : 0;
+      } catch (_) {
+        return 0;
+      }
     }
-    await ref.set({
-      'name': pseudo ?? user.displayName ?? '',
-      'email': user.email ?? '',
-      'balance': 0,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    return 0;
   }
 
-  /// Solde en direct (pour l'afficher et le voir changer après une recharge).
+  /// Solde en direct (pour l'afficher et le voir changer).
   static Stream<int> watch(String uid) {
     return FirebaseFirestore.instance
         .collection('users')
@@ -62,6 +102,50 @@ class Wallet {
         .map((s) {
       final b = s.data()?['balance'];
       return b is num ? b.toInt() : 0;
+    });
+  }
+
+  // --- Mises (toutes les opérations d'argent se font côté serveur) --------
+
+  /// Partie en ligne : le joueur paie sa mise (idempotent).
+  static Future<void> payStake(String gameId) async {
+    await _fn().httpsCallable('payStake').call(<String, dynamic>{
+      'gameId': gameId,
+    });
+  }
+
+  /// Partie en ligne pas encore commencée : quitter (ou annuler si on est
+  /// le créateur) et récupérer sa mise.
+  static Future<void> leaveGame(String gameId) async {
+    await _fn().httpsCallable('leaveGame').call(<String, dynamic>{
+      'gameId': gameId,
+    });
+  }
+
+  /// Fin d'une partie en ligne : le serveur verse la cagnotte au gagnant.
+  static Future<void> settleOnline(String gameId) async {
+    await _fn().httpsCallable('settleGame').call(<String, dynamic>{
+      'gameId': gameId,
+    });
+  }
+
+  /// Présentiel : débite la mise de tous les joueurs connectés.
+  /// Renvoie l'identifiant de la partie côté serveur.
+  static Future<String> startLocalGame({
+    required int stake,
+    required List<String> tokens,
+  }) async {
+    final res = await _fn().httpsCallable('startLocalGame').call(
+      <String, dynamic>{'stake': stake, 'tokens': tokens},
+    );
+    return (res.data as Map)['id'] as String;
+  }
+
+  /// Présentiel : verse la cagnotte aux gagnants.
+  static Future<void> settleLocal(String id, List<String> winnerUids) async {
+    await _fn().httpsCallable('settleLocalGame').call(<String, dynamic>{
+      'id': id,
+      'winnerUids': winnerUids,
     });
   }
 
@@ -85,10 +169,18 @@ class Wallet {
     final user = cred.user!;
     int balance = 0;
     try {
-      balance = await ensure(FirebaseFirestore.instanceFor(app: app), user);
+      balance = await ensure(
+        FirebaseFirestore.instanceFor(app: app),
+        user,
+        app: app,
+      );
     } catch (_) {
       // Solde illisible : on laisse quand même jouer, solde affiché à 0.
     }
+    String? token;
+    try {
+      token = await user.getIdToken();
+    } catch (_) {}
     final name = (user.displayName != null && user.displayName!.isNotEmpty)
         ? user.displayName!
         : (user.email ?? 'Joueur');
@@ -97,6 +189,7 @@ class Wallet {
       name: name,
       email: user.email ?? '',
       balance: balance,
+      idToken: token,
     );
     await auth.signOut(); // la session invité n'est pas gardée
     return account;
