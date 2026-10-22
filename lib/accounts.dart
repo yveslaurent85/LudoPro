@@ -134,18 +134,33 @@ class Wallet {
   static Future<String> startLocalGame({
     required int stake,
     required List<String> tokens,
+    List<String> names = const [],
   }) async {
     final res = await _fn().httpsCallable('startLocalGame').call(
-      <String, dynamic>{'stake': stake, 'tokens': tokens},
+      <String, dynamic>{'stake': stake, 'tokens': tokens, 'names': names},
     );
     return (res.data as Map)['id'] as String;
   }
 
-  /// Présentiel : verse la cagnotte aux gagnants.
-  static Future<void> settleLocal(String id, List<String> winnerUids) async {
-    await _fn().httpsCallable('settleLocalGame').call(<String, dynamic>{
-      'id': id,
-      'winnerUids': winnerUids,
+  /// Présentiel : verse la cagnotte aux gagnants. Renvoie le jackpot gagné
+  /// (0 si le jackpot n'est pas tombé).
+  static Future<int> settleLocal(String id, List<String> winnerUids) async {
+    final res = await _fn().httpsCallable('settleLocalGame').call(
+      <String, dynamic>{'id': id, 'winnerUids': winnerUids},
+    );
+    final j = (res.data as Map)['jackpot'];
+    return j is num ? j.toInt() : 0;
+  }
+
+  /// Montant actuel du jackpot (le seuil de déclenchement reste secret).
+  static Stream<int> watchJackpot() {
+    return FirebaseFirestore.instance
+        .collection('app')
+        .doc('jackpot')
+        .snapshots()
+        .map((s) {
+      final p = s.data()?['pool'];
+      return p is num ? p.toInt() : 0;
     });
   }
 
@@ -193,6 +208,40 @@ class Wallet {
     );
     await auth.signOut(); // la session invité n'est pas gardée
     return account;
+  }
+}
+
+/// Bandeau « Jackpot » affiché dans le salon et avant la partie.
+class JackpotBanner extends StatelessWidget {
+  const JackpotBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: Wallet.watchJackpot(),
+      builder: (context, snap) {
+        if (snap.hasError) return const SizedBox.shrink();
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: Colors.black26,
+            border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
+          ),
+          child: Text(
+            '🎰 JACKPOT : ${Wallet.format(snap.data ?? 0)}\n'
+            'Il peut tomber sur n\'importe quelle victoire !',
+            style: const TextStyle(
+              color: Color(0xFFFFE082),
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
