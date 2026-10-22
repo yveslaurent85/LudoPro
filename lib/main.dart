@@ -1007,8 +1007,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
   // --- Jeu en ligne ---------------------------------------------------
   bool get isOnline => widget.online != null;
-  int get _myColor => isOnline ? baseIdx[widget.online!.mySeat] : -1;
-  bool get _isMyTurn => !isOnline || currentPlayer == _myColor;
+  /// Spectateur : il regarde la partie en ligne sans pouvoir jouer.
+  bool get isSpectator => widget.online?.spectator ?? false;
+  int get _myColor =>
+      (isOnline && !isSpectator) ? baseIdx[widget.online!.mySeat] : -1;
+  bool get _isMyTurn =>
+      !isOnline || (!isSpectator && currentPlayer == _myColor);
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
@@ -1158,6 +1162,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Retour à l'accueil : la partie reste en mémoire, le jeu joue au hasard
   /// à ta place jusqu'à ce que tu reviennes avec « Reprendre la partie ».
   Future<void> _goHome() async {
+    if (isSpectator) {
+      Navigator.of(context).pop(); // le spectateur quitte simplement
+      return;
+    }
     if (gameOver) {
       Navigator.of(context).pop(); // partie finie : on quitte vraiment
       return;
@@ -1184,7 +1192,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// À 2 joueurs, l'autre gagne. À 3 ou 4, il est éliminé et la partie continue.
   /// En mode équipe, c'est toute l'équipe qui perd.
   Future<void> abandonGame() async {
-    if (gameOver) return;
+    if (gameOver || isSpectator) return;
     if (_busy) {
       _snack('Attends la fin du coup en cours.');
       return;
@@ -1381,7 +1389,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Envoie l'état du plateau aux autres joueurs.
   Future<void> _pushState() async {
     final o = widget.online;
-    if (o == null || !firebaseReady) return;
+    if (o == null || o.spectator || !firebaseReady) return;
     try {
       await FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
         for (int i = 0; i < 4; i++) 'p$i': players[i].pawns,
@@ -2327,21 +2335,22 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               if (value == 'quit') abandonGame();
               if (value == 'home') _goHome();
             },
-            itemBuilder: (context) => const [
+            itemBuilder: (context) => [
               PopupMenuItem<String>(
                 value: 'home',
                 child: Text(
-                  "Retour à l'accueil",
-                  style: TextStyle(color: Colors.white),
+                  isSpectator ? 'Quitter la partie' : "Retour à l'accueil",
+                  style: const TextStyle(color: Colors.white),
                 ),
               ),
-              PopupMenuItem<String>(
-                value: 'quit',
-                child: Text(
-                  'Abandonner la partie',
-                  style: TextStyle(color: Color(0xFFFF8A80)),
+              if (!isSpectator)
+                const PopupMenuItem<String>(
+                  value: 'quit',
+                  child: Text(
+                    'Abandonner la partie',
+                    style: TextStyle(color: Color(0xFFFF8A80)),
+                  ),
                 ),
-              ),
             ],
             child: Container(
               width: 40,
@@ -2403,7 +2412,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isOnline
+                      isSpectator
+                          ? 'Mode : Spectateur'
+                          : isOnline
                           ? 'Mode : En ligne'
                           : (widget.partners != null
                               ? 'Mode : Équipes 2v2'
@@ -2566,7 +2577,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         ),
         const SizedBox(height: 2),
         Text(
-          active ? '▶ À TOI · $percent %' : '$percent %',
+          active
+              ? '${isSpectator ? '▶ SON TOUR' : '▶ À TOI'} · $percent %'
+              : '$percent %',
           style: const TextStyle(
             color: Color(0xFFFFE082),
             fontSize: 12,
@@ -3038,7 +3051,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ),
             ),
           ),
-          if (!gameStarted) ...[
+          if (!gameStarted && !isSpectator) ...[
             const SizedBox(width: 8),
             roundButton(Icons.settings, showSettings),
           ],
@@ -3187,7 +3200,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: isSpectator,
       onPopInvokedWithResult: _onBackPressed,
       child: Scaffold(
         body: Stack(
