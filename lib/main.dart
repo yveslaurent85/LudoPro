@@ -518,7 +518,7 @@ class _SetupScreenState extends State<SetupScreen> {
           children: [
             for (final v in Wallet.stakes)
               ChoiceChip(
-                label: Text('$v'),
+                label: Text(Wallet.stakeLabel(v)),
                 selected: stake == v,
                 onSelected: (_) => setState(() => stake = v),
               ),
@@ -526,8 +526,10 @@ class _SetupScreenState extends State<SetupScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * seats.length))} '
-          '(cagnotte ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
+          stake == 0
+              ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
+              : 'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * seats.length))} '
+                  '(cagnotte ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
           style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
         ),
       ],
@@ -1037,7 +1039,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                   : (brokePlayer != null
                                       ? 'Solde insuffisant : $brokePlayer'
                                       : (firebaseReady
-                                          ? 'Lancer · mise ${Wallet.format(stake)}'
+                                          ? (stake == 0 ? 'Lancer · partie gratuite' : 'Lancer · mise ${Wallet.format(stake)}')
                                           : 'Lancer la partie'))),
                       style: const TextStyle(
                         fontSize: 17,
