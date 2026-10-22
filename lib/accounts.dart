@@ -1,8 +1,22 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+/// Adresse de ton Worker Cloudflare (sans « / » à la fin).
+/// À remplacer après la publication du Worker.
+const String kWorkerUrl = 'https://katika-api.TON-COMPTE.workers.dev';
+
+/// Erreur renvoyée par le serveur (message lisible pour le joueur).
+class WalletException implements Exception {
+  final String message;
+  WalletException(this.message);
+  @override
+  String toString() => message;
+}
 
 /// Un joueur connecté à son propre compte (avec son compte d'argent).
 class PlayerAccount {
@@ -56,17 +70,46 @@ class Wallet {
   ) =>
       db.collection('users').doc(uid);
 
-  static FirebaseFunctions _fn([FirebaseApp? app]) =>
-      FirebaseFunctions.instanceFor(
-        app: app ?? Firebase.app(),
-        region: 'europe-west1',
+  /// Appelle une fonction du Worker avec le jeton de connexion du joueur.
+  static Future<Map<String, dynamic>> _call(
+    String name,
+    Map<String, dynamic> body, {
+    User? user,
+  }) async {
+    final u = user ?? FirebaseAuth.instance.currentUser;
+    if (u == null) throw WalletException('Connexion requise.');
+    final token = await u.getIdToken();
+    final http.Response res;
+    try {
+      res = await http
+          .post(
+            Uri.parse('$kWorkerUrl/$name'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 25));
+    } catch (_) {
+      throw WalletException('Pas de connexion. Réessaie.');
+    }
+    Map<String, dynamic> j = {};
+    try {
+      j = Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+    } catch (_) {}
+    if (res.statusCode != 200) {
+      throw WalletException(
+        (j['error'] as String?) ?? 'Erreur du serveur (${res.statusCode}).',
       );
+    }
+    final d = j['data'];
+    return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
+  }
 
   /// Message lisible à partir d'une erreur serveur.
   static String errorText(Object e) {
-    if (e is FirebaseFunctionsException) {
-      return e.message ?? 'Erreur : ${e.code}';
-    }
+    if (e is WalletException) return e.message;
     return 'Pas de connexion. Réessaie.';
   }
 
@@ -79,10 +122,12 @@ class Wallet {
     FirebaseApp? app,
   }) async {
     try {
-      final res = await _fn(app).httpsCallable('ensureWallet').call(
+      final res = await _call(
+        'ensureWallet',
         <String, dynamic>{'pseudo': pseudo ?? user.displayName ?? ''},
+        user: user,
       );
-      final b = (res.data as Map)['balance'];
+      final b = res['balance'];
       return b is num ? b.toInt() : 0;
     } catch (_) {
       // Serveur injoignable : on lit simplement le solde existant.
@@ -112,24 +157,18 @@ class Wallet {
 
   /// Partie en ligne : le joueur paie sa mise (idempotent).
   static Future<void> payStake(String gameId) async {
-    await _fn().httpsCallable('payStake').call(<String, dynamic>{
-      'gameId': gameId,
-    });
+    await _call('payStake', <String, dynamic>{'gameId': gameId});
   }
 
   /// Partie en ligne pas encore commencée : quitter (ou annuler si on est
   /// le créateur) et récupérer sa mise.
   static Future<void> leaveGame(String gameId) async {
-    await _fn().httpsCallable('leaveGame').call(<String, dynamic>{
-      'gameId': gameId,
-    });
+    await _call('leaveGame', <String, dynamic>{'gameId': gameId});
   }
 
   /// Fin d'une partie en ligne : le serveur verse la cagnotte au gagnant.
   static Future<void> settleOnline(String gameId) async {
-    await _fn().httpsCallable('settleGame').call(<String, dynamic>{
-      'gameId': gameId,
-    });
+    await _call('settleGame', <String, dynamic>{'gameId': gameId});
   }
 
   /// Présentiel : débite la mise de tous les joueurs connectés.
@@ -139,19 +178,21 @@ class Wallet {
     required List<String> tokens,
     List<String> names = const [],
   }) async {
-    final res = await _fn().httpsCallable('startLocalGame').call(
+    final res = await _call(
+      'startLocalGame',
       <String, dynamic>{'stake': stake, 'tokens': tokens, 'names': names},
     );
-    return (res.data as Map)['id'] as String;
+    return res['id'] as String;
   }
 
   /// Présentiel : verse la cagnotte aux gagnants. Renvoie le jackpot gagné
   /// (0 si le jackpot n'est pas tombé).
   static Future<int> settleLocal(String id, List<String> winnerUids) async {
-    final res = await _fn().httpsCallable('settleLocalGame').call(
+    final res = await _call(
+      'settleLocalGame',
       <String, dynamic>{'id': id, 'winnerUids': winnerUids},
     );
-    final j = (res.data as Map)['jackpot'];
+    final j = res['jackpot'];
     return j is num ? j.toInt() : 0;
   }
 
