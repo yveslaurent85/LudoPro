@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'accounts.dart';
+import 'history.dart';
 import 'main.dart' show firebaseReady;
 import 'online.dart';
 import 'recharge.dart';
@@ -344,6 +345,15 @@ class _OnlineScreenState extends State<OnlineScreen> {
         () => Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (context) => const OnlineLobbyScreen(),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _primaryButton(
+        'Historique des parties',
+        () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (context) => const HistoryScreen(),
           ),
         ),
       ),
