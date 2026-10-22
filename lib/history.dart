@@ -217,7 +217,7 @@ class HistoryScreen extends StatelessWidget {
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 Text(
-                  'Mise : ${Wallet.format(stake)}',
+                  stake == 0 ? 'Partie gratuite' : 'Mise : ${Wallet.format(stake)}',
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 if (jackpot > 0)
