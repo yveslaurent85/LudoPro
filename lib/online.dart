@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'accounts.dart';
 import 'main.dart';
 
 // ----------------------------------------------------------------------
@@ -53,6 +54,11 @@ class OnlineSession {
 
 CollectionReference<Map<String, dynamic>> get _games =>
     FirebaseFirestore.instance.collection('games');
+
+String _stakeText(Map<String, dynamic> d) {
+  final s = (d['stake'] as num?)?.toInt() ?? 0;
+  return s > 0 ? ' • mise $s' : '';
+}
 
 String _displayName(User u) {
   final n = u.displayName;
@@ -123,7 +129,10 @@ Future<void> _teamTx(
     change(seat, partners, invites);
 
     final max = (d['maxPlayers'] as num).toInt();
-    final ready = players.length >= max && partners.every((p) => p != -1);
+    final paidCount = ((d['paid'] as List?) ?? const []).length;
+    final ready = players.length >= max &&
+        paidCount >= max &&
+        partners.every((p) => p != -1);
     tx.update(ref, {
       'partners': partners,
       'invites': invites,
@@ -299,6 +308,7 @@ class OnlineLobbyScreen extends StatefulWidget {
 
 class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int numPlayers = 2;
+  int stake = Wallet.minStake;
   int pawnCount = 4;
   bool doorSafe = true;
   bool starSafe = true;
@@ -341,6 +351,13 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     );
   }
 
+  Future<int> _myBalance() async {
+    final s =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final b = s.data()?['balance'];
+    return b is num ? b.toInt() : 0;
+  }
+
   Future<void> _create() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || busy) return;
@@ -349,6 +366,13 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       error = null;
     });
     try {
+      if (await _myBalance() < stake) {
+        if (mounted) {
+          setState(() => error =
+              'Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.');
+        }
+        return;
+      }
       final team = teamMode && numPlayers == 4;
       final ref = _games.doc();
       await ref.set({
@@ -360,6 +384,9 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'starSafe': starSafe,
         'private': privateRoom,
         'teamMode': team,
+        'stake': stake,
+        'paid': <String>[],
+        'pot': 0,
         'partners': [-1, -1, -1, -1],
         'invites': <Map<String, int>>[],
         'code': _newCode(),
@@ -382,6 +409,15 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'writer': '',
         'rev': 0,
       });
+      try {
+        await Wallet.payStake(ref.id);
+      } catch (e) {
+        try {
+          await Wallet.leaveGame(ref.id);
+        } catch (_) {}
+        if (mounted) setState(() => error = Wallet.errorText(e));
+        return;
+      }
       if (!mounted) return;
       _openRoom(ref.id);
     } catch (_) {
@@ -405,6 +441,15 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     });
     try {
       final ref = _games.doc(id);
+      final pre = await ref.get();
+      final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      if (pre.exists && need > 0 && await _myBalance() < need) {
+        if (mounted) {
+          setState(() => error =
+              'Solde insuffisant : mise de ${Wallet.format(need)}.');
+        }
+        return;
+      }
       final result =
           await FirebaseFirestore.instance.runTransaction<String?>((tx) async {
         final snap = await tx.get(ref);
@@ -417,12 +462,11 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           return 'Cette partie est déjà complète.';
         }
         players.add({'uid': user.uid, 'name': _displayName(user)});
-        // En mode équipe, la partie ne démarre qu'une fois les binômes formés.
-        final start = players.length >= max && d['teamMode'] != true;
+        // La partie démarre quand tout le monde a payé sa mise (voir le
+        // serveur) et, en équipe, quand les binômes sont formés.
         tx.update(ref, {
           'players': players,
           'uids': FieldValue.arrayUnion([user.uid]),
-          if (start) 'status': 'playing',
         });
         return null;
       });
@@ -430,7 +474,15 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       if (result != null) {
         setState(() => error = result);
       } else {
-        _openRoom(id);
+        try {
+          await Wallet.payStake(id);
+          if (mounted) _openRoom(id);
+        } catch (e) {
+          try {
+            await Wallet.leaveGame(id);
+          } catch (_) {}
+          if (mounted) setState(() => error = Wallet.errorText(e));
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -498,8 +550,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   return _tile(
                     'Partie de ${d['hostName']}$priv',
                     waiting
-                        ? 'En attente ($n/$max joueurs)$team'
-                        : 'En cours$team',
+                        ? 'En attente ($n/$max joueurs)$team${_stakeText(d)}'
+                        : 'En cours$team${_stakeText(d)}',
                     waiting ? 'Ouvrir' : 'Reprendre',
                     busy ? null : () => _openRoom(doc.id),
                   );
@@ -546,7 +598,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
                     'Partie de ${d['hostName']}',
-                    '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team',
+                    '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team${_stakeText(d)}',
                     'Rejoindre',
                     busy ? null : () => _join(doc.id),
                   );
@@ -591,7 +643,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
                     names.join(' vs '),
-                    '${(d['maxPlayers'] as num).toInt()} joueurs$team',
+                    '${(d['maxPlayers'] as num).toInt()} joueurs$team${_stakeText(d)}',
                     'Regarder',
                     () => _watchRoom(doc.id),
                   );
@@ -600,6 +652,45 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           ],
         );
       },
+    );
+  }
+
+  Widget _stakeSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 14),
+        StreamBuilder<int>(
+          stream: Wallet.watch(uid),
+          builder: (context, s) => Text(
+            'Mise de chaque joueur · ton solde : ${Wallet.format(s.data ?? 0)}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final v in Wallet.stakes)
+              ChoiceChip(
+                label: Text('$v'),
+                selected: stake == v,
+                onSelected: (_) => setState(() => stake = v),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * numPlayers))} '
+          '(cagnotte ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
+          style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+        ),
+      ],
     );
   }
 
@@ -701,6 +792,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 pawnCount,
                 (v) => setState(() => pawnCount = v),
               ),
+              _stakeSection(),
               const SizedBox(height: 6),
               if (numPlayers == 4)
                 _switchRow(
@@ -826,28 +918,8 @@ class OnlineGameRoom extends StatelessWidget {
     String uid,
   ) async {
     Navigator.of(context).pop();
-    final ref = _games.doc(gameId);
     try {
-      if (d['hostUid'] == uid) {
-        await ref.delete();
-      } else {
-        await FirebaseFirestore.instance.runTransaction<void>((tx) async {
-          final snap = await tx.get(ref);
-          final data = snap.data();
-          if (data == null) return;
-          final players = _playersOf(data)
-            ..removeWhere((p) => p['uid'] == uid);
-          tx.update(ref, {
-            'players': players,
-            'uids': FieldValue.arrayRemove([uid]),
-            // Les places changent : on efface binômes et invitations.
-            if (data['teamMode'] == true) ...{
-              'partners': [-1, -1, -1, -1],
-              'invites': <Map<String, int>>[],
-            },
-          });
-        });
-      }
+      await Wallet.leaveGame(gameId); // la mise est remboursée
     } catch (_) {}
   }
 
@@ -1082,6 +1154,9 @@ class OnlineGameRoom extends StatelessWidget {
     final colors = _colorsFor(max);
     final teamOn = d['teamMode'] == true;
     final partners = _partnersOf(d);
+    final stake = (d['stake'] as num?)?.toInt() ?? 0;
+    final pot = (d['pot'] as num?)?.toInt() ?? 0;
+    final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
 
     return Scaffold(
       body: Container(
@@ -1116,6 +1191,41 @@ class OnlineGameRoom extends StatelessWidget {
                       : 'La partie démarre dès que tout le monde est là.',
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
+                if (stake > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Mise : ${Wallet.format(stake)} • '
+                    'Cagnotte : ${Wallet.format(pot)} '
+                    '(gain ${Wallet.format(Wallet.prize(pot))})',
+                    style: const TextStyle(
+                      color: Color(0xFFFFE082),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (!paid.contains(uid))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF22B14C),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () async {
+                          try {
+                            await Wallet.payStake(gameId);
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(Wallet.errorText(e))),
+                              );
+                            }
+                          }
+                        },
+                        child: Text('Payer ma mise (${Wallet.format(stake)})'),
+                      ),
+                    ),
+                ],
                 if (d['code'] != null) _codeCard(context, d),
                 const SizedBox(height: 20),
                 for (int i = 0; i < max; i++)
@@ -1141,6 +1251,7 @@ class OnlineGameRoom extends StatelessWidget {
                           child: Text(
                             i < players.length
                                 ? '${players[i]['name']}'
+                                    '${paid.contains(players[i]['uid']) ? ' ✅' : ''}'
                                     '${teamOn && partners[i] != -1 && partners[i] < players.length ? '  🤝 ${players[partners[i]]['name']}' : ''}'
                                 : "En attente d'un joueur...",
                             style: TextStyle(
