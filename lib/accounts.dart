@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 
 /// Adresse de ton Worker Cloudflare (sans « / » à la fin).
 /// À remplacer après la publication du Worker.
-const String kWorkerUrl = 'https://katika-api.TON-COMPTE.workers.dev';
+const String kWorkerUrl = 'https://katika-api.ychachouang.workers.dev';
 
 /// Erreur renvoyée par le serveur (message lisible pour le joueur).
 class WalletException implements Exception {
