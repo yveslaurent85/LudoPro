@@ -40,8 +40,12 @@ class OnlineSession {
     required this.uid,
     required this.mySeat,
     required this.names,
+    this.uids = const [],
     this.spectator = false,
   });
+
+  /// uid des joueurs, dans l'ordre des places (détection des déconnexions).
+  final List<String> uids;
 
   /// Vrai si on regarde la partie sans y jouer.
   final bool spectator;
@@ -775,6 +779,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   ),
                 ],
               ),
+              const JackpotBanner(),
               _sectionTitle('Créer une partie'),
               _pickerRow(
                 'Nombre de joueurs',
@@ -1335,6 +1340,7 @@ class OnlineGameRoom extends StatelessWidget {
               mySeat: -1,
               spectator: true,
               names: [for (final p in players) '${p['name']}'],
+              uids: [for (final p in players) '${p['uid']}'],
             ),
           );
         }
@@ -1359,6 +1365,7 @@ class OnlineGameRoom extends StatelessWidget {
             uid: user.uid,
             mySeat: seat,
             names: [for (final p in players) '${p['name']}'],
+              uids: [for (final p in players) '${p['uid']}'],
           ),
         );
       },
