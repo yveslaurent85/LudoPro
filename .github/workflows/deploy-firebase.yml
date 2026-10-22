@@ -5,7 +5,6 @@ on:
   push:
     paths:
       - 'functions/**'
-      - '.github/workflows/deploy-firebase.yml'
 
 jobs:
   deploy:
