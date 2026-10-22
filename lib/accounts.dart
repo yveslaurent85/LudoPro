@@ -36,7 +36,10 @@ class Wallet {
 
   /// Mise minimale, et mises proposées.
   static const int minStake = 100;
-  static const List<int> stakes = [100, 200, 500, 1000, 2000, 5000];
+  /// 0 = partie gratuite.
+  static const List<int> stakes = [0, 100, 200, 500, 1000, 2000, 5000];
+
+  static String stakeLabel(int v) => v == 0 ? 'Gratuit' : '$v';
 
   /// Commission de l'application sur la cagnotte (doit être la même que
   /// COMMISSION_PERCENT dans functions/stakes.js).
