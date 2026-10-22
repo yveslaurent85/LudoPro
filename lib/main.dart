@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -328,6 +329,8 @@ class _SetupScreenState extends State<SetupScreen> {
   int pawnCount = 4;
   bool doorSafe = true; // protection des portes (cases de départ)
   bool starSafe = true; // protection des étoiles
+  int stake = Wallet.minStake; // mise de chaque joueur (jetons)
+  bool starting = false;
 
   // --- Mode équipe (2 contre 2) ---------------------------------------
   bool teamMode = false;
@@ -484,6 +487,114 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
+  /// Nom du premier joueur dont le solde ne couvre pas la mise.
+  String? get brokePlayer {
+    if (!firebaseReady) return null;
+    for (final s in seats) {
+      final a = accounts[s];
+      if (a != null && a.balance < stake) return a.name;
+    }
+    return null;
+  }
+
+  Widget _stakePicker() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Mise de chaque joueur (jetons)',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final v in Wallet.stakes)
+              ChoiceChip(
+                label: Text('$v'),
+                selected: stake == v,
+                onSelected: (_) => setState(() => stake = v),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * seats.length))} '
+          '(cagnotte ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
+          style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+        ),
+      ],
+    );
+  }
+
+  /// Débite les mises sur le serveur, puis lance la partie.
+  Future<void> _startGame() async {
+    if (starting) return;
+    String? localId;
+    final uids = <String?>[null, null, null, null];
+
+    if (firebaseReady) {
+      setState(() => starting = true);
+      try {
+        final tokens = <String>[];
+        for (final s in seats) {
+          final a = accounts[s]!;
+          uids[s] = a.uid;
+          if (s == 0) {
+            final u = FirebaseAuth.instance.currentUser;
+            tokens.add((await u?.getIdToken(true)) ?? '');
+          } else {
+            tokens.add(a.idToken ?? '');
+          }
+        }
+        localId = await Wallet.startLocalGame(stake: stake, tokens: tokens);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => starting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(Wallet.errorText(e))),
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() => starting = false);
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => LudoGame(
+          numPlayers: numPlayers,
+          pawnCount: pawnCount,
+          doorSafe: doorSafe,
+          starSafe: starSafe,
+          partners: teamMode ? List<int>.from(partners) : null,
+          localGameId: localId,
+          accountUids: uids,
+          stake: firebaseReady ? stake : 0,
+          names: [
+            for (int i = 0; i < 4; i++)
+              accounts[i]?.name ?? nameCtrls[i].text.trim(),
+          ],
+          avatars: List<IconData>.from(avatars),
+        ),
+      ),
+    );
+    if (!mounted) return;
+
+    // Soldes à jour : le joueur principal est rechargé, les invités se
+    // reconnectent pour la partie suivante.
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      setState(() => accounts.removeWhere((k, _) => k != 0));
+      if (u != null) _loadHost(u);
+    }
+  }
+
   static const List<IconData> avatarChoices = [
     Icons.person,
     Icons.face,
@@ -546,12 +657,15 @@ class _SetupScreenState extends State<SetupScreen> {
 
   Future<void> _loadHost(User u) async {
     int bal = 0;
+    String? token;
     try {
       bal = await Wallet.ensure(FirebaseFirestore.instance, u);
+      token = await u.getIdToken();
     } catch (_) {}
     if (!mounted) return;
     setState(() {
       accounts[0] = PlayerAccount(
+        idToken: token,
         uid: u.uid,
         name: (u.displayName != null && u.displayName!.isNotEmpty)
             ? u.displayName!
@@ -850,6 +964,10 @@ class _SetupScreenState extends State<SetupScreen> {
                   pawnCount,
                   (v) => setState(() => pawnCount = v),
                 ),
+                if (firebaseReady) ...[
+                  const SizedBox(height: 24),
+                  _stakePicker(),
+                ],
                 const SizedBox(height: 24),
                 Text(
                   firebaseReady
@@ -897,33 +1015,24 @@ class _SetupScreenState extends State<SetupScreen> {
                       backgroundColor: const Color(0xFF22B14C),
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: (!allConnected || !teamsReady)
+                    onPressed: (!allConnected ||
+                            !teamsReady ||
+                            brokePlayer != null ||
+                            starting)
                         ? null
-                        : () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (context) => LudoGame(
-                                  numPlayers: numPlayers,
-                                  pawnCount: pawnCount,
-                                  doorSafe: doorSafe,
-                                  starSafe: starSafe,
-                                  partners: teamMode
-                                      ? List<int>.from(partners)
-                                      : null,
-                                  names: [
-                                    for (int i = 0; i < 4; i++)
-                                      accounts[i]?.name ??
-                                          nameCtrls[i].text.trim(),
-                                  ],
-                                  avatars: List<IconData>.from(avatars),
-                                ),
-                              ),
-                            ),
+                        : _startGame,
                     child: Text(
-                      !allConnected
-                          ? 'Tous les joueurs doivent se connecter'
-                          : (!teamsReady
-                              ? 'Forme les binômes'
-                              : 'Lancer la partie'),
+                      starting
+                          ? 'Mise en cours...'
+                          : !allConnected
+                              ? 'Tous les joueurs doivent se connecter'
+                              : (!teamsReady
+                                  ? 'Forme les binômes'
+                                  : (brokePlayer != null
+                                      ? 'Solde insuffisant : $brokePlayer'
+                                      : (firebaseReady
+                                          ? 'Lancer · mise ${Wallet.format(stake)}'
+                                          : 'Lancer la partie'))),
                       style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
@@ -955,6 +1064,9 @@ class LudoGame extends StatefulWidget {
     this.names,
     this.avatars,
     this.partners,
+    this.localGameId,
+    this.accountUids,
+    this.stake = 0,
   });
 
   final int numPlayers;
@@ -972,6 +1084,15 @@ class LudoGame extends StatefulWidget {
 
   /// Binôme de chaque couleur (-1 = aucun). null = pas de mode équipe.
   final List<int>? partners;
+
+  /// Présentiel avec mise : identifiant de la partie côté serveur.
+  final String? localGameId;
+
+  /// uid du compte de chaque couleur (pour verser les gains en présentiel).
+  final List<String?>? accountUids;
+
+  /// Mise de chaque joueur (0 = pas de mise).
+  final int stake;
 
   @override
   State<LudoGame> createState() => _LudoGameState();
@@ -1384,12 +1505,49 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       diceDragging = false;
       flightPhase = 0;
     });
+    if (gameOver) _settle();
+  }
+
+  bool _settled = false;
+
+  /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants.
+  Future<void> _settle() async {
+    if (_settled || !gameOver || isSpectator || !firebaseReady) return;
+    final o = widget.online;
+    final localId = widget.localGameId;
+    if (o == null && localId == null) return;
+    _settled = true;
+    try {
+      if (o != null) {
+        await Wallet.settleOnline(o.gameId);
+      } else {
+        final w = winnerColor;
+        if (w == null) {
+          _settled = false;
+          return;
+        }
+        final uids = widget.accountUids ?? const <String?>[];
+        final winners = <String>{};
+        for (final c in [w, _mateOf(w)]) {
+          if (c >= 0 && c < uids.length && uids[c] != null) {
+            winners.add(uids[c]!);
+          }
+        }
+        await Wallet.settleLocal(localId!, winners.toList());
+      }
+    } catch (_) {
+      _settled = false; // on réessaiera au prochain événement
+    }
   }
 
   /// Envoie l'état du plateau aux autres joueurs.
   Future<void> _pushState() async {
     final o = widget.online;
-    if (o == null || o.spectator || !firebaseReady) return;
+    if (o == null) {
+      if (gameOver) _settle(); // présentiel avec mise
+      return;
+    }
+    if (o.spectator || !firebaseReady) return;
     try {
       await FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
         for (int i = 0; i < 4; i++) 'p$i': players[i].pawns,
@@ -1405,6 +1563,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'rev': FieldValue.increment(1),
         if (gameOver) 'status': 'finished',
       });
+      if (gameOver) _settle();
     } catch (_) {
       // Connexion perdue : le prochain coup renverra l'état complet.
     }
@@ -3112,7 +3271,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    if (!isOnline) ...[
+                    if (!isOnline && widget.localGameId == null) ...[
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
