@@ -1,1 +1,39 @@
 
+// functions/stakes.js
+// Solde de départ, mises et gains (jetons virtuels).
+// Toute opération sur le solde passe par ici : l'appli ne modifie jamais
+// le champ « balance » elle-même.
+
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const admin = require('firebase-admin');
+
+if (!admin.apps.length) admin.initializeApp();
+const db = admin.firestore();
+const FieldValue = admin.firestore.FieldValue;
+
+const REGION = 'europe-west1';
+const WELCOME = 10000; // jetons offerts à chaque compte
+const MIN_STAKE = 100; // mise minimale
+const COMMISSION_PERCENT = 5; // part gardée par Katika sur la cagnotte (0-100)
+const opts = { region: REGION };
+
+function needAuth(request) {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Connexion requise.');
+  }
+  return request.auth.uid;
+}
+
+function balanceOf(snap) {
+  const d = snap.exists ? snap.data() : null;
+  return d && typeof d.balance === 'number' ? d.balance : 0;
+}
+
+function colorsFor(max) {
+  return max === 2 ? [0, 2] : max === 3 ? [0, 1, 2] : [0, 1, 2, 3];
+}
+
+// ---------------------------------------------------------------------
+// Compte : 10 000 jetons offerts (une seule fois par compte)
+// ---------------------------------------------------------------------
+exports.ensureWallet = onCall(opts, async (request) => {
