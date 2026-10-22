@@ -60,8 +60,9 @@ CollectionReference<Map<String, dynamic>> get _games =>
     FirebaseFirestore.instance.collection('games');
 
 String _stakeText(Map<String, dynamic> d) {
-  final s = (d['stake'] as num?)?.toInt() ?? 0;
-  return s > 0 ? ' • mise $s' : '';
+  final s = (d['stake'] as num?)?.toInt();
+  if (s == null) return '';
+  return s > 0 ? ' • mise $s' : ' • gratuite';
 }
 
 String _displayName(User u) {
@@ -682,7 +683,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           children: [
             for (final v in Wallet.stakes)
               ChoiceChip(
-                label: Text('$v'),
+                label: Text(Wallet.stakeLabel(v)),
                 selected: stake == v,
                 onSelected: (_) => setState(() => stake = v),
               ),
@@ -690,8 +691,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * numPlayers))} '
-          '(cagnotte ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
+          stake == 0
+              ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
+              : 'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * numPlayers))} '
+                  '(cagnotte ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
           style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
         ),
       ],
@@ -1196,12 +1199,14 @@ class OnlineGameRoom extends StatelessWidget {
                       : 'La partie démarre dès que tout le monde est là.',
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
-                if (stake > 0) ...[
+                if (d['stake'] != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'Mise : ${Wallet.format(stake)} • '
-                    'Cagnotte : ${Wallet.format(pot)} '
-                    '(gain ${Wallet.format(Wallet.prize(pot))})',
+                    stake > 0
+                        ? 'Mise : ${Wallet.format(stake)} • '
+                            'Cagnotte : ${Wallet.format(pot)} '
+                            '(gain ${Wallet.format(Wallet.prize(pot))})'
+                        : 'Partie gratuite',
                     style: const TextStyle(
                       color: Color(0xFFFFE082),
                       fontSize: 14,
@@ -1227,7 +1232,11 @@ class OnlineGameRoom extends StatelessWidget {
                             }
                           }
                         },
-                        child: Text('Payer ma mise (${Wallet.format(stake)})'),
+                        child: Text(
+                          stake > 0
+                              ? 'Payer ma mise (${Wallet.format(stake)})'
+                              : 'Valider ma participation',
+                        ),
                       ),
                     ),
                 ],
