@@ -39,7 +39,11 @@ class OnlineSession {
     required this.uid,
     required this.mySeat,
     required this.names,
+    this.spectator = false,
   });
+
+  /// Vrai si on regarde la partie sans y jouer.
+  final bool spectator;
 
   final String gameId;
   final String uid;
@@ -309,6 +313,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
 
   late final Stream<QuerySnapshot<Map<String, dynamic>>> openStream =
       _games.where('status', isEqualTo: 'waiting').limit(30).snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> liveStream =
+      _games.where('status', isEqualTo: 'playing').limit(30).snapshots();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
       _games.where('uids', arrayContains: uid).snapshots();
 
@@ -322,6 +328,15 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => OnlineGameRoom(gameId: id),
+      ),
+    );
+  }
+
+  /// Ouvre une partie en cours en tant que spectateur.
+  void _watchRoom(String id) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => OnlineGameRoom(gameId: id, spectate: true),
       ),
     );
   }
@@ -543,6 +558,51 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     );
   }
 
+  /// Parties publiques en cours : on peut les regarder.
+  Widget _liveSection() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: liveStream,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return _hint('Impossible de charger les parties en cours.');
+        }
+        if (!snap.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final docs = snap.data!.docs
+            .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+            .where((d) => d.data()['private'] != true)
+            .where((d) => d.data()['over'] != true)
+            .toList()
+          ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+        if (docs.isEmpty) {
+          return _hint('Aucune partie en cours à regarder pour le moment.');
+        }
+        return Column(
+          children: [
+            for (final doc in docs)
+              Builder(
+                builder: (context) {
+                  final d = doc.data();
+                  final names = _playersOf(d).map((p) => '${p['name']}');
+                  final team = d['teamMode'] == true ? ' • 2v2' : '';
+                  return _tile(
+                    names.join(' vs '),
+                    '${(d['maxPlayers'] as num).toInt()} joueurs$team',
+                    'Regarder',
+                    () => _watchRoom(doc.id),
+                  );
+                },
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _codeSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -702,6 +762,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
               _mineSection(),
               _sectionTitle('Parties ouvertes'),
               _openSection(),
+              _sectionTitle('Parties en cours'),
+              _liveSection(),
             ],
           ),
         ),
@@ -715,9 +777,16 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
 // ----------------------------------------------------------------------
 
 class OnlineGameRoom extends StatelessWidget {
-  const OnlineGameRoom({super.key, required this.gameId});
+  const OnlineGameRoom({
+    super.key,
+    required this.gameId,
+    this.spectate = false,
+  });
 
   final String gameId;
+
+  /// Vrai : on regarde la partie sans y participer.
+  final bool spectate;
 
   Widget _info(BuildContext context, String text, {bool loading = false}) {
     return Scaffold(
@@ -1137,6 +1206,28 @@ class OnlineGameRoom extends StatelessWidget {
 
         final players = _playersOf(d);
         final seat = players.indexWhere((p) => p['uid'] == user.uid);
+
+        if (spectate && seat < 0) {
+          if (d['status'] != 'playing') {
+            return _info(context, "Cette partie n'est pas (ou plus) en cours.");
+          }
+          return LudoGame(
+            key: ValueKey('watch_$gameId'),
+            numPlayers: (d['maxPlayers'] as num).toInt(),
+            pawnCount: (d['pawnCount'] as num).toInt(),
+            doorSafe: d['doorSafe'] != false,
+            starSafe: d['starSafe'] != false,
+            partners: d['teamMode'] == true ? _partnersOf(d) : null,
+            online: OnlineSession(
+              gameId: gameId,
+              uid: user.uid,
+              mySeat: -1,
+              spectator: true,
+              names: [for (final p in players) '${p['name']}'],
+            ),
+          );
+        }
+
         if (seat < 0) {
           return _info(context, 'Tu ne fais pas partie de cette partie.');
         }
