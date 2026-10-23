@@ -9,6 +9,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'deux_des.dart';
+import 'dice3d.dart';
 import 'jackpot_live.dart';
 import 'lang.dart';
 import 'online.dart';
@@ -1175,6 +1176,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
 
+  // --- Dé 3D : lancer visible chez les adversaires -----------------------
+  /// Nombre de tours du dé sur chaque axe pendant le lancer.
+  List<int> dieSpin = [2, 3, 1];
+
+  /// Mon propre lancer est en cours (j'ignore les mises à jour reçues).
+  bool _localRoll = false;
+
+  /// Dernier lancer adverse déjà affiché.
+  int _lastRollN = 0;
+
   // --- Connexion perdue : pilotage automatique, puis forfait ------------
   /// Coups joués à la place d'un joueur déconnecté avant son forfait.
   static const int maxAutoPlays = 15;
@@ -1535,13 +1546,80 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final d = snap.data();
       if (d == null || !mounted) return;
       if (snap.metadata.hasPendingWrites) return;
+      if (_localRoll) return; // mon propre lancer est en cours
       final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
       if (jp > 0 && jp != jackpotWon) setState(() => jackpotWon = jp);
       final first = _firstSnap;
       _firstSnap = false;
+
+      // Un adversaire lance le dé : on montre l'animation 3D.
+      final roll = d['roll'];
+      if (roll is Map) {
+        final n = (roll['n'] as num?)?.toInt() ?? 0;
+        if (first) {
+          _lastRollN = n;
+        } else if (n != _lastRollN && roll['by'] != o.uid) {
+          _lastRollN = n;
+          _showRemoteRoll((d['cur'] as num?)?.toInt() ?? currentPlayer);
+          return;
+        }
+      }
+
       if (!first && d['writer'] == o.uid) return; // c'est mon propre coup
       _applyRemote(d);
     });
+  }
+
+  /// Prévient les autres joueurs que je lance le dé.
+  void _pushRoll() {
+    final o = widget.online;
+    if (o == null || o.spectator || !firebaseReady) return;
+    FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
+      'roll': {'by': o.uid, 'n': DateTime.now().millisecondsSinceEpoch},
+    }).then((_) {}, onError: (_) {});
+  }
+
+  /// Anime le dé d'un adversaire (vu sur mon écran).
+  Future<void> _showRemoteRoll(int cur) async {
+    if (!mounted || gameOver) return;
+    final token = ++_token;
+    try {
+      final from = _toRoot(diceKeys[cur]);
+      final boardBox =
+          boardKey.currentContext!.findRenderObject() as RenderBox;
+      final center = _toRoot(boardKey, boardBox.size.center(Offset.zero));
+      final jitter = Offset(
+        random.nextDouble() * 60 - 30,
+        random.nextDouble() * 60 - 30,
+      );
+      setState(() {
+        currentPlayer = cur;
+        isRolling = true;
+        flightPhase = 1;
+        pendingDice = random.nextInt(6) + 1;
+        dieSpin = [
+          (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+          (random.nextBool() ? 1 : -1) * (2 + random.nextInt(2)),
+          (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+        ];
+        flightFrom = from;
+        flightTo = center - const Offset(32, 32) + jitter;
+        message = tr('${nameOf(cur)} lance le dé...',
+            '${nameOf(cur)} is rolling...');
+      });
+    } catch (_) {
+      return;
+    }
+    _flight.duration = const Duration(milliseconds: 1000);
+    await _flight.forward(from: 0);
+    if (!mounted || token != _token) return;
+    // Le résultat n'est pas encore arrivé : on cache le dé volant.
+    if (flightPhase == 1) {
+      setState(() {
+        isRolling = false;
+        flightPhase = 0;
+      });
+    }
   }
 
   void _applyRemote(Map<String, dynamic> d) {
@@ -1727,6 +1805,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'winner': winnerOverride ?? -1,
         'writer': o.uid,
         'rev': FieldValue.increment(1),
+        'roll': FieldValue.delete(),
         if (gameOver) 'status': 'finished',
       });
       if (gameOver) _settle();
@@ -2025,7 +2104,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       gameStarted = true;
       isRolling = true;
       pendingDice = newDice;
-      faceSeq = List<int>.generate(6, (i) => i + 1)..shuffle(random);
+      dieSpin = [
+        (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+        (random.nextBool() ? 1 : -1) * (2 + random.nextInt(2)),
+        (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+      ];
+      _localRoll = true;
       flightPhase = 1;
       flightFrom = from;
       flightTo = boardCenter -
@@ -2034,9 +2118,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       message = 'Le dé roule...';
     });
     sfx.roll();
+    _pushRoll(); // les adversaires voient mon dé rouler
 
     _flight.duration = const Duration(milliseconds: 1000);
     await _flight.forward(from: 0);
+    _localRoll = false;
     if (!mounted || rollToken != _token) return;
 
     setState(() {
@@ -2953,28 +3039,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  /// Dé 3D au repos (sur la face [value]).
   Widget diceBox(int value, Color color, {bool glow = false}) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: glow
-            ? [
-                BoxShadow(
-                  color: color.withOpacity(0.85),
-                  blurRadius: 16,
-                  spreadRadius: 2,
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-      ),
-      child: CustomPaint(painter: DicePainter(value)),
-    );
+    return Die3D(value: value, color: color, glow: glow);
   }
 
   /// Le dé d'un joueur : on le touche pour lancer, ou on le glisse puis on le lâche.
@@ -3024,7 +3091,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
-  /// Le dé qui suit le doigt, puis qui roule sur le plateau.
+  /// Le dé qui suit le doigt, puis qui roule en 3D sur le plateau
+  /// (visible aussi chez les adversaires en ligne).
   Widget buildFlyingDie() {
     final color = players[currentPlayer].color;
 
@@ -3050,21 +3118,20 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         final pos = Offset.lerp(flightFrom, flightTo, eased)!;
         final rolling = flightPhase == 1;
         final bounce = rolling ? sin(t * pi * 4).abs() * (1 - t) * 26 : 0.0;
-        final size = 52.0 + 12.0 * eased;
-        final face = (rolling && t < 0.85)
-            ? faceSeq[(t * 14).floor() % 6]
-            : pendingDice;
-        final turns = rolling ? t * 3 : 0.0;
+        final size = 64.0 + 16.0 * eased;
 
         return Positioned(
-          left: pos.dx,
-          top: pos.dy - bounce,
+          left: pos.dx - 6,
+          top: pos.dy - bounce - 6,
           width: size,
           height: size,
           child: IgnorePointer(
-            child: Transform.rotate(
-              angle: turns * 2 * pi,
-              child: diceBox(face, color, glow: true),
+            child: Die3D(
+              value: pendingDice,
+              t: rolling ? t : 1.0,
+              spin: dieSpin,
+              color: color,
+              glow: true,
             ),
           ),
         );
