@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:http/http.dart' as http;
+
+import 'lang.dart';
 
 /// Adresse de ton Worker Cloudflare (sans « / » à la fin).
 /// À remplacer après la publication du Worker.
@@ -100,7 +102,9 @@ class Wallet {
     } catch (_) {}
     if (res.statusCode != 200) {
       throw WalletException(
-        (j['error'] as String?) ?? 'Erreur du serveur (${res.statusCode}).',
+        (j['error'] as String?) ??
+            tr('Erreur du serveur (${res.statusCode}).',
+                'Server error (${res.statusCode}).'),
       );
     }
     final d = j['data'];
@@ -275,12 +279,79 @@ class JackpotBanner extends StatelessWidget {
             border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
           ),
           child: Text(
-            '🎰 JACKPOT : ${Wallet.format(snap.data ?? 0)}\n'
-            'Il peut tomber sur n\'importe quelle victoire !',
+            tr(
+              '🎰 JACKPOT : ${Wallet.format(snap.data ?? 0)}\n'
+              'Il peut tomber sur n\'importe quelle victoire !',
+              '🎰 JACKPOT: ${Wallet.format(snap.data ?? 0)}\n'
+              'It can drop on any win!',
+            ),
             style: const TextStyle(
               color: Color(0xFFFFE082),
               fontSize: 13,
               fontWeight: FontWeight.w800,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Bandeau « Jackpot » compact, affiché pendant la partie.
+/// Le montant est mis à jour en direct et défile quand il change.
+class JackpotStrip extends StatefulWidget {
+  const JackpotStrip({super.key, this.stake = 1});
+
+  /// Mise de la partie (0 = partie gratuite : pas de jackpot à gagner).
+  final int stake;
+
+  @override
+  State<JackpotStrip> createState() => _JackpotStripState();
+}
+
+class _JackpotStripState extends State<JackpotStrip> {
+  // Le flux n'est créé qu'une fois : sinon il serait relancé (et le montant
+  // retomberait à 0) à chaque coup joué.
+  late final Stream<int> _stream = Wallet.watchJackpot();
+  int _last = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: _stream,
+      builder: (context, snap) {
+        if (snap.hasError) return const SizedBox.shrink();
+        final value = snap.data ?? _last;
+        _last = value;
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: Colors.black26,
+            border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: TweenAnimationBuilder<int>(
+              tween: IntTween(begin: value, end: value),
+              duration: const Duration(milliseconds: 900),
+              builder: (context, shown, _) => Text(
+                widget.stake > 0
+                    ? tr(
+                        '🎰 JACKPOT : ${Wallet.format(shown)}',
+                        '🎰 JACKPOT: ${Wallet.format(shown)}',
+                      )
+                    : tr(
+                        '🎰 JACKPOT : ${Wallet.format(shown)} (parties avec mise)',
+                        '🎰 JACKPOT: ${Wallet.format(shown)} (stake games)',
+                      ),
+                style: const TextStyle(
+                  color: Color(0xFFFFE082),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ),
           ),
         );
@@ -302,7 +373,7 @@ String _authError(String code) {
     case 'network-request-failed':
       return 'Pas de connexion internet.';
     default:
-      return 'Erreur : $code';
+      return tr('Erreur : $code', 'Error: $code');
   }
 }
 
@@ -375,7 +446,7 @@ class _LoginDialogState extends State<_LoginDialog> {
 
   InputDecoration _dec(String label, IconData icon, {Widget? suffix}) {
     return InputDecoration(
-      labelText: label,
+      labelText: tr(label),
       labelStyle: const TextStyle(color: Colors.white70),
       prefixIcon: Icon(icon, color: Colors.white70),
       suffixIcon: suffix,
@@ -397,7 +468,8 @@ class _LoginDialogState extends State<_LoginDialog> {
     return AlertDialog(
       backgroundColor: const Color(0xFF14267A),
       title: Text(
-        'Connexion · Joueur ${widget.colorName}',
+        tr('Connexion · Joueur ${widget.colorName}',
+            'Sign in · Player ${widget.colorName}'),
         style: const TextStyle(color: Colors.white, fontSize: 18),
       ),
       content: SingleChildScrollView(
