@@ -1044,10 +1044,10 @@ class _SetupScreenState extends State<SetupScreen> {
                   (v) => setState(() => starSafe = v),
                 ),
                 _switch(
-                  'Pions dehors au départ',
-                  'Tous les pions démarrent sur leur case de départ : pas '
-                      "besoin de 6 au début. Un pion capturé a besoin d'un 6 "
-                      'pour ressortir.',
+                  'Position 54',
+                  'Les pions démarrent déjà sur le plateau, près du centre : '
+                      "pas besoin de 6 au début. Un pion capturé a besoin d'un "
+                      '6 pour ressortir.',
                   startOut,
                   (v) => setState(() => startOut = v),
                 ),
@@ -1121,7 +1121,7 @@ class LudoGame extends StatefulWidget {
   final bool doorSafe; // portes (cases de départ) protégées
   final bool starSafe; // étoiles protégées
 
-  /// Vrai : les pions démarrent déjà dehors (sur leur case de départ).
+  /// Vrai : les pions démarrent déjà dehors (positions 43 et 44 de leur chemin).
   /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
   final bool startOut;
   final OnlineSession? online; // null = jeu en présentiel
@@ -1164,8 +1164,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   late int numPlayers = widget.numPlayers;
   late int pawnCount = widget.pawnCount;
 
-  /// Position de départ des pions : 0 (dehors) ou -1 (à la base).
-  int get _startPos => widget.startOut ? 0 : -1;
+  /// Position de départ du pion [i] : avec l'option « pions dehors »,
+  /// les pions démarrent sur les positions 43 et 44 de leur chemin (les
+  /// cases marquées près du centre) ; sinon ils sont à la base (-1).
+  int _startPosOf(int i) => widget.startOut ? 43 + (i % 2) : -1;
 
   // --- Abandon et retour à l'accueil ----------------------------------
   /// Couleurs des joueurs qui ont abandonné (ils perdent la partie).
@@ -1959,7 +1961,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     for (final p in players) {
-      p.pawns = List<int>.filled(pawnCount, _startPos);
+      p.pawns = List<int>.generate(pawnCount, _startPosOf);
     }
     // Avatars choisis avant la partie
     final av = widget.avatars;
@@ -2379,7 +2381,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _flight.value = 0;
     setState(() {
       for (final player in players) {
-        player.pawns = List<int>.filled(pawnCount, _startPos);
+        player.pawns = List<int>.generate(pawnCount, _startPosOf);
       }
       for (int i = 0; i < 4; i++) {
         lastRoll[i] = 1;
