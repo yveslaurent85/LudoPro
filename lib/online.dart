@@ -2,10 +2,11 @@ import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'lang.dart';
 import 'main.dart';
 
 // ----------------------------------------------------------------------
@@ -62,7 +63,9 @@ CollectionReference<Map<String, dynamic>> get _games =>
 String _stakeText(Map<String, dynamic> d) {
   final s = (d['stake'] as num?)?.toInt();
   if (s == null) return '';
-  return s > 0 ? ' • mise $s' : ' • gratuite';
+  return s > 0
+      ? tr(' • mise $s', ' • stake $s')
+      : tr(' • gratuite', ' • free');
 }
 
 String _displayName(User u) {
@@ -374,7 +377,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       if (await _myBalance() < stake) {
         if (mounted) {
           setState(() => error =
-              'Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.');
+              tr('Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.',
+                  'Insufficient balance: you need at least ${Wallet.format(stake)}.'));
         }
         return;
       }
@@ -451,7 +455,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       if (pre.exists && need > 0 && await _myBalance() < need) {
         if (mounted) {
           setState(() => error =
-              'Solde insuffisant : mise de ${Wallet.format(need)}.');
+              tr('Solde insuffisant : mise de ${Wallet.format(need)}.',
+                  'Insufficient balance: stake of ${Wallet.format(need)}.'));
         }
         return;
       }
@@ -553,10 +558,17 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final priv = d['private'] == true ? ' 🔒' : '';
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
-                    'Partie de ${d['hostName']}$priv',
+                    tr("Partie de ${d['hostName']}$priv",
+                        "${d['hostName']}'s game$priv"),
                     waiting
-                        ? 'En attente ($n/$max joueurs)$team${_stakeText(d)}'
-                        : 'En cours$team${_stakeText(d)}',
+                        ? tr(
+                            'En attente ($n/$max joueurs)$team${_stakeText(d)}',
+                            'Waiting ($n/$max players)$team${_stakeText(d)}',
+                          )
+                        : tr(
+                            'En cours$team${_stakeText(d)}',
+                            'In progress$team${_stakeText(d)}',
+                          ),
                     waiting ? 'Ouvrir' : 'Reprendre',
                     busy ? null : () => _openRoom(doc.id),
                   );
@@ -602,8 +614,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final pawns = (d['pawnCount'] as num).toInt();
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
-                    'Partie de ${d['hostName']}',
-                    '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team${_stakeText(d)}',
+                    tr("Partie de ${d['hostName']}",
+                        "${d['hostName']}'s game"),
+                    tr(
+                      '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team${_stakeText(d)}',
+                      '$n/$max players • $pawns pawn${pawns > 1 ? 's' : ''}$team${_stakeText(d)}',
+                    ),
                     'Rejoindre',
                     busy ? null : () => _join(doc.id),
                   );
@@ -648,7 +664,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
                   return _tile(
                     names.join(' vs '),
-                    '${(d['maxPlayers'] as num).toInt()} joueurs$team${_stakeText(d)}',
+                    tr(
+                      '${(d['maxPlayers'] as num).toInt()} joueurs$team${_stakeText(d)}',
+                      '${(d['maxPlayers'] as num).toInt()} players$team${_stakeText(d)}',
+                    ),
                     'Regarder',
                     () => _watchRoom(doc.id),
                   );
@@ -668,7 +687,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         StreamBuilder<int>(
           stream: Wallet.watch(uid),
           builder: (context, s) => Text(
-            'Mise de chaque joueur · ton solde : ${Wallet.format(s.data ?? 0)}',
+            tr(
+              'Mise de chaque joueur · ton solde : ${Wallet.format(s.data ?? 0)}',
+              "Each player's stake · your balance: ${Wallet.format(s.data ?? 0)}",
+            ),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 15,
@@ -693,8 +715,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         Text(
           stake == 0
               ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
-              : 'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * numPlayers))} '
+              : tr(
+                  'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * numPlayers))} '
                   '(cagnotte ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
+                  'Winner gets: ${Wallet.format(Wallet.prize(stake * numPlayers))} '
+                  '(pot ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
+                ),
           style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
         ),
       ],
@@ -1044,7 +1070,8 @@ class OnlineGameRoom extends StatelessWidget {
         card([
           Expanded(
             child: Text(
-              '🤝 Ton binôme : ${nameOfSeat(partners[me])}',
+              tr('🤝 Ton binôme : ${nameOfSeat(partners[me])}',
+                  '🤝 Your partner: ${nameOfSeat(partners[me])}'),
               style: white(),
             ),
           ),
@@ -1067,7 +1094,8 @@ class OnlineGameRoom extends StatelessWidget {
           card([
             Expanded(
               child: Text(
-                "${nameOfSeat(from)} t'invite comme binôme",
+                tr("${nameOfSeat(from)} t'invite comme binôme",
+                    '${nameOfSeat(from)} invites you as a partner'),
                 style: white(),
               ),
             ),
@@ -1187,8 +1215,12 @@ class OnlineGameRoom extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '${players.length}/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''} chacun'
-                  '${teamOn ? ' • 2 contre 2' : ''}',
+                  tr(
+                    '${players.length}/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''} chacun'
+                    '${teamOn ? ' • 2 contre 2' : ''}',
+                    '${players.length}/$max players • $pawns pawn${pawns > 1 ? 's' : ''} each'
+                    '${teamOn ? ' • 2 vs 2' : ''}',
+                  ),
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
                 const SizedBox(height: 4),
@@ -1203,9 +1235,14 @@ class OnlineGameRoom extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     stake > 0
-                        ? 'Mise : ${Wallet.format(stake)} • '
+                        ? tr(
+                            'Mise : ${Wallet.format(stake)} • '
                             'Cagnotte : ${Wallet.format(pot)} '
-                            '(gain ${Wallet.format(Wallet.prize(pot))})'
+                            '(gain ${Wallet.format(Wallet.prize(pot))})',
+                            'Stake: ${Wallet.format(stake)} • '
+                            'Pot: ${Wallet.format(pot)} '
+                            '(prize ${Wallet.format(Wallet.prize(pot))})',
+                          )
                         : 'Partie gratuite',
                     style: const TextStyle(
                       color: Color(0xFFFFE082),
@@ -1234,7 +1271,8 @@ class OnlineGameRoom extends StatelessWidget {
                         },
                         child: Text(
                           stake > 0
-                              ? 'Payer ma mise (${Wallet.format(stake)})'
+                              ? tr('Payer ma mise (${Wallet.format(stake)})',
+                                  'Pay my stake (${Wallet.format(stake)})')
                               : 'Valider ma participation',
                         ),
                       ),
@@ -1342,6 +1380,7 @@ class OnlineGameRoom extends StatelessWidget {
             pawnCount: (d['pawnCount'] as num).toInt(),
             doorSafe: d['doorSafe'] != false,
             starSafe: d['starSafe'] != false,
+            stake: (d['stake'] as num?)?.toInt() ?? 0,
             partners: d['teamMode'] == true ? _partnersOf(d) : null,
             online: OnlineSession(
               gameId: gameId,
@@ -1368,6 +1407,7 @@ class OnlineGameRoom extends StatelessWidget {
           pawnCount: (d['pawnCount'] as num).toInt(),
           doorSafe: d['doorSafe'] != false,
           starSafe: d['starSafe'] != false,
+          stake: (d['stake'] as num?)?.toInt() ?? 0,
           partners: d['teamMode'] == true ? _partnersOf(d) : null,
           online: OnlineSession(
             gameId: gameId,
