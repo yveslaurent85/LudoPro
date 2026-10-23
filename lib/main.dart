@@ -9,6 +9,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'deux_des.dart';
+import 'jackpot_live.dart';
 import 'lang.dart';
 import 'online.dart';
 import 'online_screen.dart';
@@ -3580,7 +3581,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           buildHeader(),
                           buildRanking(),
                           // Jackpot en direct pendant la partie
-                          if (firebaseReady) JackpotStrip(stake: widget.stake),
+                          if (firebaseReady) JackpotLive(stake: widget.stake),
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [badgesRow(0, 1), diceRow(0, 1)],
