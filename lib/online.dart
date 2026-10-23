@@ -155,58 +155,64 @@ Future<void> _teamTx(
   });
 }
 
+/// Rangée de choix (2/3/4, 1/2/3/4...). Si [enabled] est faux, la rangée
+/// est grisée et on ne peut plus changer la valeur.
 Widget _pickerRow(
   String title,
   List<int> values,
   int current,
-  void Function(int) onPick,
-) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        title,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 15,
-          fontWeight: FontWeight.w800,
+  void Function(int) onPick, {
+  bool enabled = true,
+}) {
+  return Opacity(
+    opacity: enabled ? 1.0 : 0.45,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
         ),
-      ),
-      const SizedBox(height: 8),
-      Row(
-        children: [
-          for (final v in values)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () => onPick(v),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      color: v == current
-                          ? const Color(0xFFFFC21A)
-                          : Colors.white.withOpacity(0.12),
-                    ),
-                    child: Text(
-                      '$v',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (final v in values)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: enabled ? () => onPick(v) : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
                         color: v == current
-                            ? const Color(0xFF1A1F3A)
-                            : Colors.white,
+                            ? const Color(0xFFFFC21A)
+                            : Colors.white.withOpacity(0.12),
+                      ),
+                      child: Text(
+                        '$v',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: v == current
+                              ? const Color(0xFF1A1F3A)
+                              : Colors.white,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
-      ),
-    ],
+          ],
+        ),
+      ],
+    ),
   );
 }
 
@@ -390,12 +396,14 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         return;
       }
       final team = teamMode && numPlayers == 4;
+      // Position 54 : toujours 2 pions chacun.
+      final pawns = startOut ? 2 : pawnCount;
       final ref = _games.doc();
       await ref.set({
         'hostUid': user.uid,
         'hostName': _displayName(user),
         'maxPlayers': numPlayers,
-        'pawnCount': pawnCount,
+        'pawnCount': pawns,
         'doorSafe': doorSafe,
         'starSafe': starSafe,
         'startOut': startOut,
@@ -413,10 +421,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         ],
         'uids': [user.uid],
         'createdAt': FieldValue.serverTimestamp(),
-        'p0': _startPawns(pawnCount, startOut),
-        'p1': _startPawns(pawnCount, startOut),
-        'p2': _startPawns(pawnCount, startOut),
-        'p3': _startPawns(pawnCount, startOut),
+        'p0': _startPawns(pawns, startOut),
+        'p1': _startPawns(pawns, startOut),
+        'p2': _startPawns(pawns, startOut),
+        'p3': _startPawns(pawns, startOut),
         'cur': 0,
         'hasRolled': false,
         'dice': 1,
@@ -833,7 +841,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 const [1, 2, 3, 4],
                 pawnCount,
                 (v) => setState(() => pawnCount = v),
+                enabled: !startOut,
               ),
+              if (startOut)
+                _hint('Position 54 : la partie se joue avec 2 pions chacun.'),
               _stakeSection(),
               const SizedBox(height: 6),
               if (numPlayers == 4)
@@ -860,9 +871,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 'Position 54',
                 'Les pions démarrent déjà sur le plateau, près du centre : '
                     "pas besoin de 6 au début. Un pion capturé a besoin d'un "
-                    '6 pour ressortir.',
+                    '6 pour ressortir. Se joue avec 2 pions chacun.',
                 startOut,
-                (v) => setState(() => startOut = v),
+                (v) => setState(() {
+                  startOut = v;
+                  if (v) pawnCount = 2;
+                }),
               ),
               _switchRow(
                 'Partie privée',
