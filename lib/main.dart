@@ -5,10 +5,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'deux_des.dart';
+import 'lang.dart';
 import 'online.dart';
 import 'online_screen.dart';
 import 'painters.dart';
@@ -41,7 +42,7 @@ class LudoProApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Katika',
+      title: 'Katika Dés et Ludo by CKY',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -236,6 +237,11 @@ class HomeScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
               children: [
+                if (!resumable)
+                  const Align(
+                    alignment: Alignment.centerRight,
+                    child: LanguageSwitcher(),
+                  ),
                 const Spacer(flex: 2),
                 const Text('👑', style: TextStyle(fontSize: 44)),
                 RichText(
@@ -254,10 +260,11 @@ class HomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Ludo et Dés',
+                  'Dés et Ludo by CKY',
                   style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
                     letterSpacing: 1.2,
                   ),
                 ),
@@ -349,7 +356,9 @@ class _SetupScreenState extends State<SetupScreen> {
   String _label(int c) {
     if (accounts[c] != null) return accounts[c]!.name;
     final t = nameCtrls[c].text.trim();
-    return t.isNotEmpty ? t : 'Joueur ${colorNames[c]}';
+    return t.isNotEmpty
+        ? t
+        : tr('Joueur ${colorLabel(c)}', 'Player ${colorLabel(c)}');
   }
 
   /// Le joueur [from] invite un autre joueur libre comme binôme.
@@ -366,7 +375,8 @@ class _SetupScreenState extends State<SetupScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF14267A),
         title: Text(
-          '${_label(from)} : inviter qui ?',
+          tr('${_label(from)} : inviter qui ?',
+              '${_label(from)}: invite who?'),
           style: const TextStyle(color: Colors.white),
         ),
         content: Column(
@@ -394,11 +404,15 @@ class _SetupScreenState extends State<SetupScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF14267A),
         title: Text(
-          '${_label(target)}, invitation !',
+          tr('${_label(target)}, invitation !',
+              "${_label(target)}, you're invited!"),
           style: const TextStyle(color: Colors.white),
         ),
         content: Text(
-          "${_label(from)} t'invite comme binôme. Tu acceptes ?",
+          tr(
+            "${_label(from)} t'invite comme binôme. Tu acceptes ?",
+            '${_label(from)} invites you as a partner. Do you accept?',
+          ),
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -427,7 +441,10 @@ class _SetupScreenState extends State<SetupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${_label(target)} a refusé le binôme avec ${_label(from)}.',
+            tr(
+              '${_label(target)} a refusé le binôme avec ${_label(from)}.',
+              '${_label(target)} declined to partner with ${_label(from)}.',
+            ),
           ),
         ),
       );
@@ -466,7 +483,8 @@ class _SetupScreenState extends State<SetupScreen> {
                 Expanded(
                   child: Text(
                     partners[c] == -1
-                        ? '${_label(c)} : sans binôme'
+                        ? tr('${_label(c)} : sans binôme',
+                            '${_label(c)}: no partner')
                         : '${_label(c)} + ${_label(partners[c])}',
                     style: const TextStyle(color: Colors.white),
                   ),
@@ -528,8 +546,12 @@ class _SetupScreenState extends State<SetupScreen> {
         Text(
           stake == 0
               ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
-              : 'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * seats.length))} '
+              : tr(
+                  'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * seats.length))} '
                   '(cagnotte ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
+                  'Winner gets: ${Wallet.format(Wallet.prize(stake * seats.length))} '
+                  '(pot ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
+                ),
           style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
         ),
       ],
@@ -687,7 +709,7 @@ class _SetupScreenState extends State<SetupScreen> {
   Future<void> _connect(int color) async {
     final acc = await showPlayerLogin(
       context,
-      colorName: colorNames[color],
+      colorName: colorLabel(color),
       color: colorList[color],
     );
     if (acc == null || !mounted) return;
@@ -805,8 +827,10 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                         onPressed: () => _connect(color),
                         icon: const Icon(Icons.login),
-                        label: Text(
-                            'Joueur ${colorNames[color]} : se connecter'),
+                        label: Text(tr(
+                          'Joueur ${colorLabel(color)} : se connecter',
+                          'Player ${colorLabel(color)}: sign in',
+                        )),
                       )
                     : TextField(
                         controller: nameCtrls[color],
@@ -817,7 +841,8 @@ class _SetupScreenState extends State<SetupScreen> {
                         decoration: InputDecoration(
                           counterText: '',
                           isDense: true,
-                          hintText: 'Joueur ${colorNames[color]}',
+                          hintText: tr('Joueur ${colorLabel(color)}',
+                              'Player ${colorLabel(color)}'),
                           hintStyle: const TextStyle(color: Colors.white54),
                           filled: true,
                           fillColor: Colors.white.withOpacity(0.12),
@@ -837,7 +862,7 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
           if (acc != null && color != 0)
             IconButton(
-              tooltip: 'Changer de compte',
+              tooltip: tr('Changer de compte', 'Switch account'),
               onPressed: () => setState(() => accounts.remove(color)),
               icon: const Icon(Icons.logout, color: Colors.white70),
             ),
@@ -1037,9 +1062,10 @@ class _SetupScreenState extends State<SetupScreen> {
                               : (!teamsReady
                                   ? 'Forme les binômes'
                                   : (brokePlayer != null
-                                      ? 'Solde insuffisant : $brokePlayer'
+                                      ? tr('Solde insuffisant : $brokePlayer',
+                                          'Insufficient balance: $brokePlayer')
                                       : (firebaseReady
-                                          ? (stake == 0 ? 'Lancer · partie gratuite' : 'Lancer · mise ${Wallet.format(stake)}')
+                                          ? (stake == 0 ? 'Lancer · partie gratuite' : tr('Lancer · mise ${Wallet.format(stake)}', 'Start · stake ${Wallet.format(stake)}'))
                                           : 'Lancer la partie'))),
                       style: const TextStyle(
                         fontSize: 17,
@@ -1210,7 +1236,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final seat = baseIdx.indexOf(colorIndex);
       if (seat >= 0 && seat < o.names.length) return o.names[seat];
     }
-    return 'Joueur ${players[colorIndex].display}';
+    return tr('Joueur ${players[colorIndex].display}',
+        'Player ${tr(players[colorIndex].display)}');
   }
 
   /// Couleur du gagnant (null tant que la partie n'est pas finie).
@@ -1363,8 +1390,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         ),
         content: Text(
           widget.partners != null
-              ? "${teamLabel(who)} perdront la partie."
-              : '${nameOf(who)} perdra la partie.',
+              ? tr('${teamLabel(who)} perdront la partie.',
+                  '${teamLabel(who)} will lose the game.')
+              : tr('${nameOf(who)} perdra la partie.',
+                  '${nameOf(who)} will lose the game.'),
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -2679,7 +2708,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 2),
                 const Text(
-                  'Ludo et Dés',
+                  'Dés et Ludo by CKY',
                   style: TextStyle(
                     color: Colors.white70,
                     fontSize: 9,
@@ -2724,7 +2753,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       ),
                     ),
                     Text(
-                      '$numPlayers Joueurs',
+                      tr('$numPlayers Joueurs', '$numPlayers Players'),
                       style: const TextStyle(
                         color: Color(0xFFFFC21A),
                         fontSize: 10,
@@ -2865,7 +2894,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             ),
             const SizedBox(width: 4),
             Text(
-              '$remaining pion${remaining > 1 ? 's' : ''}',
+              tr('$remaining pion${remaining > 1 ? 's' : ''}',
+                  '$remaining pawn${remaining > 1 ? 's' : ''}'),
               style: TextStyle(
                 color: Colors.white.withOpacity(0.9),
                 fontSize: 11,
@@ -2876,7 +2906,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         const SizedBox(height: 2),
         Text(
           active
-              ? '${isSpectator ? '▶ SON TOUR' : '▶ À TOI'} · $percent %'
+              ? '${isSpectator ? tr('▶ SON TOUR', '▶ THEIR TURN') : tr('▶ À TOI', '▶ YOUR TURN')} · $percent %'
               : '$percent %',
           style: const TextStyle(
             color: Color(0xFFFFE082),
@@ -3125,8 +3155,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         style: TextStyle(color: Colors.white),
                       ),
                       subtitle: Text(
-                        'Si tu ne joues pas pendant $autoSeconds secondes, '
-                        'le jeu joue à ta place',
+                        tr(
+                          'Si tu ne joues pas pendant $autoSeconds secondes, '
+                          'le jeu joue à ta place',
+                          "If you don't play for $autoSeconds seconds, "
+                          'the game plays for you',
+                        ),
                         style: const TextStyle(
                           color: Colors.white70,
                           fontSize: 12,
@@ -3264,7 +3298,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       ),
                     ),
                     Text(
-                      '${p.finished}/$pawnCount arrivés',
+                      tr('${p.finished}/$pawnCount arrivés',
+                          '${p.finished}/$pawnCount finished'),
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],
@@ -3322,7 +3357,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                               fontWeight: FontWeight.w600,
                             ),
                             children: [
-                              const TextSpan(text: 'Au tour de : '),
+                              TextSpan(text: tr('Au tour de : ', 'Turn of: ')),
                               TextSpan(
                                 text: nameOf(currentPlayer),
                                 style: TextStyle(
@@ -3410,7 +3445,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 if (jackpotWon > 0) ...[
                   const SizedBox(height: 6),
                   Text(
-                    '🎰 JACKPOT gagné : ${Wallet.format(jackpotWon)} !',
+                    tr('🎰 JACKPOT gagné : ${Wallet.format(jackpotWon)} !',
+                        '🎰 JACKPOT won: ${Wallet.format(jackpotWon)}!'),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
@@ -3535,7 +3571,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     builder: (context, constraints) {
                       final boardSize = min(
                         constraints.maxWidth - 24,
-                        constraints.maxHeight - 470,
+                        constraints.maxHeight - (firebaseReady ? 505 : 470),
                       ).clamp(180.0, 700.0).toDouble();
 
                       return Column(
@@ -3543,6 +3579,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         children: [
                           buildHeader(),
                           buildRanking(),
+                          // Jackpot en direct pendant la partie
+                          if (firebaseReady) JackpotStrip(stake: widget.stake),
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [badgesRow(0, 1), diceRow(0, 1)],
@@ -3573,4 +3611,3 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 }
-
