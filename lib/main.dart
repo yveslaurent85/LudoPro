@@ -602,7 +602,8 @@ class _SetupScreenState extends State<SetupScreen> {
       MaterialPageRoute<void>(
         builder: (context) => LudoGame(
           numPlayers: numPlayers,
-          pawnCount: pawnCount,
+          // Position 54 : toujours 2 pions chacun.
+          pawnCount: startOut ? 2 : pawnCount,
           doorSafe: doorSafe,
           starSafe: starSafe,
           startOut: startOut,
@@ -897,58 +898,64 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
+  /// Rangée de choix (2/3/4, 1/2/3/4...). Si [enabled] est faux, la rangée
+  /// est grisée et on ne peut plus changer la valeur.
   Widget _picker(
     String title,
     List<int> values,
     int current,
-    void Function(int) onPick,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
+    void Function(int) onPick, {
+    bool enabled = true,
+  }) {
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.45,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            for (final v in values)
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    onTap: () => onPick(v),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        color: v == current
-                            ? const Color(0xFFFFC21A)
-                            : Colors.white.withOpacity(0.12),
-                      ),
-                      child: Text(
-                        '$v',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final v in values)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: enabled ? () => onPick(v) : null,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
                           color: v == current
-                              ? const Color(0xFF1A1F3A)
-                              : Colors.white,
+                              ? const Color(0xFFFFC21A)
+                              : Colors.white.withOpacity(0.12),
+                        ),
+                        child: Text(
+                          '$v',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: v == current
+                                ? const Color(0xFF1A1F3A)
+                                : Colors.white,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
-        ),
-      ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1000,7 +1007,16 @@ class _SetupScreenState extends State<SetupScreen> {
                   const [1, 2, 3, 4],
                   pawnCount,
                   (v) => setState(() => pawnCount = v),
+                  enabled: !startOut,
                 ),
+                if (startOut)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Position 54 : la partie se joue avec 2 pions chacun.',
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ),
                 if (firebaseReady) ...[
                   const SizedBox(height: 24),
                   _stakePicker(),
@@ -1047,9 +1063,12 @@ class _SetupScreenState extends State<SetupScreen> {
                   'Position 54',
                   'Les pions démarrent déjà sur le plateau, près du centre : '
                       "pas besoin de 6 au début. Un pion capturé a besoin d'un "
-                      '6 pour ressortir.',
+                      '6 pour ressortir. Se joue avec 2 pions chacun.',
                   startOut,
-                  (v) => setState(() => startOut = v),
+                  (v) => setState(() {
+                    startOut = v;
+                    if (v) pawnCount = 2;
+                  }),
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -3288,7 +3307,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           ChoiceChip(
                             label: Text('$n'),
                             selected: pawnCount == n,
-                            onSelected: isOnline
+                            // Position 54 : toujours 2 pions, non modifiable.
+                            onSelected: (isOnline || widget.startOut)
                                 ? null
                                 : (_) {
                                     update(() => pawnCount = n);
@@ -3297,6 +3317,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           ),
                       ],
                     ),
+                    if (widget.startOut)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Position 54 : la partie se joue avec 2 pions chacun.',
+                          style: TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                      ),
                     const SizedBox(height: 14),
                     const Text(
                       'Nombre de joueurs',
