@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'history.dart';
+import 'lang.dart';
 import 'main.dart' show firebaseReady;
 import 'online.dart';
 import 'recharge.dart';
@@ -78,7 +79,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
       case 'operation-not-allowed':
         return "La connexion par e-mail n'est pas activée dans Firebase.";
       default:
-        return 'Erreur : $code';
+        return tr('Erreur : $code', 'Error: $code');
     }
   }
 
@@ -172,7 +173,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
 
   InputDecoration _field(String label, IconData icon, {Widget? suffix}) {
     return InputDecoration(
-      labelText: label,
+      labelText: tr(label),
       labelStyle: const TextStyle(color: Colors.white70),
       prefixIcon: Icon(icon, color: Colors.white70),
       suffixIcon: suffix,
@@ -326,8 +327,12 @@ class _OnlineScreenState extends State<OnlineScreen> {
         builder: (context, snap) => _banner(
           Icons.account_balance_wallet,
           const Color(0xFFFFC21A),
-          'Mon compte : ${Wallet.format(snap.data ?? 0)}\n'
-          'La recharge sera disponible bientôt.',
+          tr(
+            'Mon compte : ${Wallet.format(snap.data ?? 0)}\n'
+            'La recharge sera disponible bientôt.',
+            'My account: ${Wallet.format(snap.data ?? 0)}\n'
+            'Top-ups will be available soon.',
+          ),
         ),
       ),
       const SizedBox(height: 12),
@@ -502,4 +507,3 @@ class _OnlineScreenState extends State<OnlineScreen> {
     );
   }
 }
-
