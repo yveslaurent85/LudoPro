@@ -34,6 +34,12 @@ List<int> _colorsFor(int maxPlayers) => maxPlayers == 2
     ? [0, 2]
     : (maxPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
 
+/// Pions au départ : à la base (-1), ou déjà dehors sur les positions 43 et 44
+/// de leur chemin (près du centre) quand l'option « pions dehors au
+/// départ » est activée.
+List<int> _startPawns(int count, bool startOut) =>
+    List<int>.generate(count, (i) => startOut ? 43 + (i % 2) : -1);
+
 /// Infos passées au plateau de jeu quand la partie est en ligne.
 class OnlineSession {
   const OnlineSession({
@@ -320,6 +326,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int pawnCount = 4;
   bool doorSafe = true;
   bool starSafe = true;
+  bool startOut = false; // pions déjà dehors au départ (pas besoin de 6)
   bool privateRoom = false;
   bool teamMode = false; // 2 contre 2 (4 joueurs seulement)
   bool busy = false;
@@ -391,6 +398,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'pawnCount': pawnCount,
         'doorSafe': doorSafe,
         'starSafe': starSafe,
+        'startOut': startOut,
         'private': privateRoom,
         'teamMode': team,
         'stake': stake,
@@ -405,10 +413,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         ],
         'uids': [user.uid],
         'createdAt': FieldValue.serverTimestamp(),
-        'p0': List<int>.filled(pawnCount, -1),
-        'p1': List<int>.filled(pawnCount, -1),
-        'p2': List<int>.filled(pawnCount, -1),
-        'p3': List<int>.filled(pawnCount, -1),
+        'p0': _startPawns(pawnCount, startOut),
+        'p1': _startPawns(pawnCount, startOut),
+        'p2': _startPawns(pawnCount, startOut),
+        'p3': _startPawns(pawnCount, startOut),
         'cur': 0,
         'hasRolled': false,
         'dice': 1,
@@ -849,6 +857,14 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 (v) => setState(() => starSafe = v),
               ),
               _switchRow(
+                'Position 54',
+                'Les pions démarrent déjà sur le plateau, près du centre : '
+                    "pas besoin de 6 au début. Un pion capturé a besoin d'un "
+                    '6 pour ressortir.',
+                startOut,
+                (v) => setState(() => startOut = v),
+              ),
+              _switchRow(
                 'Partie privée',
                 'Invisible dans la liste : on la rejoint avec un code',
                 privateRoom,
@@ -1217,9 +1233,11 @@ class OnlineGameRoom extends StatelessWidget {
                 Text(
                   tr(
                     '${players.length}/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''} chacun'
-                    '${teamOn ? ' • 2 contre 2' : ''}',
+                    '${teamOn ? ' • 2 contre 2' : ''}'
+                    '${d['startOut'] == true ? ' • position 54' : ''}',
                     '${players.length}/$max players • $pawns pawn${pawns > 1 ? 's' : ''} each'
-                    '${teamOn ? ' • 2 vs 2' : ''}',
+                    '${teamOn ? ' • 2 vs 2' : ''}'
+                    '${d['startOut'] == true ? ' • position 54' : ''}',
                   ),
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
@@ -1380,6 +1398,7 @@ class OnlineGameRoom extends StatelessWidget {
             pawnCount: (d['pawnCount'] as num).toInt(),
             doorSafe: d['doorSafe'] != false,
             starSafe: d['starSafe'] != false,
+            startOut: d['startOut'] == true,
             stake: (d['stake'] as num?)?.toInt() ?? 0,
             partners: d['teamMode'] == true ? _partnersOf(d) : null,
             online: OnlineSession(
@@ -1407,6 +1426,7 @@ class OnlineGameRoom extends StatelessWidget {
           pawnCount: (d['pawnCount'] as num).toInt(),
           doorSafe: d['doorSafe'] != false,
           starSafe: d['starSafe'] != false,
+          startOut: d['startOut'] == true,
           stake: (d['stake'] as num?)?.toInt() ?? 0,
           partners: d['teamMode'] == true ? _partnersOf(d) : null,
           online: OnlineSession(
@@ -1414,7 +1434,7 @@ class OnlineGameRoom extends StatelessWidget {
             uid: user.uid,
             mySeat: seat,
             names: [for (final p in players) '${p['name']}'],
-              uids: [for (final p in players) '${p['uid']}'],
+            uids: [for (final p in players) '${p['uid']}'],
           ),
         );
       },
