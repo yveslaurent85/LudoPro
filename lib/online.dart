@@ -74,6 +74,14 @@ String _stakeText(Map<String, dynamic> d) {
       : tr(' • gratuite', ' • free');
 }
 
+/// Date et heure de création d'une partie : « • 24/10/2026 19:55 ».
+String _createdText(dynamic t) {
+  if (t is! Timestamp) return '';
+  final d = t.toDate();
+  String two(int n) => n < 10 ? '0$n' : '$n';
+  return ' • ${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
+}
+
 String _displayName(User u) {
   final n = u.displayName;
   if (n != null && n.isNotEmpty) return n;
@@ -573,17 +581,18 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final waiting = d['status'] == 'waiting';
                   final priv = d['private'] == true ? ' 🔒' : '';
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
+                  final when = _createdText(d['createdAt']);
                   return _tile(
                     tr("Partie de ${d['hostName']}$priv",
                         "${d['hostName']}'s game$priv"),
                     waiting
                         ? tr(
-                            'En attente ($n/$max joueurs)$team${_stakeText(d)}',
-                            'Waiting ($n/$max players)$team${_stakeText(d)}',
+                            'En attente ($n/$max joueurs)$team${_stakeText(d)}$when',
+                            'Waiting ($n/$max players)$team${_stakeText(d)}$when',
                           )
                         : tr(
-                            'En cours$team${_stakeText(d)}',
-                            'In progress$team${_stakeText(d)}',
+                            'En cours$team${_stakeText(d)}$when',
+                            'In progress$team${_stakeText(d)}$when',
                           ),
                     waiting ? 'Ouvrir' : 'Reprendre',
                     busy ? null : () => _openRoom(doc.id),
@@ -629,12 +638,13 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final max = (d['maxPlayers'] as num).toInt();
                   final pawns = (d['pawnCount'] as num).toInt();
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
+                  final when = _createdText(d['createdAt']);
                   return _tile(
                     tr("Partie de ${d['hostName']}",
                         "${d['hostName']}'s game"),
                     tr(
-                      '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team${_stakeText(d)}',
-                      '$n/$max players • $pawns pawn${pawns > 1 ? 's' : ''}$team${_stakeText(d)}',
+                      '$n/$max joueurs • $pawns pion${pawns > 1 ? 's' : ''}$team${_stakeText(d)}$when',
+                      '$n/$max players • $pawns pawn${pawns > 1 ? 's' : ''}$team${_stakeText(d)}$when',
                     ),
                     'Rejoindre',
                     busy ? null : () => _join(doc.id),
@@ -678,11 +688,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   final d = doc.data();
                   final names = _playersOf(d).map((p) => '${p['name']}');
                   final team = d['teamMode'] == true ? ' • 2v2' : '';
+                  final when = _createdText(d['createdAt']);
                   return _tile(
                     names.join(' vs '),
                     tr(
-                      '${(d['maxPlayers'] as num).toInt()} joueurs$team${_stakeText(d)}',
-                      '${(d['maxPlayers'] as num).toInt()} players$team${_stakeText(d)}',
+                      '${(d['maxPlayers'] as num).toInt()} joueurs$team${_stakeText(d)}$when',
+                      '${(d['maxPlayers'] as num).toInt()} players$team${_stakeText(d)}$when',
                     ),
                     'Regarder',
                     () => _watchRoom(doc.id),
@@ -1223,6 +1234,8 @@ class OnlineGameRoom extends StatelessWidget {
     final stake = (d['stake'] as num?)?.toInt() ?? 0;
     final pot = (d['pot'] as num?)?.toInt() ?? 0;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
+    final createdLabel =
+        _createdText(d['createdAt']).replaceFirst(' • ', '');
 
     return Scaffold(
       body: Container(
@@ -1255,6 +1268,11 @@ class OnlineGameRoom extends StatelessWidget {
                   ),
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
+                if (createdLabel.isNotEmpty)
+                  Text(
+                    tr('Créée le $createdLabel', 'Created on $createdLabel'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
                 const SizedBox(height: 4),
                 Text(
                   teamOn
