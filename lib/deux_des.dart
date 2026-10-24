@@ -13,6 +13,7 @@ import 'jackpot_live.dart';
 import 'online_screen.dart';
 import 'painters.dart';
 import 'rejouer.dart';
+import 'side_bets.dart';
 
 // ----------------------------------------------------------------------
 // Deux dés : chaque joueur a son compte, en présentiel comme en ligne.
@@ -1868,6 +1869,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
             child: Column(
               children: [
                 if (firebaseReady) JackpotLive(stake: stake),
+                if (stake > 0)
+                  SideBetsBar(roomId: widget.roomId, uid: user.uid, room: d),
                 Expanded(
                   child: _DiceTable(
                     names: [for (final p in players) '${p['name']}'],
