@@ -57,12 +57,20 @@ class Wallet {
 
   static String stakeLabel(int v) => v == 0 ? 'Gratuit' : '$v';
 
-  /// Commission de l'application sur la cagnotte (doit être la même que
-  /// COMMISSION_PERCENT dans functions/stakes.js).
+  /// Commission de l'application sur la cagnotte en ligne (doit être la même
+  /// que COMMISSION_PERCENT dans worker.js).
   static const int commissionPercent = 5;
 
+  /// Commission en présentiel, sur tous les jeux (Ludo et Deux dés). Doit être
+  /// la même que COMMISSION_LOCAL_PERCENT dans worker.js.
+  static const int commissionLocalPercent = 10;
+
   /// Gain du gagnant pour une cagnotte donnée (après commission).
-  static int prize(int pot) => pot * (100 - commissionPercent) ~/ 100;
+  /// [local] = true : partie en présentiel (commission de 10 %).
+  static int prize(int pot, {bool local = false}) =>
+      pot *
+      (100 - (local ? commissionLocalPercent : commissionPercent)) ~/
+      100;
 
   static String format(int amount) => '$amount $currency';
 
@@ -198,6 +206,43 @@ class Wallet {
     );
     final j = res['jackpot'];
     return j is num ? j.toInt() : 0;
+  }
+
+  /// Présentiel : fin de partie avec les scores (règle aussi les paris).
+  /// Renvoie { jackpot, bets }.
+  static Future<Map<String, dynamic>> settleLocalFull(
+    String id,
+    List<String> winnerUids,
+    List<int> scores,
+  ) {
+    return _call(
+      'settleLocalGame',
+      <String, dynamic>{
+        'id': id,
+        'winnerUids': winnerUids,
+        'scores': scores,
+      },
+    );
+  }
+
+  /// Présentiel : crée un pari entre deux joueurs (les deux mises sont
+  /// débitées tout de suite). Les jetons prouvent les deux comptes.
+  static Future<void> localBet({
+    required String id,
+    required String type,
+    required int amount,
+    required String proposerToken,
+    required String opponentToken,
+    bool over7 = true,
+  }) async {
+    await _call('localBetCreate', <String, dynamic>{
+      'id': id,
+      'type': type,
+      'amount': amount,
+      'side': over7 ? 'over' : 'under',
+      'proposerToken': proposerToken,
+      'opponentToken': opponentToken,
+    });
   }
 
   /// Montant actuel du jackpot (le seuil de déclenchement reste secret).
