@@ -15,6 +15,7 @@ import 'lang.dart';
 import 'online.dart';
 import 'online_screen.dart';
 import 'painters.dart';
+import 'rejouer.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -574,7 +575,7 @@ class _SetupScreenState extends State<SetupScreen> {
         for (final s in seats) {
           final a = accounts[s]!;
           uids[s] = a.uid;
-          if (s == 0) {
+          if (a.uid == FirebaseAuth.instance.currentUser?.uid) {
             final u = FirebaseAuth.instance.currentUser;
             tokens.add((await u?.getIdToken(true)) ?? '');
           } else {
@@ -598,8 +599,8 @@ class _SetupScreenState extends State<SetupScreen> {
       setState(() => starting = false);
     }
 
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final rematch = await Navigator.of(context).push<List<int>>(
+      MaterialPageRoute<List<int>>(
         builder: (context) => LudoGame(
           numPlayers: numPlayers,
           // Position 54 : toujours 2 pions chacun.
@@ -621,6 +622,12 @@ class _SetupScreenState extends State<SetupScreen> {
     );
     if (!mounted) return;
 
+    // Des joueurs veulent rejouer : on relance avec ceux qui ont accepté.
+    if (rematch != null && rematch.length >= 2) {
+      await _rematch(rematch);
+      return;
+    }
+
     // Soldes à jour : le joueur principal est rechargé, les invités se
     // reconnectent pour la partie suivante.
     if (firebaseReady) {
@@ -628,6 +635,33 @@ class _SetupScreenState extends State<SetupScreen> {
       setState(() => accounts.removeWhere((k, _) => k != 0));
       if (u != null) _loadHost(u);
     }
+  }
+
+  /// Rejouer avec les joueurs qui ont accepté (leurs couleurs dans la partie
+  /// finie). Ils reprennent les premières places, chacun repaie sa mise.
+  Future<void> _rematch(List<int> accepted) async {
+    final n = accepted.length;
+    final newSeats = n == 2 ? [0, 2] : (n == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+    final oldAcc = Map<int, PlayerAccount>.from(accounts);
+    final oldAv = List<IconData>.from(avatars);
+    final oldTxt = [for (final c in nameCtrls) c.text];
+    setState(() {
+      numPlayers = n;
+      accounts.clear();
+      for (int i = 0; i < n; i++) {
+        final from = accepted[i];
+        final to = newSeats[i];
+        final a = oldAcc[from];
+        if (a != null) accounts[to] = a;
+        avatars[to] = oldAv[from];
+        nameCtrls[to].text = oldTxt[from];
+      }
+      if (n != 4) {
+        teamMode = false;
+        _resetTeams();
+      }
+    });
+    await _startGame();
   }
 
   static const List<IconData> avatarChoices = [
@@ -1215,6 +1249,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
 
+  /// Dernier état de la partie terminée (sert à proposer de rejouer).
+  Map<String, dynamic>? _lastDoc;
+
   // --- Dé 3D : lancer visible chez les adversaires -----------------------
   /// Nombre de tours du dé sur chaque axe pendant le lancer.
   List<int> dieSpin = [2, 3, 1];
@@ -1584,6 +1621,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         .listen((snap) {
       final d = snap.data();
       if (d == null || !mounted) return;
+      if (d['over'] == true) setState(() => _lastDoc = d);
       if (snap.metadata.hasPendingWrites) return;
       if (_localRoll) return; // mon propre lancer est en cours
       final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
@@ -3569,6 +3607,32 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       fontSize: 15,
                       fontWeight: FontWeight.w900,
                     ),
+                  ),
+                ],
+                if (isOnline && !isSpectator && _lastDoc != null) ...[
+                  const SizedBox(height: 10),
+                  RematchPanel(
+                    collection: 'games',
+                    gameId: widget.online!.gameId,
+                    data: _lastDoc!,
+                    createRoom: createLudoRematchRoom,
+                    openRoom: (id) {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute<void>(
+                          builder: (_) => OnlineGameRoom(gameId: id),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+                if (!isOnline) ...[
+                  const SizedBox(height: 10),
+                  LocalRematchPanel(
+                    names: [for (final c in baseIdx) nameOf(c)],
+                    ids: baseIdx,
+                    stake: widget.stake,
+                    onRelaunch: (accepted) =>
+                        Navigator.of(context).pop(accepted),
                   ),
                 ],
                 const SizedBox(height: 10),
