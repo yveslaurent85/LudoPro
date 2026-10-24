@@ -12,6 +12,7 @@ import 'main.dart';
 import 'jackpot_live.dart';
 import 'online_screen.dart';
 import 'painters.dart';
+import 'rejouer.dart';
 
 // ----------------------------------------------------------------------
 // Deux dés : chaque joueur a son compte, en présentiel comme en ligne.
@@ -345,6 +346,7 @@ class _DiceTable extends StatefulWidget {
     this.winners = const [],
     this.stake = 0,
     this.jackpot = 0,
+    this.endExtra,
   });
 
   final List<String> names;
@@ -372,6 +374,9 @@ class _DiceTable extends StatefulWidget {
   final List<int> winners;
   final int stake;
   final int jackpot;
+
+  /// Proposition de rejouer, affichée dans le panneau de fin.
+  final Widget? endExtra;
 
   @override
   State<_DiceTable> createState() => _DiceTableState();
@@ -511,6 +516,10 @@ class _DiceTableState extends State<_DiceTable>
                 fontWeight: FontWeight.w800,
               ),
             ),
+            if (widget.endExtra != null) ...[
+              const SizedBox(height: 12),
+              widget.endExtra!,
+            ],
             const SizedBox(height: 12),
             SizedBox(
               width: 200,
@@ -898,7 +907,7 @@ class _LocalSetupState extends State<_LocalSetup> {
         for (int s = 0; s < n; s++) {
           final a = accounts[s]!;
           uids[s] = a.uid;
-          if (s == 0) {
+          if (a.uid == FirebaseAuth.instance.currentUser?.uid) {
             final u = FirebaseAuth.instance.currentUser;
             tokens.add((await u?.getIdToken(true)) ?? '');
           } else {
@@ -931,8 +940,8 @@ class _LocalSetupState extends State<_LocalSetup> {
                 : tr('Joueur ${_colorNames[i]}', 'Player ${_colorNames[i]}')),
     ];
 
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final rematch = await Navigator.of(context).push<List<int>>(
+      MaterialPageRoute<List<int>>(
         builder: (_) => _LocalGame(
           names: names,
           stake: firebaseReady ? stake : 0,
@@ -943,6 +952,12 @@ class _LocalSetupState extends State<_LocalSetup> {
     );
     if (!mounted) return;
 
+    // Des joueurs veulent rejouer : on relance avec ceux qui ont accepté.
+    if (rematch != null && rematch.length >= 2) {
+      await _rematch(rematch);
+      return;
+    }
+
     // Soldes à jour : le joueur principal est rechargé, les invités se
     // reconnectent pour la partie suivante.
     if (firebaseReady) {
@@ -950,6 +965,24 @@ class _LocalSetupState extends State<_LocalSetup> {
       setState(() => accounts.removeWhere((k, _) => k != 0));
       if (u != null) _loadHost(u);
     }
+  }
+
+  /// Rejouer avec les joueurs qui ont accepté (leurs places dans la partie
+  /// finie). Ils reprennent les premières places, chacun repaie sa mise.
+  Future<void> _rematch(List<int> accepted) async {
+    final oldAcc = Map<int, PlayerAccount>.from(accounts);
+    final oldTxt = [for (final c in ctrls) c.text];
+    setState(() {
+      numPlayers = accepted.length;
+      accounts.clear();
+      for (int i = 0; i < accepted.length; i++) {
+        final from = accepted[i];
+        final a = oldAcc[from];
+        if (a != null) accounts[i] = a;
+        ctrls[i].text = oldTxt[from];
+      }
+    });
+    await _start();
   }
 
   @override
@@ -1138,6 +1171,15 @@ class _LocalGameState extends State<_LocalGame> {
                 winners: winners,
                 stake: widget.stake,
                 jackpot: jackpot,
+                endExtra: over
+                    ? LocalRematchPanel(
+                        names: widget.names,
+                        ids: [for (int i = 0; i < widget.names.length; i++) i],
+                        stake: widget.stake,
+                        onRelaunch: (accepted) =>
+                            Navigator.of(context).pop(accepted),
+                      )
+                    : null,
               ),
             ),
           ],
@@ -1287,7 +1329,7 @@ class _OnlineHubState extends State<_OnlineHub> {
         }
         players.add({'uid': user.uid, 'name': _userName(user)});
         // La partie démarre quand la salle est pleine ET que tout le monde
-        // a payé sa mise (voir _OnlineRoom).
+        // a payé sa mise (le serveur lance la partie, voir payStake).
         tx.update(ref, {
           'players': players,
           'uids': FieldValue.arrayUnion([user.uid]),
@@ -1553,7 +1595,6 @@ class _OnlineRoom extends StatefulWidget {
 }
 
 class _OnlineRoomState extends State<_OnlineRoom> {
-  bool _starting = false;
   bool _settled = false;
   int _tries = 0;
 
@@ -1644,14 +1685,6 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     final stake = (d['stake'] as num?)?.toInt() ?? 0;
     final pot = (d['pot'] as num?)?.toInt() ?? 0;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
-
-    // Salle pleine et tout le monde a payé : l'hôte lance la partie.
-    if (isHost && !_starting && players.length >= max && paid.length >= max) {
-      _starting = true;
-      _ref.update({'status': 'playing'}).catchError((_) {
-        _starting = false;
-      });
-    }
 
     return _Shell(
       title: "Salle d'attente",
@@ -1853,6 +1886,21 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                     winners: _ints(d['winners'], const []),
                     stake: stake,
                     jackpot: (d['jackpot'] as num?)?.toInt() ?? 0,
+                    endExtra: over
+                        ? RematchPanel(
+                            collection: 'deuxdes',
+                            gameId: widget.roomId,
+                            data: d,
+                            createRoom: createDeuxDesRematchRoom,
+                            openRoom: (id) {
+                              Navigator.of(context).pushReplacement(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => _OnlineRoom(roomId: id),
+                                ),
+                              );
+                            },
+                          )
+                        : null,
                   ),
                 ),
               ],
