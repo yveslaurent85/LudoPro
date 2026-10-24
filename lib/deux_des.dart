@@ -10,6 +10,7 @@ import 'dice3d.dart';
 import 'lang.dart';
 import 'main.dart';
 import 'jackpot_live.dart';
+import 'local_side_bets.dart';
 import 'online_screen.dart';
 import 'painters.dart';
 import 'rejouer.dart';
@@ -291,7 +292,11 @@ class DeuxDesPage extends StatelessWidget {
 // ----------------------------------------------------------------------
 
 /// Choix de la mise + gain du gagnant (partagé entre présentiel et en ligne).
-Widget _stakeBox(int stake, int players, void Function(int) onPick) {
+/// [local] = true : présentiel, commission de 10 % (5 % en ligne).
+Widget _stakeBox(int stake, int players, void Function(int) onPick,
+    {bool local = false}) {
+  final pct =
+      local ? Wallet.commissionLocalPercent : Wallet.commissionPercent;
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -312,10 +317,10 @@ Widget _stakeBox(int stake, int players, void Function(int) onPick) {
         stake == 0
             ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
             : tr(
-                'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * players))} '
-                '(cagnotte ${stake * players}, commission ${Wallet.commissionPercent} %)',
-                'Winner gets: ${Wallet.format(Wallet.prize(stake * players))} '
-                '(pot ${stake * players}, commission ${Wallet.commissionPercent} %)',
+                'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * players, local: local))} '
+                '(cagnotte ${stake * players}, commission $pct %)',
+                'Winner gets: ${Wallet.format(Wallet.prize(stake * players, local: local))} '
+                '(pot ${stake * players}, commission $pct %)',
               ),
         style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
       ),
@@ -327,6 +332,14 @@ String _stakeText(Map<String, dynamic> d) {
   final s = (d['stake'] as num?)?.toInt();
   if (s == null) return '';
   return s > 0 ? tr(' • mise $s', ' • stake $s') : tr(' • gratuite', ' • free');
+}
+
+/// Date et heure de création d'une partie : « • 24/10/2026 19:55 ».
+String _createdText(dynamic t) {
+  if (t is! Timestamp) return '';
+  final d = t.toDate();
+  String two(int n) => n < 10 ? '0$n' : '$n';
+  return ' • ${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
 }
 
 class _DiceTable extends StatefulWidget {
@@ -347,6 +360,7 @@ class _DiceTable extends StatefulWidget {
     this.winners = const [],
     this.stake = 0,
     this.jackpot = 0,
+    this.local = false,
     this.endExtra,
   });
 
@@ -375,6 +389,9 @@ class _DiceTable extends StatefulWidget {
   final List<int> winners;
   final int stake;
   final int jackpot;
+
+  /// Présentiel : commission de 10 % au lieu de 5 %.
+  final bool local;
 
   /// Proposition de rejouer, affichée dans le panneau de fin.
   final Widget? endExtra;
@@ -437,7 +454,8 @@ class _DiceTableState extends State<_DiceTable>
     final color = _palette[(w.isEmpty ? 0 : w.first) % 4];
     final who = w.map(_name).join(' & ');
     final pot = widget.stake * widget.names.length;
-    final share = w.isEmpty ? 0 : Wallet.prize(pot) ~/ w.length;
+    final share =
+        w.isEmpty ? 0 : Wallet.prize(pot, local: widget.local) ~/ w.length;
 
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.0, end: 1.0),
@@ -899,6 +917,7 @@ class _LocalSetupState extends State<_LocalSetup> {
     if (starting) return;
     final n = numPlayers;
     String? localId;
+    var tokenList = <String>[];
     final uids = List<String?>.filled(n, null);
 
     if (firebaseReady) {
@@ -915,6 +934,7 @@ class _LocalSetupState extends State<_LocalSetup> {
             tokens.add(a.idToken ?? '');
           }
         }
+        tokenList = tokens;
         localId = await Wallet.startLocalGame(
           stake: stake,
           tokens: tokens,
@@ -948,6 +968,7 @@ class _LocalSetupState extends State<_LocalSetup> {
           stake: firebaseReady ? stake : 0,
           localId: localId,
           uids: uids,
+          tokens: tokenList,
         ),
       ),
     );
@@ -1010,7 +1031,8 @@ class _LocalSetupState extends State<_LocalSetup> {
             const SizedBox(height: 14),
             const JackpotBanner(),
             _label('Mise de chaque joueur (jetons)'),
-            _stakeBox(stake, numPlayers, (v) => setState(() => stake = v)),
+            _stakeBox(stake, numPlayers, (v) => setState(() => stake = v),
+                local: true),
           ],
           _label(firebaseReady
               ? 'Joueurs (chacun se connecte à son compte)'
@@ -1056,6 +1078,7 @@ class _LocalGame extends StatefulWidget {
     this.stake = 0,
     this.localId,
     this.uids = const [],
+    this.tokens = const [],
   });
 
   final List<String> names;
@@ -1067,6 +1090,9 @@ class _LocalGame extends StatefulWidget {
   /// uid du compte de chaque place (pour verser les gains).
   final List<String?> uids;
 
+  /// Jeton de connexion de chaque place (pour les paris).
+  final List<String> tokens;
+
   @override
   State<_LocalGame> createState() => _LocalGameState();
 }
@@ -1074,6 +1100,7 @@ class _LocalGame extends StatefulWidget {
 class _LocalGameState extends State<_LocalGame> {
   final Random _random = Random();
   late final List<int> scores = List.filled(widget.names.length, 0);
+  final DateTime created = DateTime.now();
   int cur = 0;
   int d1 = 1;
   int d2 = 1;
@@ -1087,6 +1114,16 @@ class _LocalGameState extends State<_LocalGame> {
   bool _settled = false;
   int _tries = 0;
   int jackpot = 0;
+
+  /// Résultat des paris, renvoyé par le serveur à la fin de la partie.
+  List<Map<String, dynamic>> betResults = [];
+
+  String _two(int n) => n < 10 ? '0$n' : '$n';
+
+  String get _createdLabel =>
+      tr('Partie créée le ', 'Game created on ') +
+      '${_two(created.day)}/${_two(created.month)}/${created.year} '
+          '${_two(created.hour)}:${_two(created.minute)}';
 
   void _roll() {
     setState(() {
@@ -1114,7 +1151,8 @@ class _LocalGameState extends State<_LocalGame> {
     });
   }
 
-  /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants.
+  /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants
+  /// et règle les paris.
   Future<void> _settle() async {
     final id = widget.localId;
     if (id == null || _settled || !firebaseReady) return;
@@ -1125,8 +1163,21 @@ class _LocalGameState extends State<_LocalGame> {
           if (s < widget.uids.length && widget.uids[s] != null)
             widget.uids[s]!,
       ];
-      final jp = await Wallet.settleLocal(id, ws);
-      if (mounted && jp > 0) setState(() => jackpot = jp);
+      final res = await Wallet.settleLocalFull(
+        id,
+        ws,
+        List<int>.from(scores),
+      );
+      final jp = (res['jackpot'] as num?)?.toInt() ?? 0;
+      final bets = ((res['bets'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (mounted) {
+        setState(() {
+          if (jp > 0) jackpot = jp;
+          betResults = bets;
+        });
+      }
     } catch (_) {
       _settled = false;
       if (mounted && ++_tries < 4) {
@@ -1154,6 +1205,24 @@ class _LocalGameState extends State<_LocalGame> {
         child: Column(
           children: [
             if (firebaseReady) JackpotLive(stake: widget.stake),
+            if (widget.stake > 0 && widget.localId != null)
+              LocalSideBetsBar(
+                key: const ValueKey('local_bets'),
+                localId: widget.localId!,
+                names: widget.names,
+                uids: widget.uids,
+                tokens: widget.tokens,
+                cur: cur,
+                rolled: rolled,
+                over: over,
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                _createdLabel,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
             Expanded(
               child: _DiceTable(
                 names: widget.names,
@@ -1172,13 +1241,25 @@ class _LocalGameState extends State<_LocalGame> {
                 winners: winners,
                 stake: widget.stake,
                 jackpot: jackpot,
+                local: true,
                 endExtra: over
-                    ? LocalRematchPanel(
-                        names: widget.names,
-                        ids: [for (int i = 0; i < widget.names.length; i++) i],
-                        stake: widget.stake,
-                        onRelaunch: (accepted) =>
-                            Navigator.of(context).pop(accepted),
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (betResults.isNotEmpty) ...[
+                            LocalBetsSummary(bets: betResults),
+                            const SizedBox(height: 12),
+                          ],
+                          LocalRematchPanel(
+                            names: widget.names,
+                            ids: [
+                              for (int i = 0; i < widget.names.length; i++) i,
+                            ],
+                            stake: widget.stake,
+                            onRelaunch: (accepted) =>
+                                Navigator.of(context).pop(accepted),
+                          ),
+                        ],
                       )
                     : null,
               ),
@@ -1403,13 +1484,14 @@ class _OnlineHubState extends State<_OnlineHub> {
                 final waiting = d['status'] == 'waiting';
                 final n = _playersOf(d).length;
                 final max = (d['maxPlayers'] as num).toInt();
+                final when = _createdText(d['createdAt']);
                 return _tile(
                   tr("Partie de ${d['hostName']}", "${d['hostName']}'s game"),
                   waiting
-                      ? tr('En attente ($n/$max joueurs)${_stakeText(d)}',
-                          'Waiting ($n/$max players)${_stakeText(d)}')
-                      : tr('En cours${_stakeText(d)}',
-                          'In progress${_stakeText(d)}'),
+                      ? tr('En attente ($n/$max joueurs)${_stakeText(d)}$when',
+                          'Waiting ($n/$max players)${_stakeText(d)}$when')
+                      : tr('En cours${_stakeText(d)}$when',
+                          'In progress${_stakeText(d)}$when'),
                   waiting ? 'Ouvrir' : 'Reprendre',
                   busy ? null : () => _open(doc.id),
                 );
@@ -1448,10 +1530,11 @@ class _OnlineHubState extends State<_OnlineHub> {
                 final d = doc.data();
                 final n = _playersOf(d).length;
                 final max = (d['maxPlayers'] as num).toInt();
+                final when = _createdText(d['createdAt']);
                 return _tile(
                   tr("Partie de ${d['hostName']}", "${d['hostName']}'s game"),
-                  tr('$n/$max joueurs${_stakeText(d)}',
-                      '$n/$max players${_stakeText(d)}'),
+                  tr('$n/$max joueurs${_stakeText(d)}$when',
+                      '$n/$max players${_stakeText(d)}$when'),
                   'Rejoindre',
                   busy ? null : () => _join(doc.id),
                 );
@@ -1686,6 +1769,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     final stake = (d['stake'] as num?)?.toInt() ?? 0;
     final pot = (d['pot'] as num?)?.toInt() ?? 0;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
+    final createdLabel =
+        _createdText(d['createdAt']).replaceFirst(' • ', '');
 
     return _Shell(
       title: "Salle d'attente",
@@ -1697,6 +1782,11 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                 '${players.length}/$max players'),
             style: const TextStyle(color: Colors.white70, fontSize: 14),
           ),
+          if (createdLabel.isNotEmpty)
+            Text(
+              tr('Créée le $createdLabel', 'Created on $createdLabel'),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
           const SizedBox(height: 4),
           const Text(
             'La partie démarre quand la salle est pleine et que tout le monde '
