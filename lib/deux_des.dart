@@ -9,7 +9,9 @@ import 'accounts.dart';
 import 'dice3d.dart';
 import 'lang.dart';
 import 'main.dart';
+import 'jackpot_live.dart';
 import 'online_screen.dart';
+import 'painters.dart';
 
 // ----------------------------------------------------------------------
 // Deux dés : chaque joueur a son compte, en présentiel comme en ligne.
@@ -61,6 +63,13 @@ List<Map<String, dynamic>> _playersOf(Map<String, dynamic> d) =>
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
 
+/// Places gagnantes : celles qui ont le score le plus élevé (ex æquo possibles).
+List<int> _winnersOf(List<int> scores) {
+  if (scores.isEmpty) return const [];
+  final best = scores.reduce(max);
+  return [for (int i = 0; i < scores.length; i++) if (scores[i] == best) i];
+}
+
 /// Écran avec fond bleu, bouton retour et titre.
 class _Shell extends StatelessWidget {
   const _Shell({required this.title, required this.child});
@@ -83,7 +92,7 @@ class _Shell extends StatelessWidget {
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () => Navigator.of(context).maybePop(),
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                     ),
                     Expanded(
@@ -276,15 +285,53 @@ class DeuxDesPage extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
-// Plateau commun (présentiel et en ligne) : dés 3D, scores, boutons
+// Plateau commun (présentiel et en ligne) : dés 3D, scores, fin de partie
 // ----------------------------------------------------------------------
+
+/// Choix de la mise + gain du gagnant (partagé entre présentiel et en ligne).
+Widget _stakeBox(int stake, int players, void Function(int) onPick) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final v in Wallet.stakes)
+            ChoiceChip(
+              label: Text(Wallet.stakeLabel(v)),
+              selected: stake == v,
+              onSelected: (_) => onPick(v),
+            ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      Text(
+        stake == 0
+            ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
+            : tr(
+                'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * players))} '
+                '(cagnotte ${stake * players}, commission ${Wallet.commissionPercent} %)',
+                'Winner gets: ${Wallet.format(Wallet.prize(stake * players))} '
+                '(pot ${stake * players}, commission ${Wallet.commissionPercent} %)',
+              ),
+        style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+      ),
+    ],
+  );
+}
+
+String _stakeText(Map<String, dynamic> d) {
+  final s = (d['stake'] as num?)?.toInt();
+  if (s == null) return '';
+  return s > 0 ? tr(' • mise $s', ' • stake $s') : tr(' • gratuite', ' • free');
+}
 
 class _DiceTable extends StatefulWidget {
   const _DiceTable({
     required this.names,
     required this.scores,
     required this.cur,
-    required this.round,
     required this.d1,
     required this.d2,
     required this.spin1,
@@ -294,18 +341,21 @@ class _DiceTable extends StatefulWidget {
     required this.canAct,
     required this.onRoll,
     required this.onNext,
+    this.over = false,
+    this.winners = const [],
+    this.stake = 0,
+    this.jackpot = 0,
   });
 
   final List<String> names;
   final List<int> scores;
   final int cur;
-  final int round;
   final int d1;
   final int d2;
   final List<int> spin1;
   final List<int> spin2;
 
-  /// Le joueur courant a déjà lancé ses dés ce tour-ci.
+  /// Le joueur courant a déjà lancé ses dés.
   final bool rolled;
 
   /// Compteur de lancers : chaque changement déclenche l'animation
@@ -316,6 +366,12 @@ class _DiceTable extends StatefulWidget {
   final bool canAct;
   final VoidCallback onRoll;
   final VoidCallback onNext;
+
+  /// Partie finie : tous les joueurs ont lancé. [winners] = places gagnantes.
+  final bool over;
+  final List<int> winners;
+  final int stake;
+  final int jackpot;
 
   @override
   State<_DiceTable> createState() => _DiceTableState();
@@ -368,142 +424,295 @@ class _DiceTableState extends State<_DiceTable>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final color = _palette[widget.cur % 4];
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          Text(
-            tr('Tour ${widget.round}', 'Round ${widget.round}'),
-            style: const TextStyle(
-              color: Color(0xFFFFE082),
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
+  /// Félicitations au vainqueur (ou aux ex æquo) + « Katika décharge les caisses ».
+  Widget _endPanel() {
+    final w = widget.winners;
+    final tie = w.length > 1;
+    final color = _palette[(w.isEmpty ? 0 : w.first) % 4];
+    final who = w.map(_name).join(' & ');
+    final pot = widget.stake * widget.names.length;
+    final share = w.isEmpty ? 0 : Wallet.prize(pot) ~/ w.length;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 900),
+      curve: Curves.elasticOut,
+      builder: (context, v, child) => Transform.scale(scale: v, child: child),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A1B66),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: color, width: 2.5),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.7),
+              blurRadius: 18,
+              spreadRadius: 1,
             ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              color: const Color(0xFF0A1B66),
-              border: Border.all(color: color, width: 2.5),
-            ),
-            child: Text(
-              tr('Au tour de : ${_name(widget.cur)}',
-                  'Turn of: ${_name(widget.cur)}'),
+          ],
+        ),
+        child: Column(
+          children: [
+            const Text('👑', style: TextStyle(fontSize: 52)),
+            Text(
+              tie
+                  ? tr('🤝 Égalité : $who !', '🤝 It\'s a tie: $who!')
+                  : tr('🏆 Félicitations $who !', '🏆 Congratulations $who!'),
+              textAlign: TextAlign.center,
               style: const TextStyle(
+                color: Color(0xFFFFC21A),
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            if (w.isNotEmpty)
+              Text(
+                tr('avec ${widget.scores[w.first]} points',
+                    'with ${widget.scores[w.first]} points'),
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            if (widget.stake > 0 && w.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                tie
+                    ? tr('Cagnotte partagée : ${Wallet.format(share)} chacun',
+                        'Pot shared: ${Wallet.format(share)} each')
+                    : tr('Gain : ${Wallet.format(share)}',
+                        'Prize: ${Wallet.format(share)}'),
+                style: const TextStyle(
+                  color: Color(0xFFFFE082),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+            if (widget.jackpot > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                tr('🎰 JACKPOT gagné : ${Wallet.format(widget.jackpot)} !',
+                    '🎰 JACKPOT won: ${Wallet.format(widget.jackpot)}!'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            const Text(
+              'Katika décharge les caisses',
+              style: TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: 15,
+                fontStyle: FontStyle.italic,
                 fontWeight: FontWeight.w800,
               ),
             ),
-          ),
-          const SizedBox(height: 28),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _die(widget.d1, widget.spin1),
-              const SizedBox(width: 24),
-              _die(widget.d2, widget.spin2),
-            ],
-          ),
-          const SizedBox(height: 14),
-          AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) => Text(
-              _c.isAnimating
-                  ? '...'
-                  : (widget.rolled
-                      ? 'Total : ${widget.d1 + widget.d2}'
-                      : ' '),
-              style: const TextStyle(color: Colors.white, fontSize: 24),
-            ),
-          ),
-          const SizedBox(height: 18),
-          AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) {
-              final busy = _c.isAnimating;
-              if (!widget.canAct) {
-                return Text(
-                  tr('En attente de ${_name(widget.cur)}...',
-                      'Waiting for ${_name(widget.cur)}...'),
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                );
-              }
-              return Column(
-                children: [
-                  SizedBox(
-                    width: 220,
-                    height: 48,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF22B14C),
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: (!widget.rolled && !busy) ? widget.onRoll : null,
-                      child: const Text('Lancer'),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: 220,
-                    height: 44,
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
-                      ),
-                      onPressed: (widget.rolled && !busy) ? widget.onNext : null,
-                      child: const Text('Joueur suivant'),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 24),
-          for (int i = 0; i < widget.names.length; i++)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: Colors.white.withOpacity(i == widget.cur ? 0.2 : 0.1),
-                border: Border.all(
-                  color: _palette[i % 4],
-                  width: i == widget.cur ? 2.5 : 1,
+            const SizedBox(height: 12),
+            SizedBox(
+              width: 200,
+              height: 44,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
                 ),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(radius: 9, backgroundColor: _palette[i % 4]),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      widget.names[i],
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '${i < widget.scores.length ? widget.scores[i] : 0}',
-                    style: const TextStyle(
-                      color: Color(0xFFFFE082),
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ],
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Accueil'),
               ),
             ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _palette[widget.cur % 4];
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Text(
+                  tr('Lancer ${widget.cur + 1}/${widget.names.length}',
+                      'Roll ${widget.cur + 1}/${widget.names.length}'),
+                  style: const TextStyle(
+                    color: Color(0xFFFFE082),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    color: const Color(0xFF0A1B66),
+                    border: Border.all(color: color, width: 2.5),
+                  ),
+                  child: Text(
+                    tr('Au tour de : ${_name(widget.cur)}',
+                        'Turn of: ${_name(widget.cur)}'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _die(widget.d1, widget.spin1),
+                    const SizedBox(width: 24),
+                    _die(widget.d2, widget.spin2),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                AnimatedBuilder(
+                  animation: _c,
+                  builder: (context, _) => Text(
+                    _c.isAnimating
+                        ? '...'
+                        : (widget.rolled
+                            ? 'Total : ${widget.d1 + widget.d2}'
+                            : ' '),
+                    style: const TextStyle(color: Colors.white, fontSize: 24),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                AnimatedBuilder(
+                  animation: _c,
+                  builder: (context, _) {
+                    final busy = _c.isAnimating;
+                    if (widget.over) {
+                      return busy ? const SizedBox(height: 60) : _endPanel();
+                    }
+                    if (!widget.canAct) {
+                      return Text(
+                        tr('En attente de ${_name(widget.cur)}...',
+                            'Waiting for ${_name(widget.cur)}...'),
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 14),
+                      );
+                    }
+                    return Column(
+                      children: [
+                        SizedBox(
+                          width: 220,
+                          height: 48,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF22B14C),
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: (!widget.rolled && !busy)
+                                ? widget.onRoll
+                                : null,
+                            child: const Text('Lancer'),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: 220,
+                          height: 44,
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                            ),
+                            onPressed: (widget.rolled && !busy)
+                                ? widget.onNext
+                                : null,
+                            child: const Text('Joueur suivant'),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 24),
+                AnimatedBuilder(
+                  animation: _c,
+                  builder: (context, _) {
+                    final showEnd = widget.over && !_c.isAnimating;
+                    return Column(
+                      children: [
+                        for (int i = 0; i < widget.names.length; i++)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              color: Colors.white
+                                  .withOpacity(i == widget.cur ? 0.2 : 0.1),
+                              border: Border.all(
+                                color: (showEnd && widget.winners.contains(i))
+                                    ? const Color(0xFFFFC21A)
+                                    : _palette[i % 4],
+                                width: (i == widget.cur || showEnd) ? 2.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                    radius: 9, backgroundColor: _palette[i % 4]),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    '${widget.names[i]}'
+                                    '${(showEnd && widget.winners.contains(i)) ? ' 👑' : ''}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  // Le score du joueur qui lance reste caché
+                                  // pendant que les dés roulent.
+                                  (_c.isAnimating && i == widget.cur)
+                                      ? '?'
+                                      : '${i < widget.scores.length ? widget.scores[i] : 0}',
+                                  style: const TextStyle(
+                                    color: Color(0xFFFFE082),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Confettis quand les dés ont fini de rouler et que la partie est finie.
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) => (widget.over && !_c.isAnimating)
+                  ? const Confetti()
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -521,10 +730,11 @@ class _LocalSetup extends StatefulWidget {
 
 class _LocalSetupState extends State<_LocalSetup> {
   int numPlayers = 2;
+  int stake = Wallet.minStake;
+  bool starting = false;
 
-  /// Nom et uid des joueurs connectés, par place (0 = joueur principal).
-  final Map<int, String> names = {};
-  final Map<int, String> uids = {};
+  /// Comptes connectés, par place (0 = joueur principal).
+  final Map<int, PlayerAccount> accounts = {};
   late final List<TextEditingController> ctrls =
       List.generate(4, (_) => TextEditingController());
 
@@ -533,10 +743,7 @@ class _LocalSetupState extends State<_LocalSetup> {
     super.initState();
     if (firebaseReady) {
       final u = FirebaseAuth.instance.currentUser;
-      if (u != null) {
-        names[0] = _userName(u);
-        uids[0] = u.uid;
-      }
+      if (u != null) _loadHost(u);
     }
   }
 
@@ -548,9 +755,38 @@ class _LocalSetupState extends State<_LocalSetup> {
     super.dispose();
   }
 
+  Future<void> _loadHost(User u) async {
+    int bal = 0;
+    String? token;
+    try {
+      bal = await Wallet.ensure(FirebaseFirestore.instance, u);
+      token = await u.getIdToken();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      accounts[0] = PlayerAccount(
+        idToken: token,
+        uid: u.uid,
+        name: _userName(u),
+        email: u.email ?? '',
+        balance: bal,
+      );
+    });
+  }
+
   bool get ready =>
       !firebaseReady ||
-      List.generate(numPlayers, (i) => i).every(names.containsKey);
+      List.generate(numPlayers, (i) => i).every(accounts.containsKey);
+
+  /// Nom du premier joueur dont le solde ne couvre pas la mise.
+  String? get brokePlayer {
+    if (!firebaseReady) return null;
+    for (int s = 0; s < numPlayers; s++) {
+      final a = accounts[s];
+      if (a != null && a.balance < stake) return a.name;
+    }
+    return null;
+  }
 
   Future<void> _connect(int seat) async {
     final acc = await showPlayerLogin(
@@ -560,21 +796,18 @@ class _LocalSetupState extends State<_LocalSetup> {
     );
     if (acc == null || !mounted) return;
     final already =
-        uids.entries.any((e) => e.key != seat && e.value == acc.uid);
+        accounts.entries.any((e) => e.key != seat && e.value.uid == acc.uid);
     if (already) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ce compte joue déjà dans la partie.')),
       );
       return;
     }
-    setState(() {
-      names[seat] = acc.name;
-      uids[seat] = acc.uid;
-    });
+    setState(() => accounts[seat] = acc);
   }
 
   Widget _row(int seat) {
-    final name = names[seat];
+    final acc = accounts[seat];
     Widget field;
     if (!firebaseReady) {
       field = TextField(
@@ -584,8 +817,8 @@ class _LocalSetupState extends State<_LocalSetup> {
         decoration: InputDecoration(
           counterText: '',
           isDense: true,
-          hintText: tr('Joueur ${_colorNames[seat]}',
-              'Player ${_colorNames[seat]}'),
+          hintText:
+              tr('Joueur ${_colorNames[seat]}', 'Player ${_colorNames[seat]}'),
           hintStyle: const TextStyle(color: Colors.white54),
           filled: true,
           fillColor: Colors.white.withOpacity(0.12),
@@ -595,20 +828,29 @@ class _LocalSetupState extends State<_LocalSetup> {
           ),
         ),
       );
-    } else if (name != null) {
+    } else if (acc != null) {
       field = Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           color: Colors.white.withOpacity(0.12),
           border: Border.all(color: _palette[seat], width: 1.5),
         ),
-        child: Text(
-          name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              acc.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            Text(
+              '💰 ${Wallet.format(acc.balance)}',
+              style: const TextStyle(color: Color(0xFFFFE082), fontSize: 12),
+            ),
+          ],
         ),
       );
     } else {
@@ -631,13 +873,10 @@ class _LocalSetupState extends State<_LocalSetup> {
           CircleAvatar(radius: 14, backgroundColor: _palette[seat]),
           const SizedBox(width: 12),
           Expanded(child: field),
-          if (firebaseReady && name != null && seat != 0)
+          if (firebaseReady && acc != null && seat != 0)
             IconButton(
               tooltip: tr('Changer de compte', 'Switch account'),
-              onPressed: () => setState(() {
-                names.remove(seat);
-                uids.remove(seat);
-              }),
+              onPressed: () => setState(() => accounts.remove(seat)),
               icon: const Icon(Icons.logout, color: Colors.white70),
             ),
         ],
@@ -645,22 +884,77 @@ class _LocalSetupState extends State<_LocalSetup> {
     );
   }
 
-  void _start() {
-    final list = <String>[
-      for (int i = 0; i < numPlayers; i++)
+  /// Débite les mises sur le serveur, puis lance la partie.
+  Future<void> _start() async {
+    if (starting) return;
+    final n = numPlayers;
+    String? localId;
+    final uids = List<String?>.filled(n, null);
+
+    if (firebaseReady) {
+      setState(() => starting = true);
+      try {
+        final tokens = <String>[];
+        for (int s = 0; s < n; s++) {
+          final a = accounts[s]!;
+          uids[s] = a.uid;
+          if (s == 0) {
+            final u = FirebaseAuth.instance.currentUser;
+            tokens.add((await u?.getIdToken(true)) ?? '');
+          } else {
+            tokens.add(a.idToken ?? '');
+          }
+        }
+        localId = await Wallet.startLocalGame(
+          stake: stake,
+          tokens: tokens,
+          names: [for (int s = 0; s < n; s++) accounts[s]!.name],
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => starting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(Wallet.errorText(e))),
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() => starting = false);
+    }
+
+    final names = <String>[
+      for (int i = 0; i < n; i++)
         firebaseReady
-            ? names[i]!
+            ? accounts[i]!.name
             : (ctrls[i].text.trim().isNotEmpty
                 ? ctrls[i].text.trim()
                 : tr('Joueur ${_colorNames[i]}', 'Player ${_colorNames[i]}')),
     ];
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => _LocalGame(names: list)),
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _LocalGame(
+          names: names,
+          stake: firebaseReady ? stake : 0,
+          localId: localId,
+          uids: uids,
+        ),
+      ),
     );
+    if (!mounted) return;
+
+    // Soldes à jour : le joueur principal est rechargé, les invités se
+    // reconnectent pour la partie suivante.
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      setState(() => accounts.removeWhere((k, _) => k != 0));
+      if (u != null) _loadHost(u);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final broke = brokePlayer;
     return _Shell(
       title: 'Deux dés · présentiel',
       child: ListView(
@@ -678,6 +972,12 @@ class _LocalSetupState extends State<_LocalSetup> {
                 ),
             ],
           ),
+          if (firebaseReady) ...[
+            const SizedBox(height: 14),
+            const JackpotBanner(),
+            _label('Mise de chaque joueur (jetons)'),
+            _stakeBox(stake, numPlayers, (v) => setState(() => stake = v)),
+          ],
           _label(firebaseReady
               ? 'Joueurs (chacun se connecte à son compte)'
               : 'Joueurs'),
@@ -690,10 +990,23 @@ class _LocalSetupState extends State<_LocalSetup> {
                 backgroundColor: const Color(0xFF22B14C),
                 foregroundColor: Colors.white,
               ),
-              onPressed: ready ? _start : null,
+              onPressed: (!ready || broke != null || starting) ? null : _start,
               child: Text(
-                ready ? 'Lancer la partie' : 'Tous les joueurs doivent se connecter',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                starting
+                    ? 'Mise en cours...'
+                    : !ready
+                        ? 'Tous les joueurs doivent se connecter'
+                        : (broke != null
+                            ? tr('Solde insuffisant : $broke',
+                                'Insufficient balance: $broke')
+                            : (firebaseReady
+                                ? (stake == 0
+                                    ? 'Lancer · partie gratuite'
+                                    : tr('Lancer · mise ${Wallet.format(stake)}',
+                                        'Start · stake ${Wallet.format(stake)}'))
+                                : 'Lancer la partie')),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -704,9 +1017,21 @@ class _LocalSetupState extends State<_LocalSetup> {
 }
 
 class _LocalGame extends StatefulWidget {
-  const _LocalGame({required this.names});
+  const _LocalGame({
+    required this.names,
+    this.stake = 0,
+    this.localId,
+    this.uids = const [],
+  });
 
   final List<String> names;
+  final int stake;
+
+  /// Identifiant de la partie côté serveur (null = pas de mise).
+  final String? localId;
+
+  /// uid du compte de chaque place (pour verser les gains).
+  final List<String?> uids;
 
   @override
   State<_LocalGame> createState() => _LocalGameState();
@@ -716,13 +1041,18 @@ class _LocalGameState extends State<_LocalGame> {
   final Random _random = Random();
   late final List<int> scores = List.filled(widget.names.length, 0);
   int cur = 0;
-  int round = 1;
   int d1 = 1;
   int d2 = 1;
   int rollN = 0;
   bool rolled = false;
+  bool over = false;
+  List<int> winners = [];
   List<int> spin1 = [2, 3, 1];
   List<int> spin2 = [3, 2, 2];
+
+  bool _settled = false;
+  int _tries = 0;
+  int jackpot = 0;
 
   void _roll() {
     setState(() {
@@ -733,35 +1063,85 @@ class _LocalGameState extends State<_LocalGame> {
       scores[cur] += d1 + d2;
       rolled = true;
       rollN++;
+      // Le dernier joueur vient de lancer : la partie est finie.
+      if (cur == widget.names.length - 1) {
+        over = true;
+        winners = _winnersOf(scores);
+      }
     });
+    if (over) _settle();
   }
 
   void _next() {
+    if (over) return;
     setState(() {
-      cur = (cur + 1) % widget.names.length;
-      if (cur == 0) round++;
+      cur++;
       rolled = false;
     });
   }
 
+  /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants.
+  Future<void> _settle() async {
+    final id = widget.localId;
+    if (id == null || _settled || !firebaseReady) return;
+    _settled = true;
+    try {
+      final ws = <String>[
+        for (final s in winners)
+          if (s < widget.uids.length && widget.uids[s] != null)
+            widget.uids[s]!,
+      ];
+      final jp = await Wallet.settleLocal(id, ws);
+      if (mounted && jp > 0) setState(() => jackpot = jp);
+    } catch (_) {
+      _settled = false;
+      if (mounted && ++_tries < 4) {
+        Future.delayed(const Duration(seconds: 5), _settle);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return _Shell(
-      title: 'Deux dés',
-      child: _DiceTable(
-        names: widget.names,
-        scores: scores,
-        cur: cur,
-        round: round,
-        d1: d1,
-        d2: d2,
-        spin1: spin1,
-        spin2: spin2,
-        rolled: rolled,
-        rollN: rollN,
-        canAct: true,
-        onRoll: _roll,
-        onNext: _next,
+    // Avec une mise, on ne quitte pas avant la fin (sinon la mise serait perdue).
+    return PopScope(
+      canPop: widget.localId == null || over,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Termine la partie pour récupérer les gains.'),
+            ),
+          );
+        }
+      },
+      child: _Shell(
+        title: 'Deux dés',
+        child: Column(
+          children: [
+            if (firebaseReady) JackpotLive(stake: widget.stake),
+            Expanded(
+              child: _DiceTable(
+                names: widget.names,
+                scores: scores,
+                cur: cur,
+                d1: d1,
+                d2: d2,
+                spin1: spin1,
+                spin2: spin2,
+                rolled: rolled,
+                rollN: rollN,
+                canAct: true,
+                onRoll: _roll,
+                onNext: _next,
+                over: over,
+                winners: winners,
+                stake: widget.stake,
+                jackpot: jackpot,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -780,6 +1160,7 @@ class _OnlineHub extends StatefulWidget {
 
 class _OnlineHubState extends State<_OnlineHub> {
   int maxPlayers = 2;
+  int stake = Wallet.minStake;
   bool privateRoom = false;
   bool busy = false;
   String? error;
@@ -804,6 +1185,13 @@ class _OnlineHubState extends State<_OnlineHub> {
     );
   }
 
+  Future<int> _myBalance() async {
+    final s =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final b = s.data()?['balance'];
+    return b is num ? b.toInt() : 0;
+  }
+
   Future<void> _create() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || busy) return;
@@ -812,12 +1200,23 @@ class _OnlineHubState extends State<_OnlineHub> {
       error = null;
     });
     try {
+      if (await _myBalance() < stake) {
+        if (mounted) {
+          setState(() => error = tr(
+              'Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.',
+              'Insufficient balance: you need at least ${Wallet.format(stake)}.'));
+        }
+        return;
+      }
       final ref = _rooms.doc();
       await ref.set({
         'hostUid': user.uid,
         'hostName': _userName(user),
         'maxPlayers': maxPlayers,
         'private': privateRoom,
+        'stake': stake,
+        'paid': <String>[],
+        'pot': 0,
         'code': _newCode(),
         'status': 'waiting',
         'players': [
@@ -826,8 +1225,9 @@ class _OnlineHubState extends State<_OnlineHub> {
         'uids': [user.uid],
         'scores': List<int>.filled(maxPlayers, 0),
         'cur': 0,
-        'round': 1,
         'rolled': false,
+        'over': false,
+        'winners': <int>[],
         'd1': 1,
         'd2': 1,
         'spin1': [2, 3, 1],
@@ -835,6 +1235,15 @@ class _OnlineHubState extends State<_OnlineHub> {
         'rollN': 0,
         'createdAt': FieldValue.serverTimestamp(),
       });
+      try {
+        await Wallet.payStake(ref.id);
+      } catch (e) {
+        try {
+          await Wallet.leaveGame(ref.id);
+        } catch (_) {}
+        if (mounted) setState(() => error = Wallet.errorText(e));
+        return;
+      }
       if (mounted) _open(ref.id);
     } catch (_) {
       if (mounted) {
@@ -855,6 +1264,16 @@ class _OnlineHubState extends State<_OnlineHub> {
     });
     try {
       final ref = _rooms.doc(id);
+      final pre = await ref.get();
+      final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      if (pre.exists && need > 0 && await _myBalance() < need) {
+        if (mounted) {
+          setState(() => error = tr(
+              'Solde insuffisant : mise de ${Wallet.format(need)}.',
+              'Insufficient balance: stake of ${Wallet.format(need)}.'));
+        }
+        return;
+      }
       final result =
           await FirebaseFirestore.instance.runTransaction<String?>((tx) async {
         final snap = await tx.get(ref);
@@ -867,19 +1286,27 @@ class _OnlineHubState extends State<_OnlineHub> {
           return 'Cette partie est déjà complète.';
         }
         players.add({'uid': user.uid, 'name': _userName(user)});
+        // La partie démarre quand la salle est pleine ET que tout le monde
+        // a payé sa mise (voir _OnlineRoom).
         tx.update(ref, {
           'players': players,
           'uids': FieldValue.arrayUnion([user.uid]),
-          // La salle est pleine : la partie démarre toute seule.
-          if (players.length >= max) 'status': 'playing',
         });
         return null;
       });
       if (!mounted) return;
       if (result != null) {
         setState(() => error = result);
-      } else {
-        _open(id);
+        return;
+      }
+      try {
+        await Wallet.payStake(id);
+        if (mounted) _open(id);
+      } catch (e) {
+        try {
+          await Wallet.leaveGame(id);
+        } catch (_) {}
+        if (mounted) setState(() => error = Wallet.errorText(e));
       }
     } catch (_) {
       if (mounted) setState(() => error = 'Impossible de rejoindre la partie.');
@@ -936,9 +1363,10 @@ class _OnlineHubState extends State<_OnlineHub> {
                 return _tile(
                   tr("Partie de ${d['hostName']}", "${d['hostName']}'s game"),
                   waiting
-                      ? tr('En attente ($n/$max joueurs)',
-                          'Waiting ($n/$max players)')
-                      : tr('En cours', 'In progress'),
+                      ? tr('En attente ($n/$max joueurs)${_stakeText(d)}',
+                          'Waiting ($n/$max players)${_stakeText(d)}')
+                      : tr('En cours${_stakeText(d)}',
+                          'In progress${_stakeText(d)}'),
                   waiting ? 'Ouvrir' : 'Reprendre',
                   busy ? null : () => _open(doc.id),
                 );
@@ -979,7 +1407,8 @@ class _OnlineHubState extends State<_OnlineHub> {
                 final max = (d['maxPlayers'] as num).toInt();
                 return _tile(
                   tr("Partie de ${d['hostName']}", "${d['hostName']}'s game"),
-                  tr('$n/$max joueurs', '$n/$max players'),
+                  tr('$n/$max joueurs${_stakeText(d)}',
+                      '$n/$max players${_stakeText(d)}'),
                   'Rejoindre',
                   busy ? null : () => _join(doc.id),
                 );
@@ -997,6 +1426,7 @@ class _OnlineHubState extends State<_OnlineHub> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         children: [
+          const JackpotBanner(),
           _label('Créer une partie'),
           Wrap(
             spacing: 8,
@@ -1009,6 +1439,23 @@ class _OnlineHubState extends State<_OnlineHub> {
                 ),
             ],
           ),
+          const SizedBox(height: 14),
+          StreamBuilder<int>(
+            stream: Wallet.watch(uid),
+            builder: (context, s) => Text(
+              tr(
+                'Mise de chaque joueur · ton solde : ${Wallet.format(s.data ?? 0)}',
+                "Each player's stake · your balance: ${Wallet.format(s.data ?? 0)}",
+              ),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _stakeBox(stake, maxPlayers, (v) => setState(() => stake = v)),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             activeColor: const Color(0xFFFFC21A),
@@ -1095,15 +1542,24 @@ class _OnlineHubState extends State<_OnlineHub> {
   }
 }
 
-/// Salle d'une partie en ligne : attente des joueurs, puis jeu.
-class _OnlineRoom extends StatelessWidget {
+/// Salle d'une partie en ligne : attente (mises payées), puis jeu.
+class _OnlineRoom extends StatefulWidget {
   const _OnlineRoom({required this.roomId});
 
   final String roomId;
 
-  DocumentReference<Map<String, dynamic>> get _ref => _rooms.doc(roomId);
+  @override
+  State<_OnlineRoom> createState() => _OnlineRoomState();
+}
 
-  Widget _info(BuildContext context, String text, {bool loading = false}) {
+class _OnlineRoomState extends State<_OnlineRoom> {
+  bool _starting = false;
+  bool _settled = false;
+  int _tries = 0;
+
+  DocumentReference<Map<String, dynamic>> get _ref => _rooms.doc(widget.roomId);
+
+  Widget _info(String text, {bool loading = false}) {
     return _Shell(
       title: 'Deux dés',
       child: Center(
@@ -1114,32 +1570,26 @@ class _OnlineRoom extends StatelessWidget {
     );
   }
 
-  /// Quitter la salle d'attente (l'hôte annule la partie).
-  Future<void> _leave(BuildContext context, Map<String, dynamic> d,
-      String uid) async {
+  /// Quitter la salle d'attente : la mise est remboursée par le serveur.
+  Future<void> _leave() async {
     Navigator.of(context).pop();
     try {
-      if (d['hostUid'] == uid) {
-        await _ref.delete();
-      } else {
-        await FirebaseFirestore.instance.runTransaction<void>((tx) async {
-          final snap = await tx.get(_ref);
-          final data = snap.data();
-          if (data == null || data['status'] != 'waiting') return;
-          final players = _playersOf(data)..removeWhere((p) => p['uid'] == uid);
-          tx.update(_ref, {
-            'players': players,
-            'uids': FieldValue.arrayRemove([uid]),
-          });
-        });
-      }
+      await Wallet.leaveGame(widget.roomId);
     } catch (_) {}
   }
 
-  Future<void> _start() async {
+  /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants.
+  Future<void> _settle() async {
+    if (_settled) return;
+    _settled = true;
     try {
-      await _ref.update({'status': 'playing'});
-    } catch (_) {}
+      await Wallet.settleOnline(widget.roomId);
+    } catch (_) {
+      _settled = false;
+      if (mounted && ++_tries < 4) {
+        Future.delayed(const Duration(seconds: 5), _settle);
+      }
+    }
   }
 
   Future<void> _roll(int seat) async {
@@ -1152,9 +1602,11 @@ class _OnlineRoom extends StatelessWidget {
         final d = snap.data();
         if (d == null) return;
         if ((d['cur'] as num).toInt() != seat || d['rolled'] == true) return;
+        if (d['over'] == true) return;
         final scores = _ints(d['scores'], const []);
         if (seat >= scores.length) return;
         scores[seat] += a + b;
+        final isLast = seat == _playersOf(d).length - 1;
         tx.update(_ref, {
           'd1': a,
           'd2': b,
@@ -1163,6 +1615,10 @@ class _OnlineRoom extends StatelessWidget {
           'scores': scores,
           'rolled': true,
           'rollN': FieldValue.increment(1),
+          // Le dernier joueur vient de lancer : la partie est finie.
+          if (isLast) 'over': true,
+          if (isLast) 'winners': _winnersOf(scores),
+          if (isLast) 'status': 'finished',
         });
       });
     } catch (_) {}
@@ -1175,22 +1631,28 @@ class _OnlineRoom extends StatelessWidget {
         final d = snap.data();
         if (d == null) return;
         final cur = (d['cur'] as num).toInt();
-        if (cur != seat || d['rolled'] != true) return;
-        final n = _playersOf(d).length;
-        final next = (cur + 1) % n;
-        tx.update(_ref, {
-          'cur': next,
-          'rolled': false,
-          if (next == 0) 'round': FieldValue.increment(1),
-        });
+        if (cur != seat || d['rolled'] != true || d['over'] == true) return;
+        tx.update(_ref, {'cur': cur + 1, 'rolled': false});
       });
     } catch (_) {}
   }
 
-  Widget _waiting(BuildContext context, Map<String, dynamic> d,
-      List<Map<String, dynamic>> players, String uid) {
+  Widget _waiting(Map<String, dynamic> d, List<Map<String, dynamic>> players,
+      String uid) {
     final max = (d['maxPlayers'] as num).toInt();
     final isHost = d['hostUid'] == uid;
+    final stake = (d['stake'] as num?)?.toInt() ?? 0;
+    final pot = (d['pot'] as num?)?.toInt() ?? 0;
+    final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
+
+    // Salle pleine et tout le monde a payé : l'hôte lance la partie.
+    if (isHost && !_starting && players.length >= max && paid.length >= max) {
+      _starting = true;
+      _ref.update({'status': 'playing'}).catchError((_) {
+        _starting = false;
+      });
+    }
+
     return _Shell(
       title: "Salle d'attente",
       child: ListView(
@@ -1203,9 +1665,55 @@ class _OnlineRoom extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           const Text(
-            'La partie démarre dès que la salle est pleine.',
+            'La partie démarre quand la salle est pleine et que tout le monde '
+            'a payé sa mise.',
             style: TextStyle(color: Colors.white70, fontSize: 12),
           ),
+          const SizedBox(height: 8),
+          Text(
+            stake > 0
+                ? tr(
+                    'Mise : ${Wallet.format(stake)} • '
+                    'Cagnotte : ${Wallet.format(pot)} '
+                    '(gain ${Wallet.format(Wallet.prize(pot))})',
+                    'Stake: ${Wallet.format(stake)} • '
+                    'Pot: ${Wallet.format(pot)} '
+                    '(prize ${Wallet.format(Wallet.prize(pot))})',
+                  )
+                : 'Partie gratuite',
+            style: const TextStyle(
+              color: Color(0xFFFFE082),
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (!paid.contains(uid))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF22B14C),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  try {
+                    await Wallet.payStake(widget.roomId);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(Wallet.errorText(e))),
+                      );
+                    }
+                  }
+                },
+                child: Text(
+                  stake > 0
+                      ? tr('Payer ma mise (${Wallet.format(stake)})',
+                          'Pay my stake (${Wallet.format(stake)})')
+                      : 'Valider ma participation',
+                ),
+              ),
+            ),
           Container(
             margin: const EdgeInsets.only(top: 14, bottom: 14),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1256,33 +1764,17 @@ class _OnlineRoom extends StatelessWidget {
                     child: Text(
                       i < players.length
                           ? '${players[i]['name']}'
+                              '${paid.contains(players[i]['uid']) ? ' ✅' : ''}'
                           : "En attente d'un joueur...",
                       style: TextStyle(
-                        color: i < players.length
-                            ? Colors.white
-                            : Colors.white54,
+                        color:
+                            i < players.length ? Colors.white : Colors.white54,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                 ],
-              ),
-            ),
-          if (isHost && players.length >= 2 && players.length < max)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF22B14C),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _start,
-                  child: Text(tr('Commencer à ${players.length}',
-                      'Start with ${players.length}')),
-                ),
               ),
             ),
           SizedBox(
@@ -1292,7 +1784,7 @@ class _OnlineRoom extends StatelessWidget {
                 foregroundColor: Colors.white,
                 side: const BorderSide(color: Colors.white54),
               ),
-              onPressed: () => _leave(context, d, uid),
+              onPressed: _leave,
               child: Text(isHost ? 'Annuler la partie' : 'Quitter la partie'),
             ),
           ),
@@ -1304,45 +1796,67 @@ class _OnlineRoom extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return _info(context, 'Tu dois être connecté.');
+    if (user == null) return _info('Tu dois être connecté.');
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _ref.snapshots(),
       builder: (context, snap) {
-        if (snap.hasError) {
-          return _info(context, 'Erreur de connexion à la partie.');
-        }
-        if (!snap.hasData) return _info(context, '', loading: true);
+        if (snap.hasError) return _info('Erreur de connexion à la partie.');
+        if (!snap.hasData) return _info('', loading: true);
 
         final d = snap.data!.data();
-        if (d == null) return _info(context, "Cette partie n'existe plus.");
+        if (d == null) return _info("Cette partie n'existe plus.");
 
         final players = _playersOf(d);
         final seat = players.indexWhere((p) => p['uid'] == user.uid);
-        if (seat < 0) {
-          return _info(context, 'Tu ne fais pas partie de cette partie.');
-        }
+        if (seat < 0) return _info('Tu ne fais pas partie de cette partie.');
         if (d['status'] == 'waiting') {
-          return _waiting(context, d, players, user.uid);
+          return _waiting(d, players, user.uid);
         }
 
+        final over = d['over'] == true;
+        if (over) _settle();
         final cur = (d['cur'] as num?)?.toInt() ?? 0;
-        return _Shell(
-          title: 'Deux dés · en ligne',
-          child: _DiceTable(
-            names: [for (final p in players) '${p['name']}'],
-            scores: _ints(d['scores'], const []),
-            cur: cur,
-            round: (d['round'] as num?)?.toInt() ?? 1,
-            d1: (d['d1'] as num?)?.toInt() ?? 1,
-            d2: (d['d2'] as num?)?.toInt() ?? 1,
-            spin1: _ints(d['spin1'], const [2, 3, 1]),
-            spin2: _ints(d['spin2'], const [3, 2, 2]),
-            rolled: d['rolled'] == true,
-            rollN: (d['rollN'] as num?)?.toInt() ?? 0,
-            canAct: cur == seat,
-            onRoll: () => _roll(seat),
-            onNext: () => _next(seat),
+        final stake = (d['stake'] as num?)?.toInt() ?? 0;
+
+        return PopScope(
+          canPop: stake == 0 || over,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Termine la partie pour récupérer les gains.'),
+                ),
+              );
+            }
+          },
+          child: _Shell(
+            title: 'Deux dés · en ligne',
+            child: Column(
+              children: [
+                if (firebaseReady) JackpotLive(stake: stake),
+                Expanded(
+                  child: _DiceTable(
+                    names: [for (final p in players) '${p['name']}'],
+                    scores: _ints(d['scores'], const []),
+                    cur: cur,
+                    d1: (d['d1'] as num?)?.toInt() ?? 1,
+                    d2: (d['d2'] as num?)?.toInt() ?? 1,
+                    spin1: _ints(d['spin1'], const [2, 3, 1]),
+                    spin2: _ints(d['spin2'], const [3, 2, 2]),
+                    rolled: d['rolled'] == true,
+                    rollN: (d['rollN'] as num?)?.toInt() ?? 0,
+                    canAct: cur == seat && !over,
+                    onRoll: () => _roll(seat),
+                    onNext: () => _next(seat),
+                    over: over,
+                    winners: _ints(d['winners'], const []),
+                    stake: stake,
+                    jackpot: (d['jackpot'] as num?)?.toInt() ?? 0,
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
