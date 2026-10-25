@@ -218,6 +218,11 @@ class Wallet {
   /// Présentiel : fin de partie avec les scores (règle aussi les paris).
   /// Renvoie { jackpot, bets }.
   static Future<Map<String, dynamic>> settleLocalFull(
+  /// Tableau de bord administrateur : le serveur refuse tout compte qui
+  /// n'est pas dans ADMIN_UIDS.
+  static Future<Map<String, dynamic>> adminStats({int limit = 150}) {
+    return _call('adminStats', <String, dynamic>{'limit': limit});
+  }
     String id,
     List<String> winnerUids,
     List<int> scores,
