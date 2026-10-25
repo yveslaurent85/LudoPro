@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -59,22 +60,47 @@ class LudoProApp extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
-// Sons (désactivés pour l'instant)
+// Sons
 // ----------------------------------------------------------------------
 
-/// Sons désactivés pour l'instant : aucune extension audio n'est nécessaire.
-/// Les appels dans le jeu sont déjà en place, on pourra les brancher plus tard.
+/// Effets sonores du jeu. Les fichiers .wav sont dans le dossier assets/.
+/// Un son qui ne peut pas être joué est simplement ignoré (jamais d'erreur).
 class Sfx {
   bool enabled = true;
+  final Map<String, AudioPlayer> _players = {};
 
-  void step() {}
-  void land() {}
-  void deny() {}
-  void capture() {}
-  void arrive() {}
-  void win() {}
-  void roll() {}
-  void dispose() {}
+  AudioPlayer _player(String file) => _players.putIfAbsent(file, () {
+        final p = AudioPlayer();
+        p.setPlayerMode(PlayerMode.lowLatency);
+        p.setReleaseMode(ReleaseMode.stop);
+        return p;
+      });
+
+  void _play(String file, [double volume = 1.0]) {
+    if (!enabled) return;
+    try {
+      _player(file)
+          .play(AssetSource(file), volume: volume)
+          .catchError((Object _) {});
+    } catch (_) {}
+  }
+
+  void step() => _play('sfx_step.wav', 0.6); // pas d'un pion
+  void land() => _play('sfx_land.wav'); // dé posé
+  void deny() => _play('sfx_deny.wav', 0.8); // coup refusé
+  void capture() => _play('sfx_capture.wav'); // pion capturé
+  void arrive() => _play('sfx_arrive.wav'); // pion arrivé à la maison
+  void win() => _play('sfx_win.wav'); // victoire
+  void roll() => _play('sfx_roll.wav'); // dé qui roule
+
+  void dispose() {
+    for (final p in _players.values) {
+      try {
+        p.dispose();
+      } catch (_) {}
+    }
+    _players.clear();
+  }
 }
 
 // ----------------------------------------------------------------------
@@ -1678,6 +1704,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         message = tr('${nameOf(cur)} lance le dé...',
             '${nameOf(cur)} is rolling...');
       });
+      sfx.roll();
     } catch (_) {
       return;
     }
@@ -2810,12 +2837,20 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             onSelected: (value) {
               if (value == 'quit') abandonGame();
               if (value == 'home') _goHome();
+              if (value == 'sound') setState(() => sfx.enabled = !sfx.enabled);
             },
             itemBuilder: (context) => [
               PopupMenuItem<String>(
                 value: 'home',
                 child: Text(
                   isSpectator ? 'Quitter la partie' : "Retour à l'accueil",
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'sound',
+                child: Text(
+                  sfx.enabled ? 'Son : activé' : 'Son : désactivé',
                   style: const TextStyle(color: Colors.white),
                 ),
               ),
