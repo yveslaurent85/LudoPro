@@ -408,10 +408,20 @@ class _DiceTableState extends State<_DiceTable>
     value: 1.0, // au repos
   );
 
+  /// Sons : roulement des dés, « toc » à l'arrêt, fanfare de fin.
+  final Sfx _sfx = Sfx();
+
   @override
   void didUpdateWidget(covariant _DiceTable old) {
     super.didUpdateWidget(old);
-    if (widget.rollN != old.rollN) _c.forward(from: 0);
+    if (widget.rollN != old.rollN) {
+      _sfx.roll();
+      _c.forward(from: 0).then((_) {
+        if (!mounted) return;
+        _sfx.land();
+        if (widget.over) _sfx.win();
+      });
+    }
   }
 
   @override
