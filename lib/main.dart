@@ -9,6 +9,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
+import 'admin_dashboard.dart';
 import 'base_logos.dart';
 import 'deux_des.dart';
 import 'dice3d.dart';
@@ -275,7 +276,16 @@ class HomeScreen extends StatelessWidget {
                     child: LanguageSwitcher(),
                   ),
                 const Spacer(flex: 2),
-                const Text('👑', style: TextStyle(fontSize: 44)),
+                // Appui long sur la couronne : tableau de bord administrateur
+                // (le serveur refuse tout compte qui n'est pas administrateur).
+                GestureDetector(
+                  onLongPress: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AdminDashboard(),
+                    ),
+                  ),
+                  child: const Text('👑', style: TextStyle(fontSize: 44)),
+                ),
                 RichText(
                   text: TextSpan(
                     children: [
@@ -615,6 +625,7 @@ class _SetupScreenState extends State<SetupScreen> {
           stake: stake,
           tokens: tokens,
           names: [for (final s in seats) accounts[s]!.name],
+          game: 'ludo',
         );
       } catch (e) {
         if (!mounted) return;
