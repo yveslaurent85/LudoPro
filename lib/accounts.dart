@@ -238,6 +238,19 @@ class Wallet {
     return _call('adminStats', <String, dynamic>{'limit': limit});
   }
 
+  /// Code promo : mon code (= pseudo), mon parrain, mes filleuls et mes gains.
+  static Future<Map<String, dynamic>> referralInfo({String? pseudo}) {
+    return _call('referralInfo', <String, dynamic>{
+      'pseudo':
+          pseudo ?? FirebaseAuth.instance.currentUser?.displayName ?? '',
+    });
+  }
+
+  /// Saisit le code promo (pseudo) de mon parrain. Possible une seule fois.
+  static Future<Map<String, dynamic>> applyPromo(String code) {
+    return _call('applyPromo', <String, dynamic>{'code': code});
+  }
+
   /// Présentiel : crée un pari entre deux joueurs (les deux mises sont
   /// débitées tout de suite). Les jetons prouvent les deux comptes.
   static Future<void> localBet({
