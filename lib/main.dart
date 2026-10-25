@@ -2465,6 +2465,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Positions des pions (en unités de cases)
   // ---------------------------------------------------------------------
 
+  /// Pions à la base : aux 4 coins, pour laisser la place au logo central.
   List<double> homeCenter(int p, int i) {
     final rowStart = p < 2 ? 0 : 9;
     final colStart = (p == 0 || p == 3) ? 0 : 9;
@@ -2791,6 +2792,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       ),
                     ),
                   ),
+                  ...buildBaseLogos(c),
                   ...buildPawns(c),
                   ...buildArrival(c),
                   ...buildVictory(c),
