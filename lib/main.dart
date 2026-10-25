@@ -64,24 +64,33 @@ class LudoProApp extends StatelessWidget {
 // ----------------------------------------------------------------------
 
 /// Effets sonores du jeu. Les fichiers .wav sont dans le dossier assets/.
+/// Chaque son est joué par un lecteur neuf, libéré dès que le son est fini :
+/// ainsi les sons continuent de marcher tout au long de la partie.
 /// Un son qui ne peut pas être joué est simplement ignoré (jamais d'erreur).
 class Sfx {
   bool enabled = true;
-  final Map<String, AudioPlayer> _players = {};
-
-  AudioPlayer _player(String file) => _players.putIfAbsent(file, () {
-        final p = AudioPlayer();
-        p.setPlayerMode(PlayerMode.lowLatency);
-        p.setReleaseMode(ReleaseMode.stop);
-        return p;
-      });
 
   void _play(String file, [double volume = 1.0]) {
     if (!enabled) return;
     try {
-      _player(file)
+      final player = AudioPlayer();
+      var closed = false;
+      void close() {
+        if (closed) return;
+        closed = true;
+        try {
+          player.dispose();
+        } catch (_) {}
+      }
+
+      player.onPlayerComplete.first.then((_) => close(), onError: (_) => close());
+      player
           .play(AssetSource(file), volume: volume)
-          .catchError((Object _) {});
+          .catchError((Object _) {
+        close();
+      });
+      // Sécurité : on libère le lecteur même si la fin du son n'est pas signalée.
+      Future<void>.delayed(const Duration(seconds: 8), close);
     } catch (_) {}
   }
 
@@ -93,14 +102,7 @@ class Sfx {
   void win() => _play('sfx_win.wav'); // victoire
   void roll() => _play('sfx_roll.wav'); // dé qui roule
 
-  void dispose() {
-    for (final p in _players.values) {
-      try {
-        p.dispose();
-      } catch (_) {}
-    }
-    _players.clear();
-  }
+  void dispose() {}
 }
 
 // ----------------------------------------------------------------------
