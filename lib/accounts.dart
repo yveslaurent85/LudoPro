@@ -184,15 +184,22 @@ class Wallet {
   }
 
   /// Présentiel : débite la mise de tous les joueurs connectés.
+  /// [game] = 'ludo' ou 'deuxdes' (sert au tableau de bord administrateur).
   /// Renvoie l'identifiant de la partie côté serveur.
   static Future<String> startLocalGame({
     required int stake,
     required List<String> tokens,
     List<String> names = const [],
+    String game = 'unknown',
   }) async {
     final res = await _call(
       'startLocalGame',
-      <String, dynamic>{'stake': stake, 'tokens': tokens, 'names': names},
+      <String, dynamic>{
+        'stake': stake,
+        'tokens': tokens,
+        'names': names,
+        'game': game,
+      },
     );
     return res['id'] as String;
   }
