@@ -1723,6 +1723,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   void _applyRemote(Map<String, dynamic> d) {
+    final before = [for (final p in players) List<int>.from(p.pawns)];
+    final wasOver = gameOver;
     setState(() {
       for (int i = 0; i < 4; i++) {
         final l = d['p$i'];
@@ -1761,7 +1763,43 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       diceDragging = false;
       flightPhase = 0;
     });
+    _soundsForRemote(before, wasOver);
     if (gameOver) _settle();
+  }
+
+  bool _remoteSeen = false;
+
+  /// Joue le son du coup d'un adversaire (pas, capture, arrivée, victoire).
+  void _soundsForRemote(List<List<int>> before, bool wasOver) {
+    // Le tout premier état reçu est l'état de départ : pas de son.
+    if (!_remoteSeen) {
+      _remoteSeen = true;
+      return;
+    }
+    var moved = false, captured = false, arrived = false;
+    for (int i = 0; i < 4; i++) {
+      final b = before[i];
+      final a = players[i].pawns;
+      for (int k = 0; k < a.length && k < b.length; k++) {
+        if (a[k] == b[k]) continue;
+        if (a[k] == -1 && b[k] >= 0) {
+          captured = true;
+        } else if (a[k] == 56) {
+          arrived = true;
+        } else if (a[k] > b[k]) {
+          moved = true;
+        }
+      }
+    }
+    if (gameOver && !wasOver) {
+      sfx.win();
+    } else if (captured) {
+      sfx.capture();
+    } else if (arrived) {
+      sfx.arrive();
+    } else if (moved) {
+      sfx.step();
+    }
   }
 
   /// « Je suis là » toutes les 5 s, et écoute des autres joueurs.
