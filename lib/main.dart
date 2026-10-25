@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
+import 'base_logos.dart';
 import 'deux_des.dart';
 import 'dice3d.dart';
 import 'jackpot_live.dart';
@@ -2467,8 +2468,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   List<double> homeCenter(int p, int i) {
     final rowStart = p < 2 ? 0 : 9;
     final colStart = (p == 0 || p == 3) ? 0 : 9;
-    final r = i < 2 ? 1.75 : 4.25;
-    final c = i.isEven ? 1.75 : 4.25;
+    final r = i < 2 ? 1.5 : 4.5;
+    final c = i.isEven ? 1.1 : 4.9;
     return [rowStart + r, colStart + c];
   }
 
