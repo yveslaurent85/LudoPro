@@ -1663,13 +1663,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final token = ++_token;
     try {
       final from = _toRoot(diceKeys[cur]);
-      final boardBox =
-          boardKey.currentContext!.findRenderObject() as RenderBox;
-      final center = _toRoot(boardKey, boardBox.size.center(Offset.zero));
-      final jitter = Offset(
-        random.nextDouble() * 60 - 30,
-        random.nextDouble() * 60 - 30,
-      );
       setState(() {
         currentPlayer = cur;
         isRolling = true;
@@ -1681,7 +1674,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
         ];
         flightFrom = from;
-        flightTo = center - const Offset(32, 32) + jitter;
+        flightTo = from; // le dé tourne sur place
         message = tr('${nameOf(cur)} lance le dé...',
             '${nameOf(cur)} is rolling...');
       });
@@ -2169,15 +2162,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final newDice = _rollValue();
     final rollToken = ++_token;
 
-    const flyingSize = 64.0;
-    final boardBox = boardKey.currentContext!.findRenderObject() as RenderBox;
-    final boardCenter =
-        _toRoot(boardKey, boardBox.size.center(Offset.zero));
-    final jitter = Offset(
-      random.nextDouble() * 60 - 30,
-      random.nextDouble() * 60 - 30,
-    );
-
     setState(() {
       gameStarted = true;
       isRolling = true;
@@ -2190,9 +2174,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _localRoll = true;
       flightPhase = 1;
       flightFrom = from;
-      flightTo = boardCenter -
-          const Offset(flyingSize / 2, flyingSize / 2) +
-          jitter;
+      flightTo = from; // le dé tourne sur place
       message = 'Le dé roule...';
     });
     sfx.roll();
@@ -3197,12 +3179,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         final eased = Curves.easeOutCubic.transform(t);
         final pos = Offset.lerp(flightFrom, flightTo, eased)!;
         final rolling = flightPhase == 1;
-        final bounce = rolling ? sin(t * pi * 4).abs() * (1 - t) * 26 : 0.0;
-        final size = 64.0 + 16.0 * eased;
+        // Le dé tourne sur place : léger rebond et petit grossissement.
+        final bounce = rolling ? sin(t * pi * 3).abs() * (1 - t) * 14 : 0.0;
+        final size = 64.0 + (rolling ? 14.0 * sin(t * pi) : 0.0);
+        final grow = (size - 52.0) / 2;
 
         return Positioned(
-          left: pos.dx - 6,
-          top: pos.dy - bounce - 6,
+          left: pos.dx - grow,
+          top: pos.dy - bounce - grow,
           width: size,
           height: size,
           child: IgnorePointer(
