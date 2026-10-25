@@ -949,6 +949,7 @@ class _LocalSetupState extends State<_LocalSetup> {
           stake: stake,
           tokens: tokens,
           names: [for (int s = 0; s < n; s++) accounts[s]!.name],
+          game: 'deuxdes',
         );
       } catch (e) {
         if (!mounted) return;
