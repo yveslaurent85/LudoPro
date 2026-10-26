@@ -1,12 +1,15 @@
-import 'dart:async';
 
-import 'package:cloud_functions/cloud_functions.dart';
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import 'accounts.dart';
 
-/// Recharge du compte par Orange Money ou MTN MoMo (via CamPay / TAKWID).
-/// Le montant n'est ajouté au solde que par le serveur, après confirmation.
+/// Recharge Katika via CamPay et le Cloudflare Worker.
+/// Le serveur vérifie le paiement et crédite le compte dans Firestore.
 class RechargeScreen extends StatefulWidget {
   const RechargeScreen({super.key});
 
@@ -17,18 +20,20 @@ class RechargeScreen extends StatefulWidget {
 class _RechargeScreenState extends State<RechargeScreen> {
   static const List<int> quick = [25, 1000, 2000, 5000];
 
+  static const String workerUrl =
+      'https://katika-api.ychachouang.workers.dev';
+
   final amountCtrl = TextEditingController(text: '1000');
   final phoneCtrl = TextEditingController();
-
-  final FirebaseFunctions fn =
-      FirebaseFunctions.instanceFor(region: 'europe-west1');
 
   bool busy = false;
   bool waiting = false;
   String? info;
   String? error;
+
   Timer? poll;
   int tries = 0;
+  bool checkingStatus = false;
 
   @override
   void dispose() {
@@ -38,94 +43,261 @@ class _RechargeScreenState extends State<RechargeScreen> {
     super.dispose();
   }
 
+  /// Envoie une requête authentifiée au Cloudflare Worker.
+  Future<Map<String, dynamic>> _workerPost(
+    String endpoint,
+    Map<String, dynamic> payload,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      throw Exception(
+        'Connecte-toi à ton compte Katika avant de recharger.',
+      );
+    }
+
+    final token = await user.getIdToken();
+
+    if (token == null || token.isEmpty) {
+      throw Exception(
+        'Session expirée. Déconnecte-toi puis reconnecte-toi.',
+      );
+    }
+
+    final response = await http
+        .post(
+          Uri.parse('$workerUrl/$endpoint'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    Map<String, dynamic> body;
+
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        throw const FormatException('Réponse invalide');
+      }
+      body = Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      throw Exception(
+        'Réponse invalide du serveur Katika '
+        '(HTTP ${response.statusCode}).',
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = body['error']?.toString();
+      throw Exception(
+        message != null && message.isNotEmpty
+            ? message
+            : 'Erreur du serveur (HTTP ${response.statusCode}).',
+      );
+    }
+
+    if (body['error'] != null) {
+      throw Exception(body['error'].toString());
+    }
+
+    // Le Worker renvoie normalement {"data": {...}}.
+    final result = body['data'] ?? body;
+
+    if (result is! Map) {
+      throw Exception('Les données reçues du serveur sont invalides.');
+    }
+
+    return Map<String, dynamic>.from(result);
+  }
+
+  String _errorMessage(Object e) {
+    var message = e.toString();
+
+    if (message.startsWith('Exception: ')) {
+      message = message.substring('Exception: '.length);
+    }
+
+    if (message.contains('TimeoutException')) {
+      return 'Le serveur tarde à répondre. Vérifie ta connexion et réessaie.';
+    }
+
+    if (message.contains('SocketException') ||
+        message.contains('ClientException')) {
+      return 'Connexion impossible au serveur. Vérifie Internet.';
+    }
+
+    return message;
+  }
+
   Future<void> _start() async {
+    FocusScope.of(context).unfocus();
+
     final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
     final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+
     if (amount < 25) {
-      setState(() => error = 'Montant minimum : 25 FCFA.');
+      setState(() {
+        error = 'Montant minimum : 25 FCFA.';
+        info = null;
+      });
       return;
     }
+
+    if (amount > 500000) {
+      setState(() {
+        error = 'Montant maximum : 500 000 FCFA.';
+        info = null;
+      });
+      return;
+    }
+
     if (!(phone.length == 9 && phone.startsWith('6'))) {
-      setState(() => error = 'Numéro à 9 chiffres (Orange ou MTN).');
+      setState(() {
+        error = 'Entre un numéro camerounais à 9 chiffres commençant par 6.';
+        info = null;
+      });
       return;
     }
+
+    if (FirebaseAuth.instance.currentUser == null) {
+      setState(() {
+        error = 'Connecte-toi à ton compte Katika avant de recharger.';
+        info = null;
+      });
+      return;
+    }
+
+    poll?.cancel();
+
     setState(() {
       busy = true;
+      waiting = false;
+      checkingStatus = false;
       error = null;
       info = null;
     });
+
     try {
-      final res = await fn
-          .httpsCallable('startRecharge')
-          .call(<String, dynamic>{'amount': amount, 'phone': phone});
-      final data = Map<String, dynamic>.from(res.data as Map);
-      final id = data['id'] as String;
-      final ussd = data['ussd'] as String?;
+      final result = await _workerPost(
+        'campayDeposit',
+        {
+          'amount': amount,
+          'phone': phone,
+        },
+      );
+
+      final depositId = result['depositId']?.toString();
+
+      if (depositId == null || depositId.isEmpty) {
+        throw Exception(
+          'Le serveur n’a pas retourné la référence de recharge.',
+        );
+      }
+
       if (!mounted) return;
+
       setState(() {
         busy = false;
         waiting = true;
-        info = ussd != null && ussd.isNotEmpty
-            ? 'Valide le paiement sur ton téléphone (ou compose $ussd).'
-            : 'Valide le paiement sur ton téléphone avec ton code secret.';
+        info = 'Demande envoyée. Valide le paiement sur ton téléphone '
+            'si une notification CamPay apparaît. '
+            'Nous vérifions ensuite la confirmation.';
       });
-      _startPolling(id);
-    } on FirebaseFunctionsException catch (e) {
+
+      _startPolling(depositId);
+    } catch (e) {
       if (!mounted) return;
+
       setState(() {
         busy = false;
-        error = e.message ?? 'Erreur : ${e.code}';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        busy = false;
-        error = 'Pas de connexion. Réessaie.';
+        waiting = false;
+        error = _errorMessage(e);
       });
     }
   }
 
-  void _startPolling(String id) {
+  void _startPolling(String depositId) {
     tries = 0;
+    checkingStatus = false;
     poll?.cancel();
-    poll = Timer.periodic(const Duration(seconds: 4), (t) async {
+
+    poll = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      if (!mounted || checkingStatus) return;
+
       tries++;
+
       if (tries > 30) {
-        t.cancel();
+        timer.cancel();
+
         if (!mounted) return;
+
         setState(() {
           waiting = false;
-          error = 'Paiement non confirmé. Si tu as été débité, '
-              'ton solde sera mis à jour après vérification.';
+          info = null;
+          error = 'La confirmation prend plus de temps que prévu. '
+              'Ne relance pas immédiatement le paiement. '
+              'Vérifie d’abord si ton compte Mobile Money a été débité, '
+              'puis réessaie de vérifier plus tard.';
         });
         return;
       }
+
+      checkingStatus = true;
+
       try {
-        final res =
-            await fn.httpsCallable('checkRecharge').call(<String, dynamic>{
-          'id': id,
-        });
-        final status = (res.data as Map)['status'] as String? ?? 'pending';
-        if (status == 'pending') return;
-        t.cancel();
+        final result = await _workerPost(
+          'campayDepositStatus',
+          {'depositId': depositId},
+        );
+
+        final status = result['status']?.toString() ?? 'pending';
+
+        if (status == 'pending' || status == 'unknown') {
+          return;
+        }
+
+        timer.cancel();
+
         if (!mounted) return;
+
         setState(() {
           waiting = false;
-          if (status == 'done') {
-            info = '✅ Recharge réussie ! Ton solde est à jour.';
+
+          if (status == 'credited') {
+            info = '✅ Recharge confirmée ! '
+                'Ton solde a été mis à jour par le serveur.';
             error = null;
+          } else if (status == 'mismatch') {
+            info = null;
+            error = 'Le montant ou la référence du paiement doit être vérifié. '
+                'Contacte le support Katika avant de refaire un paiement.';
+          } else if (status == 'failed') {
+            info = null;
+            error = 'Le paiement a échoué ou a été refusé. '
+                'Vérifie ton compte Mobile Money avant de réessayer.';
           } else {
             info = null;
-            error = 'Le paiement a échoué ou a été refusé.';
+            error = 'Statut de paiement inattendu : $status. '
+                'Contacte le support Katika si nécessaire.';
           }
         });
       } catch (_) {
-        // erreur réseau passagère : on réessaie au prochain tour
+        // Une erreur réseau temporaire ne doit pas annuler
+        // la vérification. Le prochain passage réessaiera.
+      } finally {
+        checkingStatus = false;
       }
     });
   }
 
-  InputDecoration _dec(String label, IconData icon, {String? suffix}) {
+  InputDecoration _dec(
+    String label,
+    IconData icon, {
+    String? suffix,
+  }) {
     return InputDecoration(
       labelText: label,
       suffixText: suffix,
@@ -140,7 +312,10 @@ class _RechargeScreenState extends State<RechargeScreen> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0xFFFFC21A), width: 2),
+        borderSide: const BorderSide(
+          color: Color(0xFFFFC21A),
+          width: 2,
+        ),
       ),
     );
   }
@@ -148,6 +323,7 @@ class _RechargeScreenState extends State<RechargeScreen> {
   @override
   Widget build(BuildContext context) {
     final locked = busy || waiting;
+
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -156,7 +332,11 @@ class _RechargeScreenState extends State<RechargeScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+            colors: [
+              Color(0xFF1F5BFF),
+              Color(0xFF0B2FA6),
+              Color(0xFF061A66),
+            ],
           ),
         ),
         child: SafeArea(
@@ -169,23 +349,31 @@ class _RechargeScreenState extends State<RechargeScreen> {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    ),
-                    const Text(
-                      'Recharger mon compte',
-                      style: TextStyle(
+                      icon: const Icon(
+                        Icons.arrow_back,
                         color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Expanded(
+                      child: Text(
+                        'Recharger mon compte',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Orange Money ou MTN MoMo : l\'opérateur est détecté '
-                  'd\'après ton numéro.',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                  'Orange Money ou MTN MoMo : l’opérateur est détecté '
+                  'd’après ton numéro.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                  ),
                 ),
                 const SizedBox(height: 18),
                 Wrap(
@@ -197,7 +385,12 @@ class _RechargeScreenState extends State<RechargeScreen> {
                         selected: amountCtrl.text == '$q',
                         onSelected: locked
                             ? null
-                            : (_) => setState(() => amountCtrl.text = '$q'),
+                            : (_) {
+                                setState(() {
+                                  amountCtrl.text = '$q';
+                                  error = null;
+                                });
+                              },
                       ),
                   ],
                 ),
@@ -208,7 +401,11 @@ class _RechargeScreenState extends State<RechargeScreen> {
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: Colors.white),
                   onChanged: (_) => setState(() {}),
-                  decoration: _dec('Montant', Icons.payments, suffix: Wallet.currency),
+                  decoration: _dec(
+                    'Montant',
+                    Icons.payments,
+                    suffix: Wallet.currency,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -217,9 +414,14 @@ class _RechargeScreenState extends State<RechargeScreen> {
                   keyboardType: TextInputType.phone,
                   maxLength: 9,
                   style: const TextStyle(color: Colors.white),
-                  decoration: _dec('Numéro Orange / MTN (9 chiffres)', Icons.phone)
-                      .copyWith(counterText: '', prefixText: '+237 ',
-                          prefixStyle: const TextStyle(color: Colors.white70)),
+                  decoration: _dec(
+                    'Numéro Orange / MTN (9 chiffres)',
+                    Icons.phone,
+                  ).copyWith(
+                    counterText: '',
+                    prefixText: '+237 ',
+                    prefixStyle: const TextStyle(color: Colors.white70),
+                  ),
                 ),
                 if (info != null) ...[
                   const SizedBox(height: 14),
@@ -234,6 +436,11 @@ class _RechargeScreenState extends State<RechargeScreen> {
                 if (waiting) ...[
                   const SizedBox(height: 12),
                   const LinearProgressIndicator(),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Vérification automatique du paiement…',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
                 ],
                 if (error != null) ...[
                   const SizedBox(height: 14),
@@ -257,8 +464,10 @@ class _RechargeScreenState extends State<RechargeScreen> {
                     onPressed: locked ? null : _start,
                     child: Text(
                       busy
-                          ? 'Patiente...'
-                          : (waiting ? 'En attente de ta validation...' : 'Recharger'),
+                          ? 'Connexion au serveur…'
+                          : waiting
+                              ? 'En attente de confirmation…'
+                              : 'Recharger',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
