@@ -251,6 +251,10 @@ class Wallet {
     return _call('applyPromo', <String, dynamic>{'code': code});
   }
 
+    /// Code promo : transfère les gains de parrainage vers le solde principal.
+  static Future<Map<String, dynamic>> referralWithdraw() {
+    return _call('referralWithdraw', <String, dynamic>{});
+  }
   /// Présentiel : crée un pari entre deux joueurs (les deux mises sont
   /// débitées tout de suite). Les jetons prouvent les deux comptes.
   static Future<void> localBet({
