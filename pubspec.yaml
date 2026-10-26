@@ -1,3 +1,4 @@
+
 name: katika
 description: Katika - Ludo et Dés
 publish_to: 'none'
@@ -14,7 +15,7 @@ dependencies:
   firebase_auth: ^5.7.0
   cloud_firestore: ^5.6.12
   url_launcher: ^6.3.0
-  http: ^1.2.0
+  http: ^1.2.2
   audioplayers: ^6.1.0
 
 dev_dependencies:
