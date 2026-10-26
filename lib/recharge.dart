@@ -15,7 +15,7 @@ class RechargeScreen extends StatefulWidget {
 }
 
 class _RechargeScreenState extends State<RechargeScreen> {
-  static const List<int> quick = [500, 1000, 2000, 5000];
+  static const List<int> quick = [25, 1000, 2000, 5000];
 
   final amountCtrl = TextEditingController(text: '1000');
   final phoneCtrl = TextEditingController();
@@ -41,8 +41,8 @@ class _RechargeScreenState extends State<RechargeScreen> {
   Future<void> _start() async {
     final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
     final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
-    if (amount < 500) {
-      setState(() => error = 'Montant minimum : 500 FCFA.');
+    if (amount < 25) {
+      setState(() => error = 'Montant minimum : 25 FCFA.');
       return;
     }
     if (!(phone.length == 9 && phone.startsWith('6'))) {
