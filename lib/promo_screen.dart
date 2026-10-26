@@ -21,7 +21,6 @@ class _PromoScreenState extends State<PromoScreen> {
   bool withdrawing = false;
   String? error;
   String? sponsorError;
-  String? withdrawError;
   Map<String, dynamic> info = {};
   final TextEditingController codeCtrl = TextEditingController();
 
@@ -86,21 +85,26 @@ class _PromoScreenState extends State<PromoScreen> {
   /// Transfère les gains de parrainage vers le solde principal.
   Future<void> _withdraw() async {
     if (withdrawing) return;
-    setState(() {
-      withdrawing = true;
-      withdrawError = null;
-    });
+    setState(() => withdrawing = true);
     try {
       final res = await Wallet.referralWithdraw();
       if (!mounted) return;
-      final amount = _i(res['amount']);
+      final amount = res is Map ? _i(res['amount']) : 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${Wallet.format(amount)} ajoutés à ton solde')),
+        SnackBar(
+          content: Text(
+            amount > 0
+                ? '${Wallet.format(amount)} ajoutés à ton solde !'
+                : 'Gains ajoutés à ton solde !',
+          ),
+        ),
       );
       await _load();
     } catch (e) {
       if (!mounted) return;
-      setState(() => withdrawError = Wallet.errorText(e));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(Wallet.errorText(e))),
+      );
     } finally {
       if (mounted) setState(() => withdrawing = false);
     }
@@ -228,29 +232,25 @@ class _PromoScreenState extends State<PromoScreen> {
       ),
     ]);
   }
-    /// Gains retirables + bouton « Retirer les gains » (dès 100 FCFA).
+
+  /// Gains retirables : le bouton apparaît quand ils atteignent le minimum.
   Widget _withdrawCard() {
     final available = _i(info['available']);
     final min = _i(info['minWithdraw']) == 0 ? 100 : _i(info['minWithdraw']);
-    final can = info['canWithdraw'] == true;
+    final can = info['canWithdraw'] == true || available >= min;
 
     return _card([
       const Text(
         'Gains à retirer',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w800,
-        ),
+        style: TextStyle(color: Colors.white70, fontSize: 12),
       ),
-      const SizedBox(height: 6),
       FittedBox(
         fit: BoxFit.scaleDown,
         child: Text(
           Wallet.format(available),
           style: const TextStyle(
             color: _gold,
-            fontSize: 28,
+            fontSize: 24,
             fontWeight: FontWeight.w900,
           ),
         ),
@@ -259,7 +259,7 @@ class _PromoScreenState extends State<PromoScreen> {
       if (can)
         SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 48,
           child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF22B14C),
@@ -275,25 +275,10 @@ class _PromoScreenState extends State<PromoScreen> {
         )
       else
         Text(
-          'Le retrait est possible dès ${Wallet.format(min)} de gains.',
-          style: const TextStyle(color: Colors.white70, fontSize: 13),
+          'Le bouton « Retirer les gains » apparaît à partir de '
+          '${Wallet.format(min)}. Les gains sont ajoutés à ton solde.',
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
         ),
-      if (withdrawError != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            withdrawError!,
-            style: const TextStyle(
-              color: Color(0xFFFF8A80),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      const SizedBox(height: 6),
-      const Text(
-        'Les gains retirés sont ajoutés à ton solde principal.',
-        style: TextStyle(color: Colors.white54, fontSize: 12),
-      ),
     ]);
   }
 
