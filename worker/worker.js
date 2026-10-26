@@ -1488,9 +1488,11 @@ async function adminStats({ uid, data, env }) {
 // Le portefeuille n'est crédité qu'après avoir redemandé le statut à Campay,
 // et une seule fois par dépôt (transaction Firestore).
 
-const TOKENS_PER_XAF = 1; // 1 FCFA = 1 jeton
-const DEPOSIT_MIN = 100;
+
+const TOKENS_PER_XAF = 1;
+const DEPOSIT_MIN = 25;
 const DEPOSIT_MAX = 500000;
+
 
 let campayTokenCache = { value: null, exp: 0 };
 
