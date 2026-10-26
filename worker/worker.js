@@ -26,6 +26,7 @@ const JACKPOT_PERCENT = 10; // part de la commission versée au jackpot
 const REFERRAL_PERCENT = 10; // part de la commission reversée au parrain
 const JACKPOT_MIN = 550; // le jackpot se déclenche entre ces deux montants
 const JACKPOT_MAX = 650;
+const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir les retirer (FCFA)
 const REFERRAL_WITHDRAW_MIN = 100; // gains de parrainage minimum pour pouvoir les retirer vers le solde
 
 // Parties en ligne gérées : le Ludo (« games ») et Deux dés (« deuxdes »).
@@ -476,7 +477,7 @@ async function payOut(
   { stake, pot, winners, percent = COMMISSION_PERCENT, participants = [] },
 ) {
   if (!(stake > 0) || !(pot > 0) || winners.length === 0) {
-    return { jackpot: 0, referral: 0 };
+    return { jackpot: 0, referral: 0, house: 0 };
   }
 
   const jack = await tx.get('app/jackpot');
@@ -498,8 +499,8 @@ async function payOut(
     target = newTarget();
   }
   const jackpotShare = Math.floor(jackpot / n);
-  pool +=
-    Math.floor((commission * JACKPOT_PERCENT) / 100) + (jackpot - jackpotShare * n);
+  const jackpotCut = Math.floor((commission * JACKPOT_PERCENT) / 100);
+  pool += jackpotCut + (jackpot - jackpotShare * n);
 
   const referral = await referralPayout(tx, participants, commission);
 
@@ -508,7 +509,32 @@ async function payOut(
   }
   tx.write('app/jackpot', { set: { pool } });
   tx.write('app/jackpotTarget', { set: { target } });
-  return { jackpot: jackpotShare * n, referral };
+  // Part nette de Katika : commission - jackpot - parrains.
+  const house = Math.max(0, commission - jackpotCut - referral);
+  return { jackpot: jackpotShare * n, referral, house };
+}
+
+// --- Commissions de Katika (compte de l'administrateur) ----------------
+// house/ledger : { balance, earned, withdrawn }
+//   earned    = total des commissions revenues à Katika (cumul)
+//   balance   = part pas encore retirée
+//   withdrawn = total déjà transféré vers le compte principal de l'admin
+// Part de Katika sur une partie = commission - part du jackpot - part des
+// parrains. Les commissions sur les paris gagnés reviennent entièrement à
+// Katika. Ce document n'est lisible que par le serveur (aucune règle Firestore
+// ne doit l'ouvrir aux joueurs).
+const HOUSE_PATH = 'house/ledger';
+
+/** Ajoute `amount` aux commissions de Katika (à appeler UNE fois par transaction). */
+async function houseAdd(tx, amount) {
+  if (!(amount > 0)) return;
+  const h = await tx.get(HOUSE_PATH);
+  tx.write(HOUSE_PATH, {
+    set: {
+      balance: Math.max(0, intOr(h ? h.balance : 0, 0)) + amount,
+      earned: Math.max(0, intOr(h ? h.earned : 0, 0)) + amount,
+    },
+  });
 }
 
 // --- Qui a gagné ? ----------------------------------------------------
@@ -787,12 +813,13 @@ async function settleGame({ uid, data, env }) {
       return { jackpot: 0 };
     }
 
-    const { jackpot, referral } = await payOut(tx, {
+    const { jackpot, referral, house } = await payOut(tx, {
       stake,
       pot,
       winners,
       participants: paid,
     });
+    await houseAdd(tx, house);
     const commission = stake > 0 && pot > 0 ? pot - prizeOf(pot) : 0;
     tx.write(g.path, {
       set: {
@@ -896,7 +923,7 @@ async function settleLocalGame({ uid, data, env }) {
     const stake = Math.max(0, intOr(d.stake, 0));
     const pot = Math.max(0, intOr(d.pot, 0));
     const bets = await loadLocalBets(tx, gameId);
-    const { jackpot, referral } = await payOut(tx, {
+    const { jackpot, referral, house } = await payOut(tx, {
       stake,
       pot,
       winners,
@@ -916,6 +943,7 @@ async function settleLocalGame({ uid, data, env }) {
     const betCommission = betsSummary
       .filter((b) => b.result === 'win')
       .reduce((s, b) => s + (2 * b.amount - b.prize), 0);
+    await houseAdd(tx, house + betCommission);
     tx.write(path, {
       set: {
         settled: true,
@@ -1153,6 +1181,7 @@ async function sideBetSync({ uid, data, env }) {
     }
     const bets = await loadBets(tx, roomId);
     const scores = Array.isArray(room.scores) ? room.scores : [];
+    let houseBets = 0; // commissions de Katika sur les paris gagnés
 
     for (const { path, b } of bets) {
       const pSeat = seatOf(room, b.proposerUid);
@@ -1195,12 +1224,14 @@ async function sideBetSync({ uid, data, env }) {
       } else {
         tx.write(`users/${winner}`, { incr: { balance: b.prize } });
         tx.write(`deuxdes/${roomId}`, { incr: { betCommission: 2 * b.amount - b.prize } });
+        houseBets += 2 * b.amount - b.prize;
         tx.write(path, {
           set: { status: 'settled', result: 'win', winnerUid: winner },
           serverTime: ['closedAt'],
         });
       }
     }
+    await houseAdd(tx, houseBets);
   });
   return { ok: true };
 }
@@ -1431,7 +1462,7 @@ async function adminStats({ uid, data, env }) {
       `Accès réservé à l'administrateur. Ton identifiant : ${uid}`,
     );
   }
-  const limit = Math.min(25, Math.max(20, intOr(data.limit, 150)));
+  const limit = Math.min(500, Math.max(20, intOr(data.limit, 150)));
   await accessToken(env); // un seul jeton pour les 3 requêtes parallèles
 
   const [ludo, deux, local] = await Promise.all([
@@ -1456,6 +1487,21 @@ async function adminStats({ uid, data, env }) {
     if (f) pool = intOr(fieldsToObj(f.fields || {}).pool, 0);
   } catch (_) {}
 
+  // Commissions de Katika (disponibles / retirées)
+  let house = { available: 0, earned: 0, withdrawn: 0 };
+  try {
+    const hr = await fsCall(env, 'batchGet', { documents: [docName(env, HOUSE_PATH)] });
+    const hf = Array.isArray(hr) && hr[0] && hr[0].found;
+    if (hf) {
+      const h = fieldsToObj(hf.fields || {});
+      house = {
+        available: Math.max(0, intOr(h.balance, 0)),
+        earned: Math.max(0, intOr(h.earned, 0)),
+        withdrawn: Math.max(0, intOr(h.withdrawn, 0)),
+      };
+    }
+  } catch (_) {}
+
   // Nombre de comptes joueurs
   let users = null;
   try {
@@ -1476,7 +1522,37 @@ async function adminStats({ uid, data, env }) {
     fetched: { ludo: ludo.length, deuxdes: deux.length, local: local.length },
     jackpotPercent: JACKPOT_PERCENT,
     referralPercent: REFERRAL_PERCENT,
+    house: {
+      ...house,
+      min: HOUSE_WITHDRAW_MIN,
+      canWithdraw: house.available >= HOUSE_WITHDRAW_MIN,
+    },
   };
+}
+
+/** Administrateur : transfère les commissions de Katika vers son compte
+ *  principal (jetons). Possible quand elles atteignent HOUSE_WITHDRAW_MIN. */
+async function adminHouseWithdraw({ uid, env }) {
+  if (!adminIds(env).includes(uid)) {
+    throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
+  }
+  return runTx(env, async (tx) => {
+    const h = await tx.get(HOUSE_PATH);
+    const amount = Math.max(0, intOr(h ? h.balance : 0, 0));
+    if (amount < HOUSE_WITHDRAW_MIN) {
+      throw new HttpError(
+        'failed-precondition',
+        `Retrait possible à partir de ${HOUSE_WITHDRAW_MIN} FCFA de commissions.`,
+      );
+    }
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    tx.write(`users/${uid}`, { incr: { balance: amount } });
+    tx.write(HOUSE_PATH, {
+      set: { balance: 0, withdrawn: Math.max(0, intOr(h.withdrawn, 0)) + amount },
+    });
+    return { amount, balance: balanceOf(me) + amount };
+  });
 }
 
 // ======================================================================
@@ -1488,11 +1564,9 @@ async function adminStats({ uid, data, env }) {
 // Le portefeuille n'est crédité qu'après avoir redemandé le statut à Campay,
 // et une seule fois par dépôt (transaction Firestore).
 
-
-const TOKENS_PER_XAF = 1;
-const DEPOSIT_MIN = 25;
-const DEPOSIT_MAX = 500000;
-
+const TOKENS_PER_XAF = 1; // 1 FCFA = 1 jeton
+const DEPOSIT_MIN = 25; // le mode test de Campay (demo) accepte 25 FCFA
+const DEPOSIT_MAX = 250000;
 
 let campayTokenCache = { value: null, exp: 0 };
 
@@ -1717,6 +1791,7 @@ const HANDLERS = {
   sideBetSync,
   localBetCreate,
   adminStats,
+  adminHouseWithdraw,
   campayDeposit,
   campayDepositStatus,
   referralWithdraw,
