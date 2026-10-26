@@ -23,6 +23,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int limit = 150;
   Map<String, dynamic> fetched = {};
 
+  // Commissions de Katika (compte retirable vers le solde de l'admin)
+  int houseAvailable = 0;
+  int houseEarned = 0;
+  int houseWithdrawn = 0;
+  int houseMin = 2500;
+  bool houseCan = false;
+  bool houseBusy = false;
+
   // Filtres
   String kind = 'all'; // all | ludo | deuxdes
   String mode = 'all'; // all | online | local
@@ -50,6 +58,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
         fetched = res['fetched'] is Map
             ? Map<String, dynamic>.from(res['fetched'] as Map)
             : {};
+        final h = res['house'] is Map
+            ? Map<String, dynamic>.from(res['house'] as Map)
+            : <String, dynamic>{};
+        houseAvailable = _i(h['available']);
+        houseEarned = _i(h['earned']);
+        houseWithdrawn = _i(h['withdrawn']);
+        houseMin = _i(h['min']) > 0 ? _i(h['min']) : 2500;
+        houseCan = h['canWithdraw'] == true || houseAvailable >= houseMin;
         loading = false;
       });
     } catch (e) {
@@ -58,6 +74,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
         error = Wallet.errorText(e);
         loading = false;
       });
+    }
+  }
+
+  /// Transfère les commissions de Katika vers le solde de l'administrateur.
+  Future<void> _withdrawHouse() async {
+    if (houseBusy) return;
+    setState(() => houseBusy = true);
+    try {
+      final res = await Wallet.adminHouseWithdraw();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_money(_i(res['amount']))} ajoutés à ton solde !'),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(Wallet.errorText(e))),
+      );
+    } finally {
+      if (mounted) setState(() => houseBusy = false);
     }
   }
 
@@ -161,6 +200,88 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 fontWeight: FontWeight.w900,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Commissions de Katika : montant disponible et bouton « Retirer »
+  /// (actif à partir de houseMin).
+  Widget _houseCard() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withOpacity(0.12),
+        border: Border.all(color: _gold, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '💰 Commissions de Katika',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Disponibles à retirer',
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              _money(houseAvailable),
+              style: const TextStyle(
+                color: _gold,
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Total gagné ${_money(houseEarned)} · déjà retiré '
+            '${_money(houseWithdrawn)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF22B14C),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white24,
+                disabledForegroundColor: Colors.white54,
+              ),
+              onPressed: houseCan && !houseBusy ? _withdrawHouse : null,
+              icon: const Icon(Icons.account_balance_wallet),
+              label: Text(
+                houseBusy ? '...' : 'Retirer vers mon compte',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          if (!houseCan)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                "Le bouton s'active à partir de ${_money(houseMin)}.",
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+          const SizedBox(height: 6),
+          const Text(
+            'Part nette de Katika : commission moins la part du jackpot et des '
+            "parrains, sur les parties terminées depuis l'activation de ce compte.",
+            style: TextStyle(color: Colors.white54, fontSize: 11),
           ),
         ],
       ),
@@ -362,6 +483,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
         children: [
+          _houseCard(),
           _title('Filtres'),
           _filterRow('Jeu', [
             _chip('Tous', kind == 'all', () => setState(() => kind = 'all')),
