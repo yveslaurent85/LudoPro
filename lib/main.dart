@@ -3867,4 +3867,23 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                             children: [diceRow(3, 2), badgesRow(3, 2)],
                           ),
                           buildStatusBar(),
-            
+                                                  ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+            buildFlyingDie(),
+            // Fin de match : confettis + panneau de résultat
+            if (gameOver)
+              const Positioned.fill(
+                child: IgnorePointer(child: Confetti()),
+              ),
+            if (gameOver) buildEndPanel(),
+          ],
+        ),
+      ),
+    );
+  }
+}
