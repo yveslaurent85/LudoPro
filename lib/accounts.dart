@@ -238,6 +238,12 @@ class Wallet {
     return _call('adminStats', <String, dynamic>{'limit': limit});
   }
 
+  /// Administrateur : transfère les commissions de Katika vers son solde
+  /// principal (possible à partir de 2500 FCFA). Renvoie { amount, balance }.
+  static Future<Map<String, dynamic>> adminHouseWithdraw() {
+    return _call('adminHouseWithdraw', <String, dynamic>{});
+  }
+
   /// Code promo : mon code (= pseudo), mon parrain, mes filleuls et mes gains.
   static Future<Map<String, dynamic>> referralInfo({String? pseudo}) {
     return _call('referralInfo', <String, dynamic>{
@@ -251,10 +257,34 @@ class Wallet {
     return _call('applyPromo', <String, dynamic>{'code': code});
   }
 
-    /// Code promo : transfère les gains de parrainage vers le solde principal.
+  /// Code promo : transfère les gains de parrainage vers le solde principal
+  /// (possible à partir de 100 FCFA). Renvoie { amount, balance }.
+  /// Le solde affiché se met à jour tout seul (voir [watch]).
   static Future<Map<String, dynamic>> referralWithdraw() {
     return _call('referralWithdraw', <String, dynamic>{});
   }
+
+  /// Dépôt Mobile Money (Campay) : le joueur reçoit une demande de paiement
+  /// sur son téléphone. [phone] = numéro MTN ou Orange (ex : 670000000).
+  /// Renvoie { depositId, reference }.
+  static Future<Map<String, dynamic>> campayDeposit({
+    required int amount,
+    required String phone,
+  }) {
+    return _call('campayDeposit', <String, dynamic>{
+      'amount': amount,
+      'phone': phone,
+    });
+  }
+
+  /// Où en est un dépôt : 'pending', 'credited', 'failed' ou 'mismatch'.
+  /// Renvoie { status, balance }.
+  static Future<Map<String, dynamic>> campayDepositStatus(String depositId) {
+    return _call('campayDepositStatus', <String, dynamic>{
+      'depositId': depositId,
+    });
+  }
+
   /// Présentiel : crée un pari entre deux joueurs (les deux mises sont
   /// débitées tout de suite). Les jetons prouvent les deux comptes.
   static Future<void> localBet({
