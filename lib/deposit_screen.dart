@@ -17,9 +17,9 @@ class DepositScreen extends StatefulWidget {
 
 class _DepositScreenState extends State<DepositScreen> {
   static const Color _gold = Color(0xFFFFC21A);
-  static const int _min = 100;
-  static const int _max = 500000;
-  static const List<int> _presets = [100, 500, 1000, 2000, 5000];
+  static const int _min = 25;
+  static const int _max = 250000;
+  static const List<int> _presets = [25, 100, 500, 1000, 2000, 5000];
 
   final TextEditingController amountCtrl = TextEditingController();
   final TextEditingController phoneCtrl = TextEditingController();
@@ -188,7 +188,7 @@ class _DepositScreenState extends State<DepositScreen> {
       ),
       const SizedBox(height: 4),
       const Text(
-        'MTN ou Orange. 1 FCFA = 1 jeton. Minimum 100 FCFA.',
+        'MTN ou Orange. 1 FCFA = 1 jeton. De 25 à 250000 FCFA.',
         style: TextStyle(color: Colors.white70, fontSize: 12),
       ),
       const SizedBox(height: 12),
