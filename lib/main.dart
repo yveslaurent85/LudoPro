@@ -1756,7 +1756,77 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  // --- Pions adverses : déplacement case par case -----------------------
+  bool _remoteBusy = false;
+  final List<Map<String, dynamic>> _remoteQueue = [];
+
+  /// Reçoit l'état envoyé par un adversaire. Si un de ses pions a avancé,
+  /// on le fait avancer case par case (comme chez lui) avant d'afficher le
+  /// nouvel état. Les états reçus pendant l'animation sont mis en file.
   void _applyRemote(Map<String, dynamic> d) {
+    if (_remoteBusy) {
+      _remoteQueue.add(d);
+      // Trop de retard : on ne garde que le plus récent (les pions sautent).
+      if (_remoteQueue.length > 4) {
+        _remoteQueue.removeRange(0, _remoteQueue.length - 1);
+      }
+      return;
+    }
+    _processRemote(d);
+  }
+
+  Future<void> _processRemote(Map<String, dynamic> d) async {
+    // Pions qui ont avancé de quelques cases (un lancer = 6 cases au plus).
+    // Le tout premier état reçu n'est jamais animé.
+    final steps = <List<int>>[]; // [couleur, pion, départ, arrivée]
+    if (_remoteSeen) {
+      for (int p = 0; p < 4; p++) {
+        final l = d['p$p'];
+        if (l is! List) continue;
+        final target = l.map((e) => (e as num).toInt()).toList();
+        final cur = players[p].pawns;
+        for (int i = 0; i < target.length && i < cur.length; i++) {
+          final from = cur[i];
+          final to = target[i];
+          if (from >= 0 && to > from && to - from <= 6) {
+            steps.add([p, i, from, to]);
+          }
+        }
+      }
+    }
+
+    if (steps.isEmpty) {
+      _applyRemoteNow(d);
+      _nextRemote();
+      return;
+    }
+
+    _remoteBusy = true;
+    if (mounted) setState(() => isMoving = true);
+    for (final s in steps) {
+      for (int pos = s[2] + 1; pos <= s[3]; pos++) {
+        if (!mounted) return;
+        if (pos == 56) {
+          sfx.arrive();
+        } else {
+          sfx.step();
+        }
+        setState(() => players[s[0]].pawns[s[1]] = pos);
+        await Future<void>.delayed(Duration(milliseconds: stepMs));
+      }
+    }
+    if (!mounted) return;
+    _applyRemoteNow(d);
+    _remoteBusy = false;
+    _nextRemote();
+  }
+
+  void _nextRemote() {
+    if (_remoteBusy || _remoteQueue.isEmpty) return;
+    _processRemote(_remoteQueue.removeAt(0));
+  }
+
+  void _applyRemoteNow(Map<String, dynamic> d) {
     final before = [for (final p in players) List<int>.from(p.pawns)];
     final wasOver = gameOver;
     setState(() {
@@ -1872,7 +1942,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final at = _presenceAt[uid] ?? _presenceStart;
     return DateTime.now().difference(at) > const Duration(seconds: staleSeconds);
   }
-
   /// Si le joueur dont c'est le tour est déconnecté, le joueur connecté de
   /// plus petite couleur joue à sa place (au hasard). Après 15 coups, il est
   /// déclaré forfait et la partie continue sans lui. S'il revient avant,
@@ -3867,7 +3936,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                             children: [diceRow(3, 2), badgesRow(3, 2)],
                           ),
                           buildStatusBar(),
-                                                  ],
+                        ],
                       );
                     },
                   ),
