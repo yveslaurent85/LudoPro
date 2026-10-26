@@ -19,6 +19,7 @@ import 'online.dart';
 import 'online_screen.dart';
 import 'painters.dart';
 import 'rejouer.dart';
+import 'promo_screen.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -244,6 +245,18 @@ class HomeScreen extends StatelessWidget {
   /// Vrai quand une partie est en cours : on propose de la reprendre.
   final bool resumable;
 
+  /// Code promo : il faut d'abord être connecté à son compte.
+  void _openPromo(BuildContext context) {
+    final loggedIn = FirebaseAuth.instance.currentUser != null;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => loggedIn
+            ? const PromoScreen()
+            : OnlineScreen(onSignedIn: (context) => const PromoScreen()),
+      ),
+    );
+  }
+
   /// Présentiel : il faut d'abord être connecté à son compte.
   /// Si Firebase n'a pas démarré, on laisse jouer quand même.
   void _openLocal(BuildContext context) {
@@ -351,6 +364,16 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (firebaseReady) ...[
+                    const SizedBox(height: 14),
+                    _ModeCard(
+                      color: const Color(0xFF8E24AA),
+                      icon: Icons.card_giftcard,
+                      title: 'Code promo',
+                      subtitle: 'Ton code, tes filleuls et tes gains',
+                      onTap: () => _openPromo(context),
+                    ),
+                  ],
                 ],
                 const Spacer(flex: 2),
               ],
@@ -3844,23 +3867,4 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                             children: [diceRow(3, 2), badgesRow(3, 2)],
                           ),
                           buildStatusBar(),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ),
-            buildFlyingDie(),
-            // Fin de match : confettis + panneau de résultat
-            if (gameOver)
-              const Positioned.fill(
-                child: IgnorePointer(child: Confetti()),
-              ),
-            if (gameOver) buildEndPanel(),
-          ],
-        ),
-      ),
-    );
-  }
-}
+            
