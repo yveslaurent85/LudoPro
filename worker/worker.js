@@ -1431,7 +1431,7 @@ async function adminStats({ uid, data, env }) {
       `Accès réservé à l'administrateur. Ton identifiant : ${uid}`,
     );
   }
-  const limit = Math.min(500, Math.max(20, intOr(data.limit, 150)));
+  const limit = Math.min(25, Math.max(20, intOr(data.limit, 150)));
   await accessToken(env); // un seul jeton pour les 3 requêtes parallèles
 
   const [ludo, deux, local] = await Promise.all([
