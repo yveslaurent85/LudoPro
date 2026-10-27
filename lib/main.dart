@@ -12,6 +12,7 @@ import 'accounts.dart';
 import 'admin_dashboard.dart';
 import 'base_logos.dart';
 import 'deux_des.dart';
+import 'game_chat.dart';
 import 'dice3d.dart';
 import 'jackpot_live.dart';
 import 'lang.dart';
@@ -402,6 +403,7 @@ class _SetupScreenState extends State<SetupScreen> {
   bool doorSafe = true; // protection des portes (cases de départ)
   bool starSafe = true; // protection des étoiles
   bool startOut = false; // pions déjà dehors au départ (pas besoin de 6)
+  bool startDoor = false; // pions sur leur case de départ (pas besoin de 6)
   int stake = Wallet.minStake; // mise de chaque joueur (jetons)
   bool starting = false;
 
@@ -671,6 +673,7 @@ class _SetupScreenState extends State<SetupScreen> {
           doorSafe: doorSafe,
           starSafe: starSafe,
           startOut: startOut,
+          startDoor: startDoor,
           partners: teamMode ? List<int>.from(partners) : null,
           localGameId: localId,
           accountUids: uids,
@@ -1164,7 +1167,21 @@ class _SetupScreenState extends State<SetupScreen> {
                   startOut,
                   (v) => setState(() {
                     startOut = v;
-                    if (v) pawnCount = 2;
+                    if (v) {
+                      pawnCount = 2;
+                      startDoor = false;
+                    }
+                  }),
+                ),
+                _switch(
+                  'Départ sur la case de départ',
+                  'Les pions démarrent déjà sur leur case de départ : pas '
+                      "besoin de 6 au début. Un pion capturé retourne à la "
+                      "base et a besoin d'un 6 pour ressortir.",
+                  startDoor,
+                  (v) => setState(() {
+                    startDoor = v;
+                    if (v) startOut = false;
                   }),
                 ),
                 const SizedBox(height: 16),
@@ -1223,6 +1240,7 @@ class LudoGame extends StatefulWidget {
     this.doorSafe = true,
     this.starSafe = true,
     this.startOut = false,
+    this.startDoor = false,
     this.online,
     this.names,
     this.avatars,
@@ -1240,6 +1258,10 @@ class LudoGame extends StatefulWidget {
   /// Vrai : les pions démarrent déjà dehors (positions 43 et 44 de leur chemin).
   /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
   final bool startOut;
+
+  /// Vrai : les pions démarrent déjà sur leur case de départ (position 0).
+  /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
+  final bool startDoor;
   final OnlineSession? online; // null = jeu en présentiel
 
   /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
@@ -1283,7 +1305,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Position de départ du pion [i] : avec l'option « pions dehors »,
   /// les pions démarrent sur les positions 43 et 44 de leur chemin (les
   /// cases marquées près du centre) ; sinon ils sont à la base (-1).
-  int _startPosOf(int i) => widget.startOut ? 43 + (i % 2) : -1;
+  int _startPosOf(int i) =>
+      widget.startOut ? 43 + (i % 2) : (widget.startDoor ? 0 : -1);
 
   // --- Abandon et retour à l'accueil ----------------------------------
   /// Couleurs des joueurs qui ont abandonné (ils perdent la partie).
@@ -1988,7 +2011,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   bool _settled = false;
-
   /// Jackpot gagné à la fin de cette partie (0 = pas de jackpot).
   int jackpotWon = 0;
 
@@ -3045,6 +3067,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ],
             ),
           ),
+          // Chat de la partie en ligne (messages et emojis, sans quitter le jeu)
+          if (isOnline && !isSpectator) ...[
+            GameChat(
+              collection: 'games',
+              gameId: widget.online!.gameId,
+              myName: nameOf(_myColor),
+            ),
+            const SizedBox(width: 4),
+          ],
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
