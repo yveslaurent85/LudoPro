@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'game_chat.dart';
 import 'dice3d.dart';
 import 'lang.dart';
 import 'main.dart';
@@ -34,8 +35,22 @@ const List<Color> _palette = [
   Color(0xFF22B14C),
   Color(0xFF1E6BFF),
   Color(0xFFFFC21A),
+  Color(0xFFFF8A1F),
+  Color(0xFF8E44AD),
+  Color(0xFFEC5FA6),
+  Color(0xFF14B8B0),
 ];
-const List<String> _colorNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
+const List<String> _colorNames = [
+  'Rouge',
+  'Vert',
+  'Bleu',
+  'Jaune',
+  'Orange',
+  'Violet',
+  'Rose',
+  'Turquoise',
+];
+const List<int> _counts = [2, 3, 4, 5, 6, 7, 8];
 
 CollectionReference<Map<String, dynamic>> get _rooms =>
     FirebaseFirestore.instance.collection('deuxdes');
@@ -75,10 +90,11 @@ List<int> _winnersOf(List<int> scores) {
 
 /// Écran avec fond bleu, bouton retour et titre.
 class _Shell extends StatelessWidget {
-  const _Shell({required this.title, required this.child});
+  const _Shell({required this.title, required this.child, this.trailing});
 
   final String title;
   final Widget child;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -108,6 +124,7 @@ class _Shell extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (trailing != null) trailing!,
                   ],
                 ),
               ),
@@ -433,7 +450,7 @@ class _DiceTableState extends State<_DiceTable>
   String _name(int i) => i < widget.names.length ? widget.names[i] : '?';
 
   Widget _die(int value, List<int> spin) {
-    final color = _palette[widget.cur % 4];
+    final color = _palette[widget.cur % _palette.length];
     return AnimatedBuilder(
       animation: _c,
       builder: (context, _) {
@@ -461,7 +478,7 @@ class _DiceTableState extends State<_DiceTable>
   Widget _endPanel() {
     final w = widget.winners;
     final tie = w.length > 1;
-    final color = _palette[(w.isEmpty ? 0 : w.first) % 4];
+    final color = _palette[(w.isEmpty ? 0 : w.first) % _palette.length];
     final who = w.map(_name).join(' & ');
     final pot = widget.stake * widget.names.length;
     final share =
@@ -570,7 +587,7 @@ class _DiceTableState extends State<_DiceTable>
 
   @override
   Widget build(BuildContext context) {
-    final color = _palette[widget.cur % 4];
+    final color = _palette[widget.cur % _palette.length];
     return Stack(
       children: [
         Positioned.fill(
@@ -697,14 +714,14 @@ class _DiceTableState extends State<_DiceTable>
                               border: Border.all(
                                 color: (showEnd && widget.winners.contains(i))
                                     ? const Color(0xFFFFC21A)
-                                    : _palette[i % 4],
+                                    : _palette[i % _palette.length],
                                 width: (i == widget.cur || showEnd) ? 2.5 : 1,
                               ),
                             ),
                             child: Row(
                               children: [
                                 CircleAvatar(
-                                    radius: 9, backgroundColor: _palette[i % 4]),
+                                    radius: 9, backgroundColor: _palette[i % _palette.length]),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
@@ -774,7 +791,7 @@ class _LocalSetupState extends State<_LocalSetup> {
   /// Comptes connectés, par place (0 = joueur principal).
   final Map<int, PlayerAccount> accounts = {};
   late final List<TextEditingController> ctrls =
-      List.generate(4, (_) => TextEditingController());
+      List.generate(8, (_) => TextEditingController());
 
   @override
   void initState() {
@@ -1030,7 +1047,7 @@ class _LocalSetupState extends State<_LocalSetup> {
           Wrap(
             spacing: 8,
             children: [
-              for (final n in [2, 3, 4])
+              for (final n in _counts)
                 ChoiceChip(
                   label: Text('$n'),
                   selected: numPlayers == n,
@@ -1568,7 +1585,7 @@ class _OnlineHubState extends State<_OnlineHub> {
           Wrap(
             spacing: 8,
             children: [
-              for (final n in [2, 3, 4])
+              for (final n in _counts)
                 ChoiceChip(
                   label: Text(tr('$n joueurs', '$n players')),
                   selected: maxPlayers == n,
@@ -1889,11 +1906,11 @@ class _OnlineRoomState extends State<_OnlineRoom> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 color: Colors.white.withOpacity(0.12),
-                border: Border.all(color: _palette[i % 4], width: 1.5),
+                border: Border.all(color: _palette[i % _palette.length], width: 1.5),
               ),
               child: Row(
                 children: [
-                  CircleAvatar(radius: 12, backgroundColor: _palette[i % 4]),
+                  CircleAvatar(radius: 12, backgroundColor: _palette[i % _palette.length]),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -1967,6 +1984,11 @@ class _OnlineRoomState extends State<_OnlineRoom> {
           },
           child: _Shell(
             title: 'Deux dés · en ligne',
+            trailing: GameChat(
+              collection: 'deuxdes',
+              gameId: widget.roomId,
+              myName: '${players[seat]['name']}',
+            ),
             child: Column(
               children: [
                 if (firebaseReady) JackpotLive(stake: stake),
