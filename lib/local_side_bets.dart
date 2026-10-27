@@ -438,8 +438,8 @@ class _BetSheetState extends State<_BetSheet> {
               ],
               _title(tr('Adversaire', 'Opponent')),
               _seatChips(_opponents(), oSeat, (s) => setState(() => oSeat = s)),
-              _title(tr('Mise de chacun (commission 10 %)',
-                  'Stake each (10 % commission)')),
+              _title(tr('Mise de chacun (commission ${Wallet.commissionLocalPercent} %)',
+                  'Stake each (${Wallet.commissionLocalPercent} % commission)')),
               Wrap(
                 spacing: 8,
                 children: [
