@@ -12,6 +12,7 @@ import 'accounts.dart';
 import 'admin_dashboard.dart';
 import 'base_logos.dart';
 import 'deposit_screen.dart';
+import 'transfer_screen.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
@@ -357,6 +358,8 @@ class HomeScreen extends StatelessWidget {
                 ),
                 item(Icons.add_card, 'Recharge', const Color(0xFF22B14C),
                     () => go((_) => const DepositScreen())),
+                item(Icons.swap_horiz, 'Transférer de l\'argent',
+                    const Color(0xFF00897B), () => go((_) => const TransferScreen())),
                 item(Icons.payments_outlined, 'Retrait',
                     const Color(0xFF1E6BFF), () {
                   Navigator.of(sheetCtx).pop();
