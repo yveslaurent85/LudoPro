@@ -82,7 +82,7 @@ class _DepositScreenState extends State<DepositScreen> {
   void _startPolling() {
     _timer?.cancel();
     _ticks = 0;
-    _timer = Timer.periodic(const Duration(seconds: 4), (_) => _check());
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _check());
   }
 
   Future<void> _check() async {
@@ -101,7 +101,7 @@ class _DepositScreenState extends State<DepositScreen> {
     } catch (_) {
       // Réseau coupé un instant : on réessaie au prochain tour.
     }
-    if (_ticks >= 45) {
+    if (_ticks >= 90) {
       // Environ 3 minutes : on arrête d'interroger. Le serveur créditera
       // quand même le solde dès que Campay confirme le paiement.
       _timer?.cancel();
