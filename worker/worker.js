@@ -21,7 +21,9 @@
 const WELCOME = 10000; // jetons offerts à chaque compte
 const MIN_STAKE = 100; // mise minimale
 const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
-const COMMISSION_LOCAL_PERCENT = 10; // présentiel (Ludo et Deux dés)
+const COMMISSION_LOCAL_PERCENT = 7.5; // présentiel (Ludo et Deux dés)
+const TRANSFER_MIN = 25; // transfert de compte à compte
+const TRANSFER_MAX = 250000;
 const JACKPOT_ENABLED = false; // jackpot désactivé : toute la commission reste à Katika
 const JACKPOT_PERCENT = 0; // part de la commission versée au jackpot (inutilisée)
 const PARTNER_PERCENT = 60; // part du partenaire sur (commission - part du parrain)
@@ -380,7 +382,8 @@ function newId() {
 
 /** Gain du gagnant : la cagnotte moins la commission (5 % en ligne, 10 % en présentiel). */
 function prizeOf(pot, percent = COMMISSION_PERCENT) {
-  return Math.floor((pot * (100 - percent)) / 100);
+  // percent peut avoir une décimale (ex. 7,5 %) : on calcule en dixièmes.
+  return Math.floor((pot * (1000 - Math.round(percent * 10))) / 1000);
 }
 
 function newTarget() {
@@ -1989,6 +1992,58 @@ async function adminReviveGames({ uid, env }) {
   return { found: targets.length, revived, refunded, afterMinutes: REVIVE_AFTER_MIN };
 }
 
+/** Transfert d'argent d'un joueur vers un autre (par pseudo ou code promo). */
+async function transfer({ uid, data, env }) {
+  const amount = intOr(data.amount, -1);
+  if (amount < TRANSFER_MIN || amount > TRANSFER_MAX) {
+    throw new HttpError('invalid-argument', `Montant entre ${TRANSFER_MIN} et ${TRANSFER_MAX} FCFA.`);
+  }
+  const raw = String(data.to || '').trim().slice(0, 60);
+  if (!raw) throw new HttpError('invalid-argument', 'Indique le pseudo du destinataire.');
+
+  // Retrouve le destinataire : code promo (= pseudo) d'abord, puis pseudo exact.
+  let toUid = '';
+  const key = promoKey(raw);
+  if (key) {
+    const o = await readDoc(env, `promoCodes/${key}`);
+    if (o && typeof o.uid === 'string') toUid = o.uid;
+  }
+  if (!toUid) {
+    const list = await queryDocs(env, 'users', eqFilter('pseudo', raw), 2);
+    if (list.length > 1) {
+      throw new HttpError('failed-precondition', 'Plusieurs joueurs ont ce pseudo : utilise son code promo.');
+    }
+    if (list.length === 1) toUid = list[0].id;
+  }
+  if (!toUid) throw new HttpError('not-found', 'Aucun joueur avec ce pseudo ou ce code promo.');
+  if (toUid === uid) throw new HttpError('invalid-argument', "Tu ne peux pas t'envoyer de l'argent.");
+
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    const to = await tx.get(`users/${toUid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (!to) throw new HttpError('not-found', 'Compte du destinataire introuvable.');
+    if (balanceOf(me) < amount) {
+      throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    }
+    const toName = String(to.pseudo || to.promoCode || raw);
+    tx.write(`users/${uid}`, { incr: { balance: -amount } });
+    tx.write(`users/${toUid}`, { incr: { balance: amount } });
+    tx.write(`transfers/${newId()}`, {
+      create: true,
+      set: {
+        from: uid,
+        to: toUid,
+        amount,
+        fromName: String(me.pseudo || me.promoCode || ''),
+        toName,
+      },
+      serverTime: ['createdAt'],
+    });
+    return { amount, toName, balance: balanceOf(me) - amount };
+  });
+}
+
 /** Appelé par Campay (sans connexion joueur) : déclenche la vérification du dépôt. */
 async function campayWebhook(request, env) {
   const p = Object.fromEntries(new URL(request.url).searchParams);
@@ -2039,6 +2094,7 @@ const HANDLERS = {
   adminPartners,
   partnerStats,
   partnerWithdraw,
+  transfer,
 };
 
 const CORS = {
