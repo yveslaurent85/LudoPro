@@ -967,12 +967,16 @@ class OnlineGameRoom extends StatelessWidget {
     super.key,
     required this.gameId,
     this.spectate = false,
+    this.adminView = false,
   });
 
   final String gameId;
 
   /// Vrai : on regarde la partie sans y participer.
   final bool spectate;
+
+  /// Vrai : l'administrateur revoit une partie (en cours ou terminée).
+  final bool adminView;
 
   Widget _info(BuildContext context, String text, {bool loading = false}) {
     return Scaffold(
@@ -1442,7 +1446,9 @@ class OnlineGameRoom extends StatelessWidget {
         final seat = players.indexWhere((p) => p['uid'] == user.uid);
 
         if (spectate && seat < 0) {
-          if (d['status'] != 'playing') {
+          final okStatus = d['status'] == 'playing' ||
+              (adminView && d['status'] == 'finished');
+          if (!okStatus) {
             return _info(context, "Cette partie n'est pas (ou plus) en cours.");
           }
           return LudoGame(
