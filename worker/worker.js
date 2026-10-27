@@ -22,7 +22,11 @@ const WELCOME = 10000; // jetons offerts à chaque compte
 const MIN_STAKE = 100; // mise minimale
 const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
 const COMMISSION_LOCAL_PERCENT = 10; // présentiel (Ludo et Deux dés)
-const JACKPOT_PERCENT = 10; // part de la commission versée au jackpot
+const JACKPOT_ENABLED = false; // jackpot désactivé : toute la commission reste à Katika
+const JACKPOT_PERCENT = 0; // part de la commission versée au jackpot (inutilisée)
+const PARTNER_PERCENT = 60; // part du partenaire sur (commission - part du parrain)
+const PARTNER_WITHDRAW_MIN = 100; // gains de partenaire minimum pour les transférer vers le solde
+const REVIVE_AFTER_MIN = 180; // parties bloquées depuis plus de 3 h
 const REFERRAL_PERCENT = 10; // part de la commission reversée au parrain
 const JACKPOT_MIN = 550; // le jackpot se déclenche entre ces deux montants
 const JACKPOT_MAX = 650;
@@ -440,27 +444,60 @@ async function claimPromo(tx, uid, userDoc, pseudo) {
   return key;
 }
 
-/** Verse aux parrains leur part de la commission. Renvoie le total versé. */
-async function referralPayout(tx, participants, commission) {
+/** Verse aux parrains leur part de la commission, et aux partenaires leur part
+ *  du reste. Pour chaque joueur parrainé : le parrain touche REFERRAL_PERCENT %
+ *  de la part de commission du joueur ; si ce parrain (ou le parrain de ce
+ *  parrain) est un compte partenaire, il touche PARTNER_PERCENT % de ce qui
+ *  reste. Renvoie { referral, partner } : totaux versés. */
+async function referralPayout(tx, participants, commission, info = {}) {
   const list = [...new Set(participants.filter((u) => typeof u === 'string'))];
-  if (!(commission > 0) || list.length === 0) return 0;
+  if (!(commission > 0) || list.length === 0) return { referral: 0, partner: 0 };
   const share = commission / list.length;
   const bonus = Math.floor((share * REFERRAL_PERCENT) / 100);
-  if (bonus <= 0) return 0;
+  const partnerBonus = Math.floor(((share - bonus) * PARTNER_PERCENT) / 100);
 
   const gains = new Map();
+  const pGains = new Map();
   for (const u of list) {
     const d = await tx.get(`users/${u}`);
     const r = d && typeof d.referrerUid === 'string' ? d.referrerUid : '';
     if (!r || r === u) continue;
-    gains.set(r, (gains.get(r) || 0) + bonus);
+    if (bonus > 0) gains.set(r, (gains.get(r) || 0) + bonus);
+
+    if (partnerBonus > 0) {
+      const rd = await tx.get(`users/${r}`);
+      let partner = '';
+      if (rd && rd.partner === true) partner = r;
+      else if (rd && typeof rd.referrerUid === 'string' && rd.referrerUid) {
+        const pd = await tx.get(`users/${rd.referrerUid}`);
+        if (pd && pd.partner === true) partner = rd.referrerUid;
+      }
+      if (partner && partner !== u) {
+        pGains.set(partner, (pGains.get(partner) || 0) + partnerBonus);
+      }
+    }
   }
-  let total = 0;
+  let referral = 0;
   for (const [r, g] of gains) {
     tx.write(`users/${r}`, { incr: { referralBalance: g, referralEarned: g } });
-    total += g;
+    referral += g;
   }
-  return total;
+  let partner = 0;
+  for (const [p, g] of pGains) {
+    tx.write(`users/${p}`, { incr: { partnerBalance: g, partnerEarned: g } });
+    tx.write(`partnerEarnings/${newId()}`, {
+      create: true,
+      set: {
+        partner: p,
+        amount: g,
+        gameId: String(info.gameId || ''),
+        mode: String(info.mode || ''),
+      },
+      serverTime: ['createdAt'],
+    });
+    partner += g;
+  }
+  return { referral, partner };
 }
 
 // --- Jackpot ----------------------------------------------------------
@@ -474,44 +511,50 @@ async function referralPayout(tx, participants, commission) {
  *  versé aux parrains. `participants` = tous les joueurs qui ont misé. */
 async function payOut(
   tx,
-  { stake, pot, winners, percent = COMMISSION_PERCENT, participants = [] },
+  { stake, pot, winners, percent = COMMISSION_PERCENT, participants = [], gameId = '', mode = '' },
 ) {
   if (!(stake > 0) || !(pot > 0) || winners.length === 0) {
-    return { jackpot: 0, referral: 0, house: 0 };
+    return { jackpot: 0, referral: 0, partner: 0, house: 0 };
   }
-
-  const jack = await tx.get('app/jackpot');
-  const targ = await tx.get('app/jackpotTarget');
 
   const n = winners.length;
   const prize = prizeOf(pot, percent);
   const commission = pot - prize;
   const prizeShare = Math.floor(prize / n);
 
-  let pool = intOr(jack ? jack.pool : 0, 0);
-  let target = intOr(targ ? targ.target : 0, 0);
-  if (target <= 0) target = newTarget();
-
+  // Jackpot désactivé : aucune part prélevée, rien n'est versé.
   let jackpot = 0;
-  if (pool >= target) {
-    jackpot = pool;
-    pool = 0;
-    target = newTarget();
+  let jackpotCut = 0;
+  let jackpotShare = 0;
+  if (JACKPOT_ENABLED) {
+    const jack = await tx.get('app/jackpot');
+    const targ = await tx.get('app/jackpotTarget');
+    let pool = intOr(jack ? jack.pool : 0, 0);
+    let target = intOr(targ ? targ.target : 0, 0);
+    if (target <= 0) target = newTarget();
+    if (pool >= target) {
+      jackpot = pool;
+      pool = 0;
+      target = newTarget();
+    }
+    jackpotShare = Math.floor(jackpot / n);
+    jackpotCut = Math.floor((commission * JACKPOT_PERCENT) / 100);
+    pool += jackpotCut + (jackpot - jackpotShare * n);
+    tx.write('app/jackpot', { set: { pool } });
+    tx.write('app/jackpotTarget', { set: { target } });
   }
-  const jackpotShare = Math.floor(jackpot / n);
-  const jackpotCut = Math.floor((commission * JACKPOT_PERCENT) / 100);
-  pool += jackpotCut + (jackpot - jackpotShare * n);
 
-  const referral = await referralPayout(tx, participants, commission);
+  const { referral, partner } = await referralPayout(tx, participants, commission, {
+    gameId,
+    mode,
+  });
 
   for (const uid of winners) {
     tx.write(`users/${uid}`, { incr: { balance: prizeShare + jackpotShare } });
   }
-  tx.write('app/jackpot', { set: { pool } });
-  tx.write('app/jackpotTarget', { set: { target } });
-  // Part nette de Katika : commission - jackpot - parrains.
-  const house = Math.max(0, commission - jackpotCut - referral);
-  return { jackpot: jackpotShare * n, referral, house };
+  // Part nette de Katika : commission - jackpot - parrains - partenaires.
+  const house = Math.max(0, commission - jackpotCut - referral - partner);
+  return { jackpot: jackpotShare * n, referral, partner, house };
 }
 
 // --- Commissions de Katika (compte de l'administrateur) ----------------
@@ -808,16 +851,19 @@ async function settleGame({ uid, data, env }) {
           commission: 0,
           refunded: true,
           referralPaid: 0,
+          partnerPaid: 0,
         },
       });
       return { jackpot: 0 };
     }
 
-    const { jackpot, referral, house } = await payOut(tx, {
+    const { jackpot, referral, partner, house } = await payOut(tx, {
       stake,
       pot,
       winners,
       participants: paid,
+      gameId,
+      mode: 'online',
     });
     await houseAdd(tx, house);
     const commission = stake > 0 && pot > 0 ? pot - prizeOf(pot) : 0;
@@ -828,6 +874,7 @@ async function settleGame({ uid, data, env }) {
         status: 'finished',
         commission,
         referralPaid: referral,
+        partnerPaid: partner,
       },
     });
     return { jackpot };
@@ -924,12 +971,14 @@ async function settleLocalGame({ uid, data, env }) {
     const stake = Math.max(0, intOr(d.stake, 0));
     const pot = Math.max(0, intOr(d.pot, 0));
     const bets = await loadLocalBets(tx, gameId);
-    const { jackpot, referral, house } = await payOut(tx, {
+    const { jackpot, referral, partner, house } = await payOut(tx, {
       stake,
       pot,
       winners,
       percent: COMMISSION_LOCAL_PERCENT,
       participants: players,
+      gameId,
+      mode: 'local',
     });
     const betsSummary = settleLocalBets(
       tx,
@@ -954,6 +1003,7 @@ async function settleLocalGame({ uid, data, env }) {
         commission,
         betCommission,
         referralPaid: referral,
+        partnerPaid: partner,
       },
     });
     return { jackpot, bets: betsSummary };
@@ -1395,7 +1445,7 @@ function adminIds(env) {
 async function recentDocs(env, collectionId, limit) {
   const fields = [
     'createdAt', 'status', 'stake', 'pot', 'settled', 'jackpot', 'commission',
-    'betCommission', 'referralPaid', 'refunded', 'maxPlayers', 'players', 'names',
+    'betCommission', 'referralPaid', 'partnerPaid', 'refunded', 'maxPlayers', 'players', 'names',
     'uids', 'game',
   ];
   const res = await fsCall(env, 'runQuery', {
@@ -1452,6 +1502,7 @@ function adminRow(kind, mode, d) {
     prize: settled && !refunded ? Math.max(0, pot - commission) : 0,
     betCommission: Math.max(0, intOr(d.betCommission, 0)),
     referralPaid: Math.max(0, intOr(d.referralPaid, 0)),
+    partnerPaid: Math.max(0, intOr(d.partnerPaid, 0)),
     jackpot: Math.max(0, intOr(d.jackpot, 0)),
   };
 }
@@ -1750,6 +1801,194 @@ async function referralWithdraw({ uid, env }) {
   });
 }
 
+// ======================================================================
+// Comptes partenaires et débloquage des parties
+// ======================================================================
+// Un compte partenaire (users/{uid}.partner = true, désigné par
+// l'administrateur grâce à son code promo) touche PARTNER_PERCENT % de la
+// commission de Katika, après la part du parrain, sur les parties des joueurs
+// qu'il a parrainés (ou que ses filleuls ont parrainés). Gains : partnerBalance
+// (disponible), partnerEarned (cumul), partnerWithdrawn ; historique dans
+// partnerEarnings/{id}.
+
+function requireAdmin(uid, env) {
+  if (!adminIds(env).includes(uid)) {
+    throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
+  }
+}
+
+function eqFilter(field, value) {
+  return {
+    fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: toFs(value) },
+  };
+}
+
+async function queryDocs(env, collectionId, where, limit = 200) {
+  const res = await fsCall(env, 'runQuery', {
+    structuredQuery: { from: [{ collectionId }], where, limit },
+  });
+  return (Array.isArray(res) ? res : [])
+    .filter((r) => r.document)
+    .map((r) => ({
+      id: r.document.name.split('/').pop(),
+      ...fieldsToObj(r.document.fields || {}),
+    }));
+}
+
+/** Administrateur : donne ou retire le statut de partenaire (par code promo). */
+async function adminSetPartner({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const key = promoKey(data.code);
+  if (!key) throw new HttpError('invalid-argument', 'Code promo invalide.');
+  const on = data.on !== false;
+  return runTx(env, async (tx) => {
+    const owner = await tx.get(`promoCodes/${key}`);
+    if (!owner || typeof owner.uid !== 'string') {
+      throw new HttpError('not-found', 'Aucun joueur avec ce code promo.');
+    }
+    tx.write(`users/${owner.uid}`, { set: { partner: on } });
+    return { ok: true, uid: owner.uid, code: key, partner: on };
+  });
+}
+
+/** Administrateur : liste des partenaires et de leurs gains. */
+async function adminPartners({ uid, env }) {
+  requireAdmin(uid, env);
+  const list = await queryDocs(env, 'users', eqFilter('partner', true), 100);
+  return {
+    percent: PARTNER_PERCENT,
+    partners: list.map((u) => ({
+      uid: u.id,
+      code: String(u.promoCode || u.pseudo || '?'),
+      earned: Math.max(0, intOr(u.partnerEarned, 0)),
+      available: Math.max(0, intOr(u.partnerBalance, 0)),
+      withdrawn: Math.max(0, intOr(u.partnerWithdrawn, 0)),
+    })),
+  };
+}
+
+/** Partenaire : ses gains, ses filleuls et son historique. */
+async function partnerStats({ uid, env }) {
+  const me = await readDoc(env, `users/${uid}`);
+  if (!me || me.partner !== true) {
+    throw new HttpError('permission-denied', 'Accès réservé aux administrateurs et partenaires.');
+  }
+  let referrals = 0;
+  try {
+    const r = await fsCall(env, 'runAggregationQuery', {
+      structuredAggregationQuery: {
+        structuredQuery: {
+          from: [{ collectionId: 'users' }],
+          where: eqFilter('referrerUid', uid),
+        },
+        aggregations: [{ alias: 'n', count: {} }],
+      },
+    });
+    referrals = Number(r[0].result.aggregateFields.n.integerValue) || 0;
+  } catch (_) {}
+  const list = await queryDocs(env, 'partnerEarnings', eqFilter('partner', uid), 300);
+  list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const available = Math.max(0, intOr(me.partnerBalance, 0));
+  return {
+    code: String(me.promoCode || me.pseudo || ''),
+    percent: PARTNER_PERCENT,
+    earned: Math.max(0, intOr(me.partnerEarned, 0)),
+    available,
+    withdrawn: Math.max(0, intOr(me.partnerWithdrawn, 0)),
+    min: PARTNER_WITHDRAW_MIN,
+    canWithdraw: available >= PARTNER_WITHDRAW_MIN,
+    referrals,
+    games: list.length,
+    recent: list.slice(0, 50).map((e) => ({
+      amount: intOr(e.amount, 0),
+      mode: String(e.mode || ''),
+      createdAt: typeof e.createdAt === 'string' ? e.createdAt : null,
+    })),
+  };
+}
+
+/** Partenaire : transfère ses gains vers son solde principal. */
+async function partnerWithdraw({ uid, env }) {
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me || me.partner !== true) {
+      throw new HttpError('permission-denied', 'Réservé aux partenaires.');
+    }
+    const amount = Math.max(0, intOr(me.partnerBalance, 0));
+    if (amount < PARTNER_WITHDRAW_MIN) {
+      throw new HttpError(
+        'failed-precondition',
+        `Retrait possible à partir de ${PARTNER_WITHDRAW_MIN} FCFA de gains.`,
+      );
+    }
+    tx.write(`users/${uid}`, {
+      incr: { balance: amount, partnerBalance: -amount, partnerWithdrawn: amount },
+    });
+    return { amount, balance: balanceOf(me) + amount };
+  });
+}
+
+async function readDoc(env, path) {
+  const r = await fsCall(env, 'batchGet', { documents: [docName(env, path)] });
+  const f = Array.isArray(r) && r[0] && r[0].found;
+  return f ? fieldsToObj(f.fields || {}) : null;
+}
+
+/** Administrateur : débloque les parties restées bloquées depuis plus de
+ *  REVIVE_AFTER_MIN minutes (en attente ou en cours, jamais terminées) :
+ *  toutes les mises sont remboursées et la partie est clôturée. */
+async function adminReviveGames({ uid, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const limitMs = Date.now() - REVIVE_AFTER_MIN * 60 * 1000;
+  const targets = [];
+  for (const col of ['games', 'deuxdes', 'localGames']) {
+    for (const status of ['waiting', 'playing']) {
+      const docs = await queryDocs(env, col, eqFilter('status', status), 200);
+      for (const d of docs) {
+        const t = typeof d.createdAt === 'string' ? Date.parse(d.createdAt) : 0;
+        if (d.settled !== true && d.over !== true && t > 0 && t < limitMs) targets.push({ col, id: d.id });
+      }
+    }
+  }
+  let revived = 0;
+  let refunded = 0;
+  for (const { col, id } of targets) {
+    try {
+      const amount = await runTx(env, async (tx) => {
+        const path = `${col}/${id}`;
+        const d = await tx.get(path);
+        if (!d || d.settled === true) return -1;
+        if (d.status !== 'waiting' && d.status !== 'playing') return -1;
+        if (d.over === true) return -1; // terminée : les joueurs la règlent à l'ouverture
+        const stake = Math.max(0, intOr(d.stake, 0));
+        const who =
+          col === 'localGames'
+            ? (Array.isArray(d.uids) ? d.uids : [])
+            : (Array.isArray(d.paid) ? d.paid : []);
+        refund(tx, who, stake);
+        tx.write(path, {
+          set: {
+            settled: true,
+            refunded: true,
+            status: 'finished',
+            over: true,
+            commission: 0,
+            referralPaid: 0,
+            partnerPaid: 0,
+          },
+        });
+        return stake > 0 ? stake * who.length : 0;
+      });
+      if (amount >= 0) {
+        revived++;
+        refunded += amount;
+      }
+    } catch (_) {}
+  }
+  return { found: targets.length, revived, refunded, afterMinutes: REVIVE_AFTER_MIN };
+}
+
 /** Appelé par Campay (sans connexion joueur) : déclenche la vérification du dépôt. */
 async function campayWebhook(request, env) {
   const p = Object.fromEntries(new URL(request.url).searchParams);
@@ -1796,6 +2035,10 @@ const HANDLERS = {
   campayDeposit,
   campayDepositStatus,
   referralWithdraw,
+  adminSetPartner,
+  adminPartners,
+  partnerStats,
+  partnerWithdraw,
 };
 
 const CORS = {
