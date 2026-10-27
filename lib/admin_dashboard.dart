@@ -984,7 +984,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       onPressed: () => Navigator.of(context).maybePop(),
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                     ),
-                      Expanded(
+                    Expanded(
                       child: Text(
                         partnerView ? '👑 Espace partenaire' : '👑 Tableau de bord',
                         style: TextStyle(
