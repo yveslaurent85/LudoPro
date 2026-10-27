@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -379,7 +380,17 @@ class _DiceTable extends StatefulWidget {
     this.jackpot = 0,
     this.local = false,
     this.endExtra,
+    this.onTimeout,
+    this.onForce,
   });
+
+  /// Le joueur n'a pas joué dans les 30 s : cet appareil joue à sa place
+  /// (appelé seulement quand [canAct] est vrai).
+  final VoidCallback? onTimeout;
+
+  /// Joueur absent : 8 s après la fin du décompte, n'importe quel appareil
+  /// peut jouer à sa place (parties en ligne).
+  final VoidCallback? onForce;
 
   final List<String> names;
   final List<int> scores;
@@ -428,9 +439,55 @@ class _DiceTableState extends State<_DiceTable>
   /// Sons : roulement des dés, « toc » à l'arrêt, fanfare de fin.
   final Sfx _sfx = Sfx();
 
+  // --- Décompte de 30 s par joueur ------------------------------------
+  static const int _limit = 30;
+  Timer? _timer;
+  int _left = _limit;
+  int _turnKey = -1;
+  int _fired = 0; // 0 : rien, 1 : appareil du joueur, 2 : relais
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTurn();
+  }
+
+  void _syncTurn() {
+    if (widget.over) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+    if (_turnKey != widget.cur) {
+      _turnKey = widget.cur;
+      _left = _limit;
+      _fired = 0;
+    }
+    _timer ??= Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
+  }
+
+  void _onTick() {
+    if (!mounted) return;
+    if (widget.over) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+    setState(() => _left--);
+    if (_left <= 0 && widget.canAct && _fired < 1) {
+      _fired = 1;
+      widget.onTimeout?.call();
+    }
+    if (_left <= -8 && _fired < 2) {
+      _fired = 2;
+      widget.onForce?.call();
+    }
+  }
+
   @override
   void didUpdateWidget(covariant _DiceTable old) {
     super.didUpdateWidget(old);
+    _syncTurn();
     if (widget.rollN != old.rollN) {
       _sfx.roll();
       _c.forward(from: 0).then((_) {
@@ -443,6 +500,7 @@ class _DiceTableState extends State<_DiceTable>
 
   @override
   void dispose() {
+    _timer?.cancel();
     _c.dispose();
     super.dispose();
   }
@@ -623,7 +681,20 @@ class _DiceTableState extends State<_DiceTable>
                     ),
                   ),
                 ),
-                const SizedBox(height: 28),
+                if (!widget.over) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '⏱ ${_left < 0 ? 0 : _left} s',
+                    style: TextStyle(
+                      color: _left <= 10
+                          ? const Color(0xFFFF8A80)
+                          : const Color(0xFFFFE082),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -1179,6 +1250,20 @@ class _LocalGameState extends State<_LocalGame> {
     });
   }
 
+  /// 30 s écoulées : le système joue à la place du joueur (lancer, puis
+  /// joueur suivant).
+  Future<void> _autoPlay() async {
+    if (over) return;
+    final turn = cur;
+    if (!rolled) {
+      _roll();
+      if (over) return;
+      await Future.delayed(const Duration(milliseconds: 2800));
+      if (!mounted || over || cur != turn) return;
+    }
+    _next();
+  }
+
   /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants
   /// et règle les paris.
   Future<void> _settle() async {
@@ -1264,6 +1349,7 @@ class _LocalGameState extends State<_LocalGame> {
                 canAct: true,
                 onRoll: _roll,
                 onNext: _next,
+                onTimeout: _autoPlay,
                 over: over,
                 winners: winners,
                 stake: widget.stake,
@@ -1801,6 +1887,16 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     } catch (_) {}
   }
 
+  /// 30 s écoulées : lance les dés (si besoin) puis passe au joueur suivant,
+  /// à la place du joueur [seat] (n'importe quel appareil peut le faire).
+  Future<void> _autoTurn(int seat, bool rolled) async {
+    if (!rolled) {
+      await _roll(seat);
+      await Future.delayed(const Duration(milliseconds: 2800));
+    }
+    await _next(seat);
+  }
+
   Widget _waiting(Map<String, dynamic> d, List<Map<String, dynamic>> players,
       String uid) {
     final max = (d['maxPlayers'] as num).toInt();
@@ -2025,6 +2121,10 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                     canAct: seat >= 0 && cur == seat && !over,
                     onRoll: () => _roll(seat),
                     onNext: () => _next(seat),
+                    onTimeout: () => _autoTurn(cur, d['rolled'] == true),
+                    onForce: seat < 0
+                        ? null
+                        : () => _autoTurn(cur, d['rolled'] == true),
                     over: over,
                     winners: _ints(d['winners'], const []),
                     stake: stake,
