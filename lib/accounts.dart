@@ -244,6 +244,26 @@ class Wallet {
     return _call('adminHouseWithdraw', <String, dynamic>{});
   }
 
+  /// Administrateur : donne ou retire le statut de partenaire (code promo).
+  static Future<Map<String, dynamic>> adminSetPartner(String code, bool on) {
+    return _call('adminSetPartner', <String, dynamic>{'code': code, 'on': on});
+  }
+
+  /// Administrateur : liste des partenaires et de leurs gains.
+  static Future<Map<String, dynamic>> adminPartners() {
+    return _call('adminPartners', <String, dynamic>{});
+  }
+
+  /// Partenaire : mes gains, mes filleuls et mon historique.
+  static Future<Map<String, dynamic>> partnerStats() {
+    return _call('partnerStats', <String, dynamic>{});
+  }
+
+  /// Partenaire : transfère mes gains vers mon solde principal.
+  static Future<Map<String, dynamic>> partnerWithdraw() {
+    return _call('partnerWithdraw', <String, dynamic>{});
+  }
+
   /// Code promo : mon code (= pseudo), mon parrain, mes filleuls et mes gains.
   static Future<Map<String, dynamic>> referralInfo({String? pseudo}) {
     return _call('referralInfo', <String, dynamic>{
@@ -365,11 +385,15 @@ class Wallet {
 }
 
 /// Bandeau « Jackpot » affiché dans le salon et avant la partie.
+/// Jackpot désactivé : les bandeaux ne s'affichent plus.
+const bool kJackpotEnabled = false;
+
 class JackpotBanner extends StatelessWidget {
   const JackpotBanner({super.key});
 
   @override
   Widget build(BuildContext context) {
+    if (!kJackpotEnabled) return const SizedBox.shrink();
     return StreamBuilder<int>(
       stream: Wallet.watchJackpot(),
       builder: (context, snap) {
@@ -422,6 +446,7 @@ class _JackpotStripState extends State<JackpotStrip> {
 
   @override
   Widget build(BuildContext context) {
+    if (!kJackpotEnabled) return const SizedBox.shrink();
     return StreamBuilder<int>(
       stream: _stream,
       builder: (context, snap) {
