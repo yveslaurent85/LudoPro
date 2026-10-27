@@ -4152,7 +4152,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           buildHeader(),
                           buildRanking(),
                           // Jackpot en direct pendant la partie
-                          if (firebaseReady) JackpotLive(stake: widget.stake),
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [badgesRow(0, 1), diceRow(0, 1)],
