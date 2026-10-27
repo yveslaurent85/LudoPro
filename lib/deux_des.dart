@@ -859,6 +859,9 @@ class _LocalSetupState extends State<_LocalSetup> {
   int stake = Wallet.minStake;
   bool starting = false;
 
+  /// Paris préparés avant le début (placés dès que la partie démarre).
+  final List<PendingBet> pending = [];
+
   /// Comptes connectés, par place (0 = joueur principal).
   final Map<int, PlayerAccount> accounts = {};
   late final List<TextEditingController> ctrls =
@@ -898,6 +901,85 @@ class _LocalSetupState extends State<_LocalSetup> {
         balance: bal,
       );
     });
+  }
+
+  /// Noms des joueurs de cette partie (compte connecté, sinon la couleur).
+  List<String> get _seatNames => [
+        for (int i = 0; i < numPlayers; i++)
+          accounts[i]?.name ?? tr('Joueur ${_colorNames[i]}', 'Player ${_colorNames[i]}'),
+      ];
+
+  Future<void> _addPending() async {
+    final b = await pickPendingBet(context, _seatNames);
+    if (b != null && mounted) setState(() => pending.add(b));
+  }
+
+  /// Section « Paris avant la partie » (présentiel avec mise).
+  Widget _pendingSection() {
+    final names = _seatNames;
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.black26,
+        border: Border.all(color: Colors.white38),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tr('🎲 Paris avant la partie (Duel, Défi 7)',
+                      '🎲 Bets before the game (Duel, 7 challenge)'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: numPlayers < 2 ? null : _addPending,
+                child: Text(
+                  tr('+ Parier', '+ Bet'),
+                  style: const TextStyle(
+                    color: Color(0xFFFFC21A),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (pending.isEmpty)
+            Text(
+              tr('Tu peux aussi parier pendant la partie, tant que le joueur '
+                  "n'a pas lancé ses dés.",
+                  'You can also bet during the game, as long as the player has '
+                      "not rolled yet."),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          for (int i = 0; i < pending.length; i++)
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    pending[i].describe(names),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => setState(() => pending.removeAt(i)),
+                  icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
   }
 
   bool get ready =>
@@ -1060,6 +1142,24 @@ class _LocalSetupState extends State<_LocalSetup> {
                 : tr('Joueur ${_colorNames[i]}', 'Player ${_colorNames[i]}')),
     ];
 
+    // Paris préparés avant la partie : placés maintenant (mises débitées).
+    var placedBets = <String>[];
+    if (firebaseReady && localId != null && stake > 0 && pending.isNotEmpty) {
+      final r = await placePendingBets(
+        localId: localId,
+        tokens: tokenList,
+        names: names,
+        bets: List<PendingBet>.from(pending),
+      );
+      placedBets = r.placed;
+      if (r.errors.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(r.errors.first)),
+        );
+      }
+    }
+    if (mounted) setState(pending.clear);
+
     final rematch = await Navigator.of(context).push<List<int>>(
       MaterialPageRoute<List<int>>(
         builder: (_) => _LocalGame(
@@ -1068,6 +1168,7 @@ class _LocalSetupState extends State<_LocalSetup> {
           localId: localId,
           uids: uids,
           tokens: tokenList,
+          initialBets: placedBets,
         ),
       ),
     );
@@ -1122,7 +1223,10 @@ class _LocalSetupState extends State<_LocalSetup> {
                 ChoiceChip(
                   label: Text('$n'),
                   selected: numPlayers == n,
-                  onSelected: (_) => setState(() => numPlayers = n),
+                  onSelected: (_) => setState(() {
+                    numPlayers = n;
+                    pending.removeWhere((b) => b.pSeat >= n || b.oSeat >= n);
+                  }),
                 ),
             ],
           ),
@@ -1132,6 +1236,7 @@ class _LocalSetupState extends State<_LocalSetup> {
             _label('Mise de chaque joueur (jetons)'),
             _stakeBox(stake, numPlayers, (v) => setState(() => stake = v),
                 local: true),
+            if (stake > 0) _pendingSection(),
           ],
           _label(firebaseReady
               ? 'Joueurs (chacun se connecte à son compte)'
@@ -1178,7 +1283,11 @@ class _LocalGame extends StatefulWidget {
     this.localId,
     this.uids = const [],
     this.tokens = const [],
+    this.initialBets = const [],
   });
+
+  /// Paris déjà placés avant le début de la partie.
+  final List<String> initialBets;
 
   final List<String> names;
   final int stake;
@@ -1324,6 +1433,7 @@ class _LocalGameState extends State<_LocalGame> {
                 names: widget.names,
                 uids: widget.uids,
                 tokens: widget.tokens,
+                initialPlaced: widget.initialBets,
                 cur: cur,
                 rolled: rolled,
                 over: over,
