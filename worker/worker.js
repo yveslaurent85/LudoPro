@@ -841,12 +841,13 @@ async function startLocalGame({ uid: hostUid, data, env }) {
   if (stake < 0 || (stake > 0 && stake < MIN_STAKE)) {
     throw new HttpError('invalid-argument', 'Mise invalide.');
   }
+  const game = data.game === 'deuxdes' || data.game === 'ludo' ? data.game : 'unknown';
+  const maxLocal = game === 'deuxdes' ? 8 : 4; // Deux dés : jusqu'à 8 joueurs
   const tokens = Array.isArray(data.tokens) ? data.tokens : [];
-  if (tokens.length < 2 || tokens.length > 4) {
+  if (tokens.length < 2 || tokens.length > maxLocal) {
     throw new HttpError('invalid-argument', 'Nombre de joueurs invalide.');
   }
   const names = Array.isArray(data.names) ? data.names.map(String) : [];
-  const game = data.game === 'deuxdes' || data.game === 'ludo' ? data.game : 'unknown';
 
   const uids = [];
   for (const t of tokens) uids.push(await verifyIdToken(t, env));
