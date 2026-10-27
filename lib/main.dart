@@ -11,6 +11,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'accounts.dart';
 import 'admin_dashboard.dart';
 import 'base_logos.dart';
+import 'deposit_screen.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
@@ -258,6 +259,135 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  /// Ouvre une page qui demande un compte (connexion d'abord si besoin).
+  void _requireLogin(BuildContext context, Widget Function(BuildContext) page) {
+    final loggedIn = FirebaseAuth.instance.currentUser != null;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (c) => loggedIn ? page(c) : OnlineScreen(onSignedIn: page),
+      ),
+    );
+  }
+
+  /// Menu : solde, code promo, recharge et retrait.
+  void _openMenu(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0A1B66),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        void go(Widget Function(BuildContext) page) {
+          Navigator.of(sheetCtx).pop();
+          _requireLogin(context, page);
+        }
+
+        Widget item(IconData icon, String label, Color color, VoidCallback f) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  alignment: Alignment.centerLeft,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: f,
+                icon: Icon(icon),
+                label: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    color: Colors.white.withOpacity(0.12),
+                    border: Border.all(color: const Color(0xFFFFC21A)),
+                  ),
+                  child: user == null
+                      ? const Text(
+                          'Connecte-toi pour voir ton solde',
+                          style: TextStyle(color: Colors.white, fontSize: 15),
+                        )
+                      : Column(
+                          children: [
+                            const Text(
+                              'Mon solde',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                            StreamBuilder<int>(
+                              stream: Wallet.watch(user.uid),
+                              builder: (context, snap) => Text(
+                                '💰 ${Wallet.format(snap.data ?? 0)}',
+                                style: const TextStyle(
+                                  color: Color(0xFFFFE082),
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                item(Icons.add_card, 'Recharge', const Color(0xFF22B14C),
+                    () => go((_) => const DepositScreen())),
+                item(Icons.payments_outlined, 'Retrait',
+                    const Color(0xFF1E6BFF), () {
+                  Navigator.of(sheetCtx).pop();
+                  showDialog<void>(
+                    context: context,
+                    builder: (dCtx) => AlertDialog(
+                      title: const Text('Retrait'),
+                      content: const Text(
+                        'Le retrait vers Mobile Money arrive bientôt. '
+                        'Tes gains de parrainage se transfèrent déjà vers '
+                        'ton solde depuis « Code promo ».',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(dCtx).pop(),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                item(Icons.card_giftcard, 'Code promo',
+                    const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   /// Présentiel : il faut d'abord être connecté à son compte.
   /// Si Firebase n'a pas démarré, on laisse jouer quand même.
   void _openLocal(BuildContext context) {
@@ -285,9 +415,27 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               children: [
                 if (!resumable)
-                  const Align(
-                    alignment: Alignment.centerRight,
-                    child: LanguageSwitcher(),
+                  Row(
+                    children: [
+                      if (firebaseReady)
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.white.withOpacity(0.14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                          ),
+                          onPressed: () => _openMenu(context),
+                          icon: const Icon(Icons.menu),
+                          label: const Text(
+                            'Menu',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      const Spacer(),
+                      const LanguageSwitcher(),
+                    ],
                   ),
                 const Spacer(flex: 2),
                 // Appui long sur la couronne : tableau de bord administrateur
@@ -336,20 +484,14 @@ class HomeScreen extends StatelessWidget {
                 else ...[
                   _ModeCard(
                     color: const Color(0xFF22B14C),
-                    icon: Icons.groups,
-                    title: 'En présentiel',
-                    subtitle: 'Chaque joueur se connecte à son compte',
-                    onTap: () => _openLocal(context),
-                  ),
-                  const SizedBox(height: 14),
-                  _ModeCard(
-                    color: const Color(0xFF1E6BFF),
-                    icon: Icons.public,
-                    title: 'En ligne',
-                    subtitle: 'Crée un compte pour jouer à distance',
+                    icon: Icons.grid_view_rounded,
+                    title: 'Ludo',
+                    subtitle: 'En présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (context) => const OnlineScreen(),
+                        builder: (context) => _LudoModePage(
+                          onLocal: () => _openLocal(context),
+                        ),
                       ),
                     ),
                   ),
@@ -365,17 +507,71 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (firebaseReady) ...[
-                    const SizedBox(height: 14),
-                    _ModeCard(
-                      color: const Color(0xFF8E24AA),
-                      icon: Icons.card_giftcard,
-                      title: 'Code promo',
-                      subtitle: 'Ton code, tes filleuls et tes gains',
-                      onTap: () => _openPromo(context),
+                ],
+                const Spacer(flex: 2),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Choix du mode de Ludo : en présentiel ou en ligne.
+class _LudoModePage extends StatelessWidget {
+  const _LudoModePage({required this.onLocal});
+
+  final VoidCallback onLocal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    const Text(
+                      'Ludo',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ],
-                ],
+                ),
+                const Spacer(),
+                _ModeCard(
+                  color: const Color(0xFF22B14C),
+                  icon: Icons.groups,
+                  title: 'En présentiel',
+                  subtitle: 'Chaque joueur se connecte à son compte',
+                  onTap: onLocal,
+                ),
+                const SizedBox(height: 14),
+                _ModeCard(
+                  color: const Color(0xFF1E6BFF),
+                  icon: Icons.public,
+                  title: 'En ligne',
+                  subtitle: 'Crée un compte pour jouer à distance',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (context) => const OnlineScreen(),
+                    ),
+                  ),
+                ),
                 const Spacer(flex: 2),
               ],
             ),
