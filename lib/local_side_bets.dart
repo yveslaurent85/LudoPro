@@ -19,6 +19,76 @@ const List<Color> _seatColors = [
 
 const List<int> _betAmounts = [100, 200, 500, 1000];
 
+/// Pari préparé avant le début de la partie (placé dès que la partie
+/// démarre, quand les mises sont débitées).
+class PendingBet {
+  const PendingBet(this.type, this.pSeat, this.oSeat, this.amount, this.over7);
+
+  final String type; // 'duel' ou 'seven'
+  final int pSeat;
+  final int oSeat;
+  final int amount;
+  final bool over7;
+
+  String describe(List<String> names) {
+    String nm(int s) => s >= 0 && s < names.length ? names[s] : '?';
+    final a = nm(pSeat);
+    final b = nm(oSeat);
+    return type == 'seven'
+        ? tr('$a ${over7 ? 'plus de 7' : 'moins de 7'} vs $b · $amount',
+            '$a ${over7 ? 'over 7' : 'under 7'} vs $b · $amount')
+        : tr('Duel $a vs $b · $amount', 'Duel $a vs $b · $amount');
+  }
+}
+
+/// Ouvre la fenêtre de pari avant la partie. Renvoie le pari préparé.
+Future<PendingBet?> pickPendingBet(BuildContext context, List<String> names) {
+  return showModalBottomSheet<PendingBet>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFF14267A),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+    ),
+    builder: (_) => _BetSheet(
+      localId: null,
+      names: names,
+      tokens: const [],
+      cur: 0,
+      rolled: false,
+    ),
+  );
+}
+
+/// Place les paris préparés (la partie vient de démarrer). Renvoie les
+/// textes des paris placés et les erreurs éventuelles.
+Future<({List<String> placed, List<String> errors})> placePendingBets({
+  required String localId,
+  required List<String> tokens,
+  required List<String> names,
+  required List<PendingBet> bets,
+}) async {
+  final placed = <String>[];
+  final errors = <String>[];
+  for (final b in bets) {
+    if (b.pSeat >= tokens.length || b.oSeat >= tokens.length) continue;
+    try {
+      await Wallet.localBet(
+        id: localId,
+        type: b.type,
+        amount: b.amount,
+        proposerToken: tokens[b.pSeat],
+        opponentToken: tokens[b.oSeat],
+        over7: b.over7,
+      );
+      placed.add(b.describe(names));
+    } catch (e) {
+      errors.add('${b.describe(names)} : ${Wallet.errorText(e)}');
+    }
+  }
+  return (placed: placed, errors: errors);
+}
+
 /// Bandeau « Paris » affiché pendant la partie en présentiel.
 class LocalSideBetsBar extends StatefulWidget {
   const LocalSideBetsBar({
@@ -30,7 +100,11 @@ class LocalSideBetsBar extends StatefulWidget {
     required this.cur,
     required this.rolled,
     required this.over,
+    this.initialPlaced = const [],
   });
+
+  /// Paris déjà placés avant le début de la partie.
+  final List<String> initialPlaced;
 
   final String localId;
   final List<String> names;
@@ -49,7 +123,7 @@ class LocalSideBetsBar extends StatefulWidget {
 }
 
 class _LocalSideBetsBarState extends State<LocalSideBetsBar> {
-  final List<String> placed = [];
+  late final List<String> placed = [...widget.initialPlaced];
 
   Future<void> _open() async {
     final text = await showModalBottomSheet<String>(
@@ -137,7 +211,8 @@ class _BetSheet extends StatefulWidget {
     required this.rolled,
   });
 
-  final String localId;
+  /// null : pari préparé avant la partie (rien n'est débité maintenant).
+  final String? localId;
   final List<String> names;
   final List<String> tokens;
   final int cur;
@@ -194,6 +269,10 @@ class _BetSheetState extends State<_BetSheet> {
     final p = pSeat;
     final o = oSeat;
     if (p == null || o == null || busy) return;
+    if (widget.localId == null) {
+      Navigator.pop(context, PendingBet(type, p, o, amount, over7));
+      return;
+    }
     final pt = p < widget.tokens.length ? widget.tokens[p] : '';
     final ot = o < widget.tokens.length ? widget.tokens[o] : '';
     if (pt.isEmpty || ot.isEmpty) {
@@ -208,7 +287,7 @@ class _BetSheetState extends State<_BetSheet> {
     });
     try {
       await Wallet.localBet(
-        id: widget.localId,
+        id: widget.localId!,
         type: type,
         amount: amount,
         proposerToken: pt,
@@ -297,7 +376,12 @@ class _BetSheetState extends State<_BetSheet> {
               ),
               const SizedBox(height: 4),
               Text(
-                tr('Les deux mises sont débitées tout de suite. '
+                widget.localId == null
+                    ? tr('Le pari sera placé au démarrage de la partie : les '
+                        'deux mises seront débitées à ce moment-là.',
+                        'The bet is placed when the game starts: both stakes '
+                            'are taken then.')
+                    : tr('Les deux mises sont débitées tout de suite. '
                     'On ne peut parier que sur un joueur qui n\'a pas encore lancé.',
                     'Both stakes are taken now. You can only bet on a player '
                         'who has not rolled yet.'),
