@@ -1232,7 +1232,6 @@ class _LocalGameState extends State<_LocalGame> {
         title: 'Deux dés',
         child: Column(
           children: [
-            if (firebaseReady) JackpotLive(stake: widget.stake),
             if (widget.stake > 0 && widget.localId != null)
               LocalSideBetsBar(
                 key: const ValueKey('local_bets'),
@@ -1697,10 +1696,22 @@ class _OnlineHubState extends State<_OnlineHub> {
 }
 
 /// Salle d'une partie en ligne : attente (mises payées), puis jeu.
-class _OnlineRoom extends StatefulWidget {
-  const _OnlineRoom({required this.roomId});
+/// Administrateur : revoit une partie de Deux dés en ligne (lecture seule).
+class DeuxDesSpectator extends StatelessWidget {
+  const DeuxDesSpectator({super.key, required this.roomId});
 
   final String roomId;
+
+  @override
+  Widget build(BuildContext context) =>
+      _OnlineRoom(roomId: roomId, spectate: true);
+}
+
+class _OnlineRoom extends StatefulWidget {
+  const _OnlineRoom({required this.roomId, this.spectate = false});
+
+  final String roomId;
+  final bool spectate;
 
   @override
   State<_OnlineRoom> createState() => _OnlineRoomState();
@@ -1961,18 +1972,23 @@ class _OnlineRoomState extends State<_OnlineRoom> {
 
         final players = _playersOf(d);
         final seat = players.indexWhere((p) => p['uid'] == user.uid);
-        if (seat < 0) return _info('Tu ne fais pas partie de cette partie.');
+        if (seat < 0 && !widget.spectate) {
+          return _info('Tu ne fais pas partie de cette partie.');
+        }
+        if (seat < 0 && d['status'] == 'waiting') {
+          return _info("Cette partie n'a pas encore commencé.");
+        }
         if (d['status'] == 'waiting') {
           return _waiting(d, players, user.uid);
         }
 
         final over = d['over'] == true;
-        if (over) _settle();
+        if (over && seat >= 0) _settle();
         final cur = (d['cur'] as num?)?.toInt() ?? 0;
         final stake = (d['stake'] as num?)?.toInt() ?? 0;
 
         return PopScope(
-          canPop: stake == 0 || over,
+          canPop: stake == 0 || over || seat < 0,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -1984,15 +2000,16 @@ class _OnlineRoomState extends State<_OnlineRoom> {
           },
           child: _Shell(
             title: 'Deux dés · en ligne',
-            trailing: GameChat(
-              collection: 'deuxdes',
-              gameId: widget.roomId,
-              myName: '${players[seat]['name']}',
-            ),
+            trailing: seat < 0
+                ? null
+                : GameChat(
+                    collection: 'deuxdes',
+                    gameId: widget.roomId,
+                    myName: '${players[seat]['name']}',
+                  ),
             child: Column(
               children: [
-                if (firebaseReady) JackpotLive(stake: stake),
-                if (stake > 0)
+                if (stake > 0 && seat >= 0)
                   SideBetsBar(roomId: widget.roomId, uid: user.uid, room: d),
                 Expanded(
                   child: _DiceTable(
@@ -2005,14 +2022,14 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                     spin2: _ints(d['spin2'], const [3, 2, 2]),
                     rolled: d['rolled'] == true,
                     rollN: (d['rollN'] as num?)?.toInt() ?? 0,
-                    canAct: cur == seat && !over,
+                    canAct: seat >= 0 && cur == seat && !over,
                     onRoll: () => _roll(seat),
                     onNext: () => _next(seat),
                     over: over,
                     winners: _ints(d['winners'], const []),
                     stake: stake,
                     jackpot: (d['jackpot'] as num?)?.toInt() ?? 0,
-                    endExtra: over
+                    endExtra: (over && seat >= 0)
                         ? RematchPanel(
                             collection: 'deuxdes',
                             gameId: widget.roomId,
