@@ -380,6 +380,18 @@ class HomeScreen extends StatelessWidget {
                 }),
                 item(Icons.card_giftcard, 'Code promo',
                     const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
+                if (user != null)
+                  item(Icons.logout, 'Se déconnecter', const Color(0xFFE5262B),
+                      () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.of(sheetCtx).pop();
+                    try {
+                      await FirebaseAuth.instance.signOut();
+                    } catch (_) {}
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Tu es déconnecté.')),
+                    );
+                  }),
               ],
             ),
           ),
