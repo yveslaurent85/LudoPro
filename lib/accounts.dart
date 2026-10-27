@@ -63,14 +63,16 @@ class Wallet {
 
   /// Commission en présentiel, sur tous les jeux (Ludo et Deux dés). Doit être
   /// la même que COMMISSION_LOCAL_PERCENT dans worker.js.
-  static const int commissionLocalPercent = 10;
+  static const double commissionLocalPercent = 7.5;
 
   /// Gain du gagnant pour une cagnotte donnée (après commission).
   /// [local] = true : partie en présentiel (commission de 10 %).
-  static int prize(int pot, {bool local = false}) =>
-      pot *
-      (100 - (local ? commissionLocalPercent : commissionPercent)) ~/
-      100;
+  static int prize(int pot, {bool local = false}) {
+    // La commission peut avoir une décimale (7,5 %) : calcul en dixièmes.
+    final tenths =
+        ((local ? commissionLocalPercent : commissionPercent) * 10).round();
+    return pot * (1000 - tenths) ~/ 1000;
+  }
 
   static String format(int amount) => '$amount $currency';
 
@@ -252,6 +254,12 @@ class Wallet {
   /// Administrateur : liste des partenaires et de leurs gains.
   static Future<Map<String, dynamic>> adminPartners() {
     return _call('adminPartners', <String, dynamic>{});
+  }
+
+  /// Transfère [amount] vers un autre joueur (pseudo ou code promo).
+  /// Renvoie { amount, toName, balance }.
+  static Future<Map<String, dynamic>> transfer(String to, int amount) {
+    return _call('transfer', <String, dynamic>{'to': to, 'amount': amount});
   }
 
   /// Partenaire : mes gains, mes filleuls et mon historique.
