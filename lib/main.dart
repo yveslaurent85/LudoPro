@@ -2747,11 +2747,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     }
 
-    // Victoire : seul, tous ses pions arrivés ; en équipe, les deux binômes.
-    final mate = _mateOf(playerIndex);
+    // Victoire : dès qu'un joueur a tous ses pions arrivés, la partie
+    // s'arrête ; en équipe, son équipe (lui et son binôme) gagne.
     final selfDone = player.pawns.every((p) => p == 56);
-    final won = selfDone &&
-        (mate == -1 || players[mate].pawns.every((p) => p == 56));
+    final won = selfDone;
 
     if (won) {
       sfx.win();
@@ -3942,6 +3941,36 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   /// Panneau de fin de match : gagnant + boutons Rejouer / Accueil.
+  /// Gains affichés à la fin d'une partie avec mise : un seul gagnant, ou
+  /// chaque joueur de l'équipe gagnante (la cagnotte est partagée).
+  List<Widget> buildGains(int w) {
+    final winners = <int>[w, if (_mateOf(w) >= 0) _mateOf(w)];
+    final pot = widget.stake * widget.numPlayers;
+    final share = Wallet.prize(pot, local: !isOnline) ~/ winners.length;
+    TextStyle st(double size) => TextStyle(
+          color: const Color(0xFFFFE082),
+          fontSize: size,
+          fontWeight: FontWeight.w800,
+        );
+    return [
+      const SizedBox(height: 8),
+      if (winners.length == 1)
+        Text(
+          tr('Gain : ${Wallet.format(share)}',
+              'Prize: ${Wallet.format(share)}'),
+          textAlign: TextAlign.center,
+          style: st(16),
+        )
+      else
+        for (final c in winners)
+          Text(
+            '🏆 ${nameOf(c)} : +${Wallet.format(share)}',
+            textAlign: TextAlign.center,
+            style: st(15),
+          ),
+    ];
+  }
+
   Widget buildEndPanel() {
     final w = winnerColor;
     final color = w == null ? const Color(0xFFFFC21A) : players[w].color;
@@ -3988,6 +4017,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
+                if (w != null && widget.stake > 0) ...buildGains(w),
                 if (jackpotWon > 0) ...[
                   const SizedBox(height: 6),
                   Text(
