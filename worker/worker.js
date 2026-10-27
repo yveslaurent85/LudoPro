@@ -1025,7 +1025,7 @@ async function settleLocalGame({ uid, data, env }) {
 const BET_MIN = MIN_STAKE;
 const BET_MAX = 5000;
 const BET_MAX_OPEN_PER_PLAYER = 3;
-const BET_MAX_PER_ROOM = 12;
+const BET_MAX_PER_ROOM = 40; // jusqu'à 8 joueurs
 
 const betPath = (roomId, id) => `deuxdes/${roomId}/bets/${id}`;
 const betIndexPath = (roomId) => `deuxdes/${roomId}/betMeta/index`;
@@ -1728,7 +1728,7 @@ async function campayDeposit({ uid, data, env }) {
 
 /** Interroge Campay et crédite le portefeuille si le paiement a réussi (une seule fois). */
 async function settleDeposit(env, id) {
-  const dep = await runTx(env, async (tx) => tx.get(`deposits/${id}`));
+  const dep = await readDoc(env, `deposits/${id}`);
   if (!dep) return { status: 'unknown' };
   if (dep.status !== 'pending' || !dep.campayRef) return { status: dep.status };
 
@@ -1767,10 +1767,10 @@ async function settleDeposit(env, id) {
 /** L'appli demande où en est son dépôt. */
 async function campayDepositStatus({ uid, data, env }) {
   const id = idStr(data.depositId);
-  const dep = id ? await runTx(env, async (tx) => tx.get(`deposits/${id}`)) : null;
+  const dep = id ? await readDoc(env, `deposits/${id}`) : null;
   if (!dep || dep.uid !== uid) throw new HttpError('not-found', 'Dépôt introuvable.');
   const r = await settleDeposit(env, id);
-  const me = await runTx(env, async (tx) => tx.get(`users/${uid}`));
+  const me = await readDoc(env, `users/${uid}`);
   return { status: r.status, balance: balanceOf(me) };
 }
 
