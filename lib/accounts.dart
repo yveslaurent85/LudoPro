@@ -193,6 +193,7 @@ class Wallet {
     required List<String> tokens,
     List<String> names = const [],
     String game = 'unknown',
+    int capturePay = 0,
   }) async {
     final res = await _call(
       'startLocalGame',
@@ -201,6 +202,7 @@ class Wallet {
         'tokens': tokens,
         'names': names,
         'game': game,
+        'capturePay': capturePay,
       },
     );
     return res['id'] as String;
@@ -290,6 +292,27 @@ class Wallet {
   /// Le solde affiché se met à jour tout seul (voir [watch]).
   static Future<Map<String, dynamic>> referralWithdraw() {
     return _call('referralWithdraw', <String, dynamic>{});
+  }
+
+  /// Captures payantes : montant minimum par capture et montants proposés.
+  static const int minCapture = 100;
+  static const List<int> captureAmounts = [100, 200, 500, 1000, 2000];
+
+  /// Capture payante (partie en ligne) : le serveur prend le montant de la
+  /// capture sur le solde du joueur capturé et le verse au joueur qui capture.
+  /// [eventId] évite de payer deux fois la même capture. Renvoie { amount }.
+  static Future<Map<String, dynamic>> captureFee({
+    required String gameId,
+    required String capturerUid,
+    required String victimUid,
+    required String eventId,
+  }) {
+    return _call('captureFee', <String, dynamic>{
+      'gameId': gameId,
+      'capturerUid': capturerUid,
+      'victimUid': victimUid,
+      'eventId': eventId,
+    });
   }
 
   /// Dépôt Mobile Money (Campay) : le joueur reçoit une demande de paiement
