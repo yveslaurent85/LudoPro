@@ -347,6 +347,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   bool startDoor = false; // pions sur la case de départ (pas besoin de 6)
   bool privateRoom = false;
   bool teamMode = false; // 2 contre 2 (4 joueurs seulement)
+  bool capturePay = false; // captures payantes
+  int captureAmount = Wallet.minCapture; // montant par capture
   bool busy = false;
   String? error;
 
@@ -399,10 +401,16 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       error = null;
     });
     try {
-      if (await _myBalance() < stake) {
+      // Captures payantes : il faut aussi pouvoir payer au moins une capture.
+      final needCreate = stake + (capturePay ? captureAmount : 0);
+      if (await _myBalance() < needCreate) {
         if (mounted) {
-          setState(() => error =
-              tr('Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.',
+          setState(() => error = capturePay
+              ? tr('Solde insuffisant : il te faut au moins '
+                  '${Wallet.format(needCreate)} (mise + une capture).',
+                  'Insufficient balance: you need at least '
+                  '${Wallet.format(needCreate)} (stake + one capture).')
+              : tr('Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.',
                   'Insufficient balance: you need at least ${Wallet.format(stake)}.'));
         }
         return;
@@ -422,6 +430,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'startDoor': startDoor,
         'private': privateRoom,
         'teamMode': team,
+        'capturePay': capturePay ? captureAmount : 0,
         'stake': stake,
         'paid': <String>[],
         'pot': 0,
@@ -480,11 +489,18 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     try {
       final ref = _games.doc(id);
       final pre = await ref.get();
-      final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      final stakeNeed = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      final captNeed = (pre.data()?['capturePay'] as num?)?.toInt() ?? 0;
+      final need = stakeNeed + captNeed;
       if (pre.exists && need > 0 && await _myBalance() < need) {
         if (mounted) {
-          setState(() => error =
-              tr('Solde insuffisant : mise de ${Wallet.format(need)}.',
+          setState(() => error = captNeed > 0
+              ? tr('Solde insuffisant : il te faut au moins '
+                  '${Wallet.format(need)} (mise + une capture de '
+                  '${Wallet.format(captNeed)}).',
+                  'Insufficient balance: you need at least '
+                  '${Wallet.format(need)} (stake + one ${Wallet.format(captNeed)} capture).')
+              : tr('Solde insuffisant : mise de ${Wallet.format(need)}.',
                   'Insufficient balance: stake of ${Wallet.format(need)}.'));
         }
         return;
@@ -759,6 +775,48 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     );
   }
 
+  /// Montant payé à chaque capture (à partir de 100 FCFA).
+  Widget _captureSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        Text(
+          tr('Montant par capture (minimum ${Wallet.format(Wallet.minCapture)})',
+              'Amount per capture (minimum ${Wallet.format(Wallet.minCapture)})'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final v in Wallet.captureAmounts)
+              ChoiceChip(
+                label: Text('$v'),
+                selected: captureAmount == v,
+                onSelected: (_) => setState(() => captureAmount = v),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          tr(
+            'Chaque pion capturé : ${Wallet.format(captureAmount)} pris sur '
+            'le solde du joueur capturé (ce qu\'il a, s\'il en a moins).',
+            'Each captured pawn: ${Wallet.format(captureAmount)} taken from '
+            'the captured player\'s balance (whatever they have, if less).',
+          ),
+          style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+        ),
+      ],
+    );
+  }
+
   Widget _codeSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -863,6 +921,14 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 _hint('Position 54 : la partie se joue avec 2 pions chacun.'),
               _stakeSection(),
               const SizedBox(height: 6),
+              _switchRow(
+                'Captures payantes',
+                'Chaque pion capturé rapporte de l\'argent au joueur qui '
+                    'capture, pris sur le solde du joueur capturé.',
+                capturePay,
+                (v) => setState(() => capturePay = v),
+              ),
+              if (capturePay) _captureSection(),
               if (numPlayers == 4)
                 _switchRow(
                   'Jouer en équipe (2 contre 2)',
@@ -1255,7 +1321,9 @@ class OnlineGameRoom extends StatelessWidget {
     final teamOn = d['teamMode'] == true;
     final partners = _partnersOf(d);
     final stake = (d['stake'] as num?)?.toInt() ?? 0;
-    final pot = (d['pot'] as num?)?.toInt() ?? 0;
+    // Cagnotte finale : mise x nombre de joueurs de la salle.
+    final pot = stake * max;
+    final capturePay = (d['capturePay'] as num?)?.toInt() ?? 0;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
     final createdLabel =
         _createdText(d['createdAt']).replaceFirst(' • ', '');
@@ -1313,7 +1381,8 @@ class OnlineGameRoom extends StatelessWidget {
                         ? tr(
                             'Mise : ${Wallet.format(stake)} • '
                             'Cagnotte : ${Wallet.format(pot)} '
-                            '(gain ${Wallet.format(Wallet.prize(pot))})',
+                            '(gain ${Wallet.format(Wallet.prize(pot))})'
+                            '${capturePay > 0 ? '\nCapture payante : ${Wallet.format(capturePay)} par pion' : ''}',
                             'Stake: ${Wallet.format(stake)} • '
                             'Pot: ${Wallet.format(pot)} '
                             '(prize ${Wallet.format(Wallet.prize(pot))})',
