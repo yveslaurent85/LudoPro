@@ -107,6 +107,7 @@ class Sfx {
   void arrive() => _play('sfx_arrive.wav'); // pion arrivé à la maison
   void win() => _play('sfx_win.wav'); // victoire
   void roll() => _play('sfx_roll.wav'); // dé qui roule
+  void six() => _play('sfx_six.wav'); // le dé tombe sur 6
 
   void dispose() {}
 }
@@ -621,6 +622,8 @@ class _SetupScreenState extends State<SetupScreen> {
   bool startOut = false; // pions déjà dehors au départ (pas besoin de 6)
   bool startDoor = false; // pions sur leur case de départ (pas besoin de 6)
   int stake = Wallet.minStake; // mise de chaque joueur (jetons)
+  bool capturePay = false; // captures payantes
+  int captureAmount = Wallet.minCapture; // montant par capture
   bool starting = false;
 
   // --- Mode équipe (2 contre 2) ---------------------------------------
@@ -794,7 +797,9 @@ class _SetupScreenState extends State<SetupScreen> {
     if (!firebaseReady) return null;
     for (final s in seats) {
       final a = accounts[s];
-      if (a != null && a.balance < stake) return a.name;
+      if (a != null && a.balance < stake + (capturePay ? captureAmount : 0)) {
+        return a.name;
+      }
     }
     return null;
   }
@@ -838,6 +843,48 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
           style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
         ),
+        const SizedBox(height: 6),
+        _switch(
+          'Captures payantes',
+          'Chaque pion capturé rapporte de l\'argent au joueur qui capture, '
+              'pris sur le solde du joueur capturé.',
+          capturePay,
+          (v) => setState(() => capturePay = v),
+        ),
+        if (capturePay) ...[
+          Text(
+            tr('Montant par capture (minimum ${Wallet.format(Wallet.minCapture)})',
+                'Amount per capture (minimum ${Wallet.format(Wallet.minCapture)})'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final v in Wallet.captureAmounts)
+                ChoiceChip(
+                  label: Text('$v'),
+                  selected: captureAmount == v,
+                  onSelected: (_) => setState(() => captureAmount = v),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            tr(
+              'Chaque pion capturé : ${Wallet.format(captureAmount)} pris sur '
+              'le solde du joueur capturé (ce qu\'il a, s\'il en a moins).',
+              'Each captured pawn: ${Wallet.format(captureAmount)} taken from '
+              'the captured player\'s balance (whatever they have, if less).',
+            ),
+            style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+          ),
+        ],
       ],
     );
   }
@@ -867,6 +914,7 @@ class _SetupScreenState extends State<SetupScreen> {
           tokens: tokens,
           names: [for (final s in seats) accounts[s]!.name],
           game: 'ludo',
+          capturePay: capturePay ? captureAmount : 0,
         );
       } catch (e) {
         if (!mounted) return;
@@ -894,6 +942,7 @@ class _SetupScreenState extends State<SetupScreen> {
           localGameId: localId,
           accountUids: uids,
           stake: firebaseReady ? stake : 0,
+          capturePayLocal: (firebaseReady && capturePay) ? captureAmount : 0,
           names: [
             for (int i = 0; i < 4; i++)
               accounts[i]?.name ?? nameCtrls[i].text.trim(),
@@ -1464,6 +1513,7 @@ class LudoGame extends StatefulWidget {
     this.localGameId,
     this.accountUids,
     this.stake = 0,
+    this.capturePayLocal = 0,
   });
 
   final int numPlayers;
@@ -1498,6 +1548,9 @@ class LudoGame extends StatefulWidget {
 
   /// Mise de chaque joueur (0 = pas de mise).
   final int stake;
+
+  /// Présentiel : montant payé par capture (0 = captures gratuites).
+  final int capturePayLocal;
 
   @override
   State<LudoGame> createState() => _LudoGameState();
@@ -1620,10 +1673,61 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         (widget.partners != null && a.length == 2 && _mateOf(a[0]) == a[1]);
   }
 
+  /// Captures payantes (montant par pion capturé, 0 = désactivé) : lu dans
+  /// la partie en ligne.
+  late int capturePay = widget.capturePayLocal;
+  int _captureSeq = 0;
+
+  /// Captures payantes : le serveur prend [capturePay] sur le solde de chaque
+  /// joueur capturé et le verse au joueur qui a capturé.
+  void _chargeCaptures(int capturer, List<int> victims) {
+    final o = widget.online;
+    final localId = widget.localGameId;
+    if (capturePay <= 0 || victims.isEmpty) return;
+    if (o != null ? o.spectator : localId == null) return;
+    final gameId = o?.gameId ?? localId!;
+    final capturerUid = _uidOfColor(capturer);
+    if (capturerUid.isEmpty) return;
+    for (final v in victims) {
+      final victimUid = _uidOfColor(v);
+      if (victimUid.isEmpty || victimUid == capturerUid) continue;
+      _captureSeq++;
+      final id = 'c${DateTime.now().microsecondsSinceEpoch}x$_captureSeq';
+      Wallet.captureFee(
+        gameId: gameId,
+        capturerUid: capturerUid,
+        victimUid: victimUid,
+        eventId: id,
+      ).then((r) {
+        if (!mounted) return;
+        final a = r['amount'];
+        if (a is num && a > 0 && (o == null || capturerUid == o.uid)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('+${Wallet.format(a.toInt())} (capture)')),
+          );
+        }
+        // Le capturé n'avait pas assez pour payer : il perd la partie.
+        if (r['eliminated'] == true && !gameOver) {
+          _applyForfeit(
+            v,
+            reason: 'n\'a plus assez de solde pour payer la capture '
+                'et perd la partie',
+          );
+        }
+      }).catchError((Object _) {});
+    }
+  }
+
   /// uid du compte qui joue cette couleur (parties en ligne).
   String _uidOfColor(int color) {
     final o = widget.online;
-    if (o == null) return '';
+    if (o == null) {
+      // Présentiel : compte connecté pour chaque couleur.
+      final u = widget.accountUids;
+      return (u != null && color >= 0 && color < u.length)
+          ? (u[color] ?? '')
+          : '';
+    }
     final seat = baseIdx.indexOf(color);
     return (seat >= 0 && seat < o.uids.length) ? o.uids[seat] : '';
   }
@@ -1887,10 +1991,29 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Pour régler la difficulté, change les deux valeurs ci-dessous
   /// (exprimées en pour mille : 330 = 33 %, 225 = 22,5 %).
   int _randomFace() {
+    // Les captures sont un peu plus fréquentes : quand une face permet de
+    // capturer, elle a 12 % de chances de plus de sortir (120 pour mille).
+    const captureBoost = 120;
+    final capFaces = <int>[
+      for (int f = 1; f <= 6; f++)
+        if (_faceCaptures(f)) f,
+    ];
+    if (capFaces.isNotEmpty && random.nextInt(1000) < captureBoost) {
+      return capFaces[random.nextInt(capFaces.length)];
+    }
     final allHome = players[currentPlayer].pawns.every((x) => x == -1);
     final sixChance = allHome ? 330 : 225;
     if (random.nextInt(1000) < sixChance) return 6;
     return random.nextInt(5) + 1;
+  }
+
+  /// Un des pions du joueur courant capturerait-il avec la face [f] ?
+  bool _faceCaptures(int f) {
+    final n = players[currentPlayer].pawns.length;
+    for (int i = 0; i < n; i++) {
+      if (_captureWith(i, f)) return true;
+    }
+    return false;
   }
 
   /// Valeur du prochain lancer. À l'arrivée, quand il ne reste qu'un pion
@@ -2100,6 +2223,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   void _applyRemoteNow(Map<String, dynamic> d) {
     final before = [for (final p in players) List<int>.from(p.pawns)];
     final wasOver = gameOver;
+    final wasRolled = hasRolled;
+    final seenBefore = _remoteSeen;
+    capturePay = (d['capturePay'] as num?)?.toInt() ?? capturePay;
     setState(() {
       for (int i = 0; i < 4; i++) {
         final l = d['p$i'];
@@ -2139,6 +2265,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       flightPhase = 0;
     });
     _soundsForRemote(before, wasOver);
+    // Un adversaire vient de faire un 6 : son du 6.
+    if (seenBefore && hasRolled && !wasRolled && dice == 6) sfx.six();
     if (gameOver) _settle();
   }
 
@@ -2519,18 +2647,23 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       !isMoving &&
       flightPhase == 0;
 
-  bool canPawnMove(int position) {
-    if (position == -1) return dice == 6;
-    return position + dice <= 56;
+  bool canPawnMove(int position) => _canMoveWith(position, dice);
+
+  bool _canMoveWith(int position, int d) {
+    if (position == -1) return d == 6;
+    return position + d <= 56;
   }
 
   /// Ce coup capture-t-il un pion adverse ? (jamais un pion du binôme)
-  bool moveCaptures(int pawnIndex) {
+  bool moveCaptures(int pawnIndex) => _captureWith(pawnIndex, dice);
+
+  /// Le pion [pawnIndex] du joueur courant capturerait-il avec la face [d] ?
+  bool _captureWith(int pawnIndex, int d) {
     final player = players[currentPlayer];
     final from = player.pawns[pawnIndex];
-    if (!canPawnMove(from)) return false;
+    if (!_canMoveWith(from, d)) return false;
 
-    final target = from == -1 ? 0 : from + dice;
+    final target = from == -1 ? 0 : from + d;
     if (target >= 51) return false;
 
     final absolutePosition = (player.start + target) % 52;
@@ -2642,6 +2775,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       flightPhase = 2;
     });
     sfx.land();
+    if (dice == 6) sfx.six();
 
     final legal = legalMoves();
     final distinct = distinctMoves(legal);
@@ -2783,6 +2917,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     final newPosition = player.pawns[pawnIndex];
     bool captured = false;
+    final victims = <int>[]; // couleur de chaque pion capturé
 
     // Capture possible uniquement sur le circuit commun (0..50), hors cases sûres
     // et jamais contre le binôme.
@@ -2803,6 +2938,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 !_isBlock(p, opponentPosition)) {
               players[p].pawns[i] = -1;
               captured = true;
+              victims.add(p);
             }
           }
         }
@@ -2840,7 +2976,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       } else if (dice == 6 || captured || newPosition == 56) {
         hasRolled = false;
         message = captured
-            ? 'Capture ! Tu rejoues.'
+            ? ((isOnline || widget.localGameId != null) && capturePay > 0
+                ? 'Capture ! +${Wallet.format(capturePay * victims.length)}. '
+                    'Tu rejoues.'
+                : 'Capture ! Tu rejoues.')
             : newPosition == 56
                 ? 'Un pion est arrivé ! Tu rejoues.'
                 : 'Un 6 ! Tu rejoues.';
@@ -2849,6 +2988,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     });
     _pushState();
+    _chargeCaptures(playerIndex, victims);
 
     if (newPosition == 56) {
       final k = arrivalKey;
