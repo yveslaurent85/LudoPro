@@ -1877,13 +1877,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _pushState();
   }
 
-  /// Face aléatoire avec un 6 plus fréquent : 30 % de chances
-  /// (45 % si tous les pions du joueur sont encore à la base).
-  /// Pour régler la difficulté, change les deux pourcentages ci-dessous.
+  /// Face aléatoire avec un 6 plus fréquent : 22,5 % de chances
+  /// (33 % si tous les pions du joueur sont encore à la base).
+  /// Pour régler la difficulté, change les deux valeurs ci-dessous
+  /// (exprimées en pour mille : 330 = 33 %, 225 = 22,5 %).
   int _randomFace() {
     final allHome = players[currentPlayer].pawns.every((x) => x == -1);
-    final sixChance = allHome ? 45 : 30;
-    if (random.nextInt(100) < sixChance) return 6;
+    final sixChance = allHome ? 330 : 225;
+    if (random.nextInt(1000) < sixChance) return 6;
     return random.nextInt(5) + 1;
   }
 
