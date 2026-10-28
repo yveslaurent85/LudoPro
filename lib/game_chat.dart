@@ -631,7 +631,7 @@ Future<void> showEmojiPicker(
                   ),
                   Expanded(
                     child: GridView.count(
-                      crossAxisCount: 4,
+                      crossAxisCount: 3,
                       padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                       children: [
                         for (final e in kTagEmojis)
@@ -852,6 +852,7 @@ class _RoomInfoSheetState extends State<_RoomInfoSheet> {
     final max = (d['maxPlayers'] as num?)?.toInt() ?? players.length;
     final stake = (d['stake'] as num?)?.toInt() ?? 0;
     final pot = (d['pot'] as num?)?.toInt() ?? 0;
+    final capturePay = (d['capturePay'] as num?)?.toInt() ?? 0;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
     final status = '${d['status'] ?? ''}';
     final team = d['teamMode'] == true;
@@ -959,7 +960,10 @@ class _RoomInfoSheetState extends State<_RoomInfoSheet> {
             tr('${Wallet.format(stake)} par joueur',
                 '${Wallet.format(stake)} per player'),
           ),
-          _line(tr('Cagnotte', 'Pot'), Wallet.format(pot)),
+          _line(tr('Cagnotte', 'Pot'), Wallet.format(stake * max)),
+          if (capturePay > 0)
+            _line(tr('Capture payante', 'Paid capture'),
+                tr('${Wallet.format(capturePay)} par pion', '${Wallet.format(capturePay)} per pawn')),
           _line(
             tr('Gain du gagnant', 'Winner gets'),
             Wallet.format(Wallet.prize(stake * max)),
