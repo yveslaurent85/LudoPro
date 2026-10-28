@@ -37,11 +37,14 @@ class _OnlineScreenState extends State<OnlineScreen> {
   final TextEditingController pseudoCtrl = TextEditingController();
   final TextEditingController emailCtrl = TextEditingController();
   final TextEditingController passCtrl = TextEditingController();
+  final TextEditingController promoCtrl = TextEditingController();
 
   bool creating = true;
   bool hidePassword = true;
   bool busy = false;
   String? errorText;
+  String? infoText;
+  bool resetBusy = false;
   User? user;
 
   @override
@@ -57,6 +60,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
     pseudoCtrl.dispose();
     emailCtrl.dispose();
     passCtrl.dispose();
+    promoCtrl.dispose();
     super.dispose();
   }
 
@@ -94,6 +98,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
     final pseudo = pseudoCtrl.text.trim();
     final email = emailCtrl.text.trim();
     final password = passCtrl.text;
+    final promo = promoCtrl.text.trim();
 
     if (creating && pseudo.isEmpty) {
       setState(() => errorText = 'Choisis un pseudo.');
@@ -111,7 +116,12 @@ class _OnlineScreenState extends State<OnlineScreen> {
     setState(() {
       busy = true;
       errorText = null;
+      infoText = null;
     });
+
+    // Gardé avant les « await » : le message reste affiché après le
+    // changement d'écran.
+    final messenger = ScaffoldMessenger.of(context);
 
     try {
       final auth = FirebaseAuth.instance;
@@ -131,6 +141,25 @@ class _OnlineScreenState extends State<OnlineScreen> {
               pseudo: pseudo,
             );
           } catch (_) {}
+          // Code promo (facultatif) : possible uniquement à la création.
+          if (promo.isNotEmpty) {
+            try {
+              await Wallet.applyPromo(promo);
+              messenger.showSnackBar(
+                const SnackBar(content: Text('Code promo validé !')),
+              );
+            } catch (e) {
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Compte créé, mais le code promo n\'a pas été appliqué : '
+                    '${Wallet.errorText(e)}',
+                  ),
+                  duration: const Duration(seconds: 6),
+                ),
+              );
+            }
+          }
         }
       } else {
         await auth.signInWithEmailAndPassword(
@@ -142,6 +171,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
       setState(() {
         user = auth.currentUser;
         passCtrl.clear();
+        promoCtrl.clear();
       });
       // Mode présentiel : connexion réussie, on passe à la préparation.
       final next = widget.onSignedIn;
@@ -160,6 +190,47 @@ class _OnlineScreenState extends State<OnlineScreen> {
       if (mounted) {
         setState(() => busy = false);
       }
+    }
+  }
+
+  /// Mot de passe oublié : envoie un email de récupération à l'adresse saisie.
+  Future<void> _forgotPassword() async {
+    if (!firebaseReady) {
+      setState(() {
+        errorText = "Le serveur en ligne n'est pas configuré dans l'appli.";
+      });
+      return;
+    }
+    final email = emailCtrl.text.trim();
+    if (!email.contains('@')) {
+      setState(() {
+        infoText = null;
+        errorText = 'Entre ton e-mail ci-dessus, puis touche '
+            '« Mot de passe oublié ? ».';
+      });
+      return;
+    }
+    setState(() {
+      resetBusy = true;
+      errorText = null;
+      infoText = null;
+    });
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      setState(() {
+        infoText = 'Un e-mail de récupération a été envoyé à $email. '
+            'Ouvre-le et suis le lien pour choisir un nouveau mot de passe '
+            '(regarde aussi dans les spams).';
+      });
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => errorText = _errorMessage(e.code));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => errorText = 'Une erreur est survenue. Réessaie.');
+    } finally {
+      if (mounted) setState(() => resetBusy = false);
     }
   }
 
@@ -375,6 +446,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
             setState(() {
               creating = true;
               errorText = null;
+              infoText = null;
             });
           }),
           const SizedBox(width: 10),
@@ -382,6 +454,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
             setState(() {
               creating = false;
               errorText = null;
+              infoText = null;
             });
           }),
         ],
@@ -424,6 +497,49 @@ class _OnlineScreenState extends State<OnlineScreen> {
           ),
         ),
       ),
+      if (creating) ...[
+        const SizedBox(height: 12),
+        TextField(
+          controller: promoCtrl,
+          enabled: !busy,
+          style: const TextStyle(color: Colors.white),
+          cursorColor: const Color(0xFFFFC21A),
+          decoration: _field('Code promo (facultatif)', Icons.card_giftcard),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, left: 4),
+          child: Text(
+            'Pseudo de la personne qui t\'a invité. Possible uniquement '
+            'maintenant, à la création du compte.',
+            style: TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+        ),
+      ],
+      if (!creating)
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: (busy || resetBusy) ? null : _forgotPassword,
+            child: Text(
+              resetBusy ? 'Patiente...' : 'Mot de passe oublié ?',
+              style: const TextStyle(
+                color: Color(0xFFFFC21A),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      if (infoText != null) ...[
+        const SizedBox(height: 12),
+        Text(
+          infoText!,
+          style: const TextStyle(
+            color: Color(0xFF7CFFB0),
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
       if (errorText != null) ...[
         const SizedBox(height: 12),
         Text(
