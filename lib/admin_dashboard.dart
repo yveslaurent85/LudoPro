@@ -30,12 +30,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int houseEarned = 0;
   int houseWithdrawn = 0;
   int houseMin = 2500;
+  int houseShare = 0; // part de cet admin en % (50 si 2 admins)
   bool houseCan = false;
   bool houseBusy = false;
 
   // Comptes partenaires
   List<Map<String, dynamic>> partners = [];
-  int partnerPercent = 60;
+  int partnerPercent = 40;
   final TextEditingController partnerCtrl = TextEditingController();
   bool partnerBusy = false;
 
@@ -84,6 +85,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         houseEarned = _i(h['earned']);
         houseWithdrawn = _i(h['withdrawn']);
         houseMin = _i(h['min']) > 0 ? _i(h['min']) : 2500;
+        houseShare = _i(h['sharePercent']);
         houseCan = h['canWithdraw'] == true || houseAvailable >= houseMin;
         partnerView = false;
         loading = false;
@@ -116,7 +118,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final res = await Wallet.adminPartners();
       if (!mounted) return;
       setState(() {
-        partnerPercent = _i(res['percent']) > 0 ? _i(res['percent']) : 60;
+        partnerPercent = _i(res['percent']) > 0 ? _i(res['percent']) : 40;
         partners = [
           for (final p in (res['partners'] as List? ?? const []))
             Map<String, dynamic>.from(p as Map),
@@ -307,7 +309,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '💰 Commissions de Katika',
+            houseShare > 0 && houseShare < 100
+                ? '💰 Ma part des commissions ($houseShare %)'
+                : '💰 Commissions de Katika',
             style: TextStyle(
               color: Colors.white,
               fontSize: 16,
@@ -365,9 +369,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
           const SizedBox(height: 6),
           const Text(
-            'Part nette de Katika : commission moins la part des parrains et '
-            'des partenaires, sur les parties terminées depuis '
-            "l'activation de ce compte.",
+            'Part nette de Katika (commission moins la part des parrains et '
+            'des partenaires), partagée entre les deux administrateurs : '
+            "50 % chacun, sur les parties terminées depuis l'activation de "
+            'ce compte.',
             style: TextStyle(color: Colors.white54, fontSize: 11),
           ),
         ],
@@ -496,6 +501,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final can = pStats['canWithdraw'] == true;
     final min = _i(pStats['min']) > 0 ? _i(pStats['min']) : 100;
     final recent = (pStats['recent'] as List?) ?? const [];
+    final qualified = _i(pStats['qualified']);
+    final needRef = _i(pStats['needReferrals']) > 0
+        ? _i(pStats['needReferrals'])
+        : 25;
+    final needWag = _i(pStats['needWagered']) > 0
+        ? _i(pStats['needWagered'])
+        : 1000;
+    final cond = pStats['conditionsMet'] == true || qualified >= needRef;
     String when(dynamic s) {
       final d = s is String ? DateTime.tryParse(s)?.toLocal() : null;
       if (d == null) return '';
@@ -562,11 +575,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                Text(
+                  'Filleuls actifs : $qualified / $needRef',
+                  style: TextStyle(
+                    color: cond ? const Color(0xFF7CFFB0) : Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: (qualified / needRef).clamp(0.0, 1.0).toDouble(),
+                    minHeight: 8,
+                    backgroundColor: Colors.white24,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      cond ? const Color(0xFF22B14C) : _gold,
+                    ),
+                  ),
+                ),
                 if (!can)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
-                      "Le bouton s'active à partir de ${_money(min)}.",
+                      'Retrait possible quand $needRef filleuls ont chacun '
+                      'misé au moins ${_money(needWag)} (parties et duels), '
+                      "et à partir de ${_money(min)} de gains.",
                       style:
                           const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
