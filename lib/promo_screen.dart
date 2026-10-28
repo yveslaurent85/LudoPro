@@ -17,23 +17,14 @@ class _PromoScreenState extends State<PromoScreen> {
   static const Color _gold = Color(0xFFFFC21A);
 
   bool loading = true;
-  bool sending = false;
   bool withdrawing = false;
   String? error;
-  String? sponsorError;
   Map<String, dynamic> info = {};
-  final TextEditingController codeCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    codeCtrl.dispose();
-    super.dispose();
   }
 
   int _i(dynamic v) => v is num ? v.toInt() : 0;
@@ -56,29 +47,6 @@ class _PromoScreenState extends State<PromoScreen> {
         error = Wallet.errorText(e);
         loading = false;
       });
-    }
-  }
-
-  Future<void> _apply() async {
-    final code = codeCtrl.text.trim();
-    if (code.isEmpty || sending) return;
-    setState(() {
-      sending = true;
-      sponsorError = null;
-    });
-    try {
-      await Wallet.applyPromo(code);
-      if (!mounted) return;
-      codeCtrl.clear();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Code promo validé !')),
-      );
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => sponsorError = Wallet.errorText(e));
-    } finally {
-      if (mounted) setState(() => sending = false);
     }
   }
 
@@ -303,64 +271,15 @@ class _PromoScreenState extends State<PromoScreen> {
     }
     return _card([
       const Text(
-        "J'ai un code de parrain",
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w800,
-        ),
+        'Code de parrain',
+        style: TextStyle(color: Colors.white70, fontSize: 12),
       ),
       const SizedBox(height: 4),
       const Text(
-        'Entre le pseudo de la personne qui t\'a invité. Tu ne peux le faire '
-        "qu'une seule fois.",
+        'Le code de parrain se saisit uniquement à la création du compte '
+        '(facultatif). Il ne peut plus être ajouté après.',
         style: TextStyle(color: Colors.white70, fontSize: 12),
       ),
-      const SizedBox(height: 10),
-      Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: codeCtrl,
-              enabled: !sending,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Pseudo du parrain',
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            height: 52,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF22B14C),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: sending ? null : _apply,
-              child: Text(sending ? '...' : 'Valider'),
-            ),
-          ),
-        ],
-      ),
-      if (sponsorError != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            sponsorError!,
-            style: const TextStyle(
-              color: Color(0xFFFF8A80),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
     ]);
   }
 
