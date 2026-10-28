@@ -23,6 +23,8 @@
 
 const WELCOME = 10000; // jetons offerts à chaque compte
 const MIN_STAKE = 100; // mise minimale
+const MIN_CAPTURE = 100; // capture payante : montant minimum par pion
+const MAX_CAPTURE = 5000; // et maximum
 const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
 const COMMISSION_LOCAL_PERCENT = 7.5; // présentiel (Ludo et Deux dés)
 const TRANSFER_MIN = 25; // transfert de compte à compte
@@ -804,8 +806,15 @@ async function payStake({ uid, data, env }) {
       throw new HttpError('failed-precondition', 'Mise invalide.');
     }
     const me = await tx.get(`users/${uid}`);
-    if (stake > 0 && balanceOf(me) < stake) {
-      throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    // Captures payantes : il faut aussi pouvoir payer au moins une capture.
+    const capNeed = g.col === 'games' ? capFeeOf(d) : 0;
+    if ((stake > 0 || capNeed > 0) && balanceOf(me) < stake + capNeed) {
+      throw new HttpError(
+        'failed-precondition',
+        capNeed > 0
+          ? `Solde insuffisant : il faut au moins ${stake + capNeed} FCFA (mise + une capture de ${capNeed} FCFA).`
+          : 'Solde insuffisant.',
+      );
     }
 
     const max = intOr(d.maxPlayers, 2);
@@ -822,6 +831,87 @@ async function payStake({ uid, data, env }) {
     });
   });
   return { ok: true };
+}
+
+/** Montant d'une capture payante fixé à la création de la partie (0 = aucun). */
+function capFeeOf(d) {
+  const c = intOr(d && d.capturePay, 0);
+  return c >= MIN_CAPTURE ? Math.min(c, MAX_CAPTURE) : 0;
+}
+
+/** Capture payante (Ludo en ligne) : le montant fixé à la création de la
+ *  partie passe du solde du joueur capturé à celui du joueur qui capture
+ *  (au plus ce que le joueur capturé possède). Chaque capture n'est payée
+ *  qu'une fois (eventId) et leur nombre est plafonné par le nombre de coups
+ *  joués dans la partie. */
+async function captureFee({ uid, data, env }) {
+  const gameId = idOf(data);
+  const capturer = typeof data.capturerUid === 'string' ? data.capturerUid : '';
+  const victim = typeof data.victimUid === 'string' ? data.victimUid : '';
+  const eventId = typeof data.eventId === 'string' ? data.eventId : '';
+  if (!gameId || !capturer || !victim || capturer === victim || !/^[A-Za-z0-9]{6,48}$/.test(eventId)) {
+    throw new HttpError('invalid-argument', 'Capture invalide.');
+  }
+  return runTx(env, async (tx) => {
+    // Partie en ligne (games) ou en présentiel (localGames).
+    let g = await locate(tx, gameId);
+    let local = false;
+    if (!g) {
+      const ld = await tx.get(`localGames/${gameId}`);
+      if (ld) {
+        g = { path: `localGames/${gameId}`, data: ld, col: 'localGames' };
+        local = true;
+      }
+    }
+    if (!g || (!local && g.col !== 'games')) {
+      throw new HttpError('not-found', "Cette partie n'existe plus.");
+    }
+    const d = g.data;
+    if (local && (d.hostUid !== uid || d.settled === true)) {
+      throw new HttpError('permission-denied', 'Seul le joueur principal peut déclarer une capture.');
+    }
+    const uids = Array.isArray(d.uids) ? d.uids : [];
+    if (!uids.includes(uid) || !uids.includes(capturer) || !uids.includes(victim)) {
+      throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
+    }
+    if (d.status !== 'playing') {
+      throw new HttpError('failed-precondition', "La partie n'est pas en cours.");
+    }
+    const fee = capFeeOf(d);
+    if (fee <= 0) return { amount: 0 };
+
+    const evPath = `${g.path}/captures/${eventId}`;
+    const done = await tx.get(evPath);
+    if (done) return { amount: intOr(done.amount, 0), eliminated: done.eliminated === true };
+
+    // Plafond : un coup capturant = au moins 2 mises à jour de la partie.
+    const metaPath = `${g.path}/captures/meta`;
+    const meta = await tx.get(metaPath);
+    const count = intOr(meta && meta.count, 0);
+    const cap = local ? 300 : Math.floor(intOr(d.rev, 0) / 2) + 2;
+    if (count + 1 > cap) {
+      throw new HttpError('failed-precondition', 'Trop de captures pour cette partie.');
+    }
+
+    const v = await tx.get(`users/${victim}`);
+    const c = await tx.get(`users/${capturer}`);
+    if (!c) throw new HttpError('not-found', 'Compte introuvable.');
+    const amount = Math.max(0, Math.min(fee, balanceOf(v)));
+    // Le capturé n'a pas assez pour payer toute la capture : il perd la partie.
+    const eliminated = balanceOf(v) < fee;
+
+    tx.write(evPath, {
+      create: true,
+      set: { amount, capturer, victim, eliminated },
+      serverTime: ['createdAt'],
+    });
+    tx.write(metaPath, { incr: { count: 1 } });
+    if (amount > 0) {
+      tx.write(`users/${victim}`, { incr: { balance: -amount } });
+      tx.write(`users/${capturer}`, { incr: { balance: amount } });
+    }
+    return { amount, eliminated };
+  });
 }
 
 /** Quitte une salle d'attente : mise remboursée. L'hôte annule la partie et
@@ -946,6 +1036,8 @@ async function startLocalGame({ uid: hostUid, data, env }) {
     throw new HttpError('invalid-argument', 'Nombre de joueurs invalide.');
   }
   const names = Array.isArray(data.names) ? data.names.map(String) : [];
+  const capAsked = intOr(data.capturePay, 0);
+  const capturePay = capAsked >= MIN_CAPTURE ? Math.min(capAsked, MAX_CAPTURE) : 0;
 
   const uids = [];
   for (const t of tokens) uids.push(await verifyIdToken(t, env));
@@ -957,7 +1049,7 @@ async function startLocalGame({ uid: hostUid, data, env }) {
     if (stake > 0) {
       for (let i = 0; i < uids.length; i++) {
         const u = await tx.get(`users/${uids[i]}`);
-        if (balanceOf(u) < stake) {
+        if (balanceOf(u) < stake + capturePay) {
           throw new HttpError(
             'failed-precondition',
             `Solde insuffisant : ${names[i] || 'un joueur'}`,
@@ -974,6 +1066,7 @@ async function startLocalGame({ uid: hostUid, data, env }) {
         names,
         game,
         stake,
+        capturePay,
         pot: stake * uids.length,
         status: 'playing',
         settled: false,
@@ -2187,6 +2280,7 @@ const HANDLERS = {
   applyPromo,
   referralInfo,
   payStake,
+  captureFee,
   leaveGame,
   settleGame,
   startLocalGame,
