@@ -130,7 +130,7 @@ class _PromoScreenState extends State<PromoScreen> {
   Widget _myCode() {
     final code = info['code'] as String?;
     final reason = info['reason'] as String?;
-    final percent = _i(info['percent']) == 0 ? 10 : _i(info['percent']);
+    final percent = _i(info['percent']) == 0 ? 20 : _i(info['percent']);
 
     return _card([
       const Text(
