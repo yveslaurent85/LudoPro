@@ -29,10 +29,12 @@ const TRANSFER_MIN = 25; // transfert de compte à compte
 const TRANSFER_MAX = 250000;
 const JACKPOT_ENABLED = false; // jackpot désactivé : toute la commission reste à Katika
 const JACKPOT_PERCENT = 0; // part de la commission versée au jackpot (inutilisée)
-const PARTNER_PERCENT = 60; // part du partenaire sur (commission - part du parrain)
+const PARTNER_PERCENT = 40; // part du partenaire sur (commission - part du parrain)
+const PARTNER_MIN_REFERRALS = 25; // retrait partenaire : nombre de filleuls actifs requis
+const PARTNER_MIN_WAGERED = 1000; // ... chacun ayant misé au moins ce total (FCFA) : mises des parties + paris (Duel, Défi 7)
 const PARTNER_WITHDRAW_MIN = 100; // gains de partenaire minimum pour les transférer vers le solde
 const REVIVE_AFTER_MIN = 180; // parties bloquées depuis plus de 3 h
-const REFERRAL_PERCENT = 10; // part de la commission reversée au parrain
+const REFERRAL_PERCENT = 20; // part de la commission reversée au parrain (affilié)
 const JACKPOT_MIN = 550; // le jackpot se déclenche entre ces deux montants
 const JACKPOT_MAX = 650;
 const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir les retirer (FCFA)
@@ -555,9 +557,18 @@ async function payOut(
     mode,
   });
 
+  // Total misé par chaque joueur (users/{uid}.wagered) : sert à savoir quels
+  // filleuls sont « actifs » pour le retrait des partenaires.
+  const toCount = new Set(participants.filter((u) => typeof u === 'string'));
   for (const uid of winners) {
-    tx.write(`users/${uid}`, { incr: { balance: prizeShare + jackpotShare } });
+    tx.write(`users/${uid}`, {
+      incr: {
+        balance: prizeShare + jackpotShare,
+        ...(toCount.delete(uid) ? { wagered: stake } : {}),
+      },
+    });
   }
+  for (const uid of toCount) tx.write(`users/${uid}`, { incr: { wagered: stake } });
   // Part nette de Katika : commission - jackpot - parrains - partenaires.
   const house = Math.max(0, commission - jackpotCut - referral - partner);
   return { jackpot: jackpotShare * n, referral, partner, house };
@@ -1314,6 +1325,9 @@ async function sideBetSync({ uid, data, env }) {
         tx.write(path, { set: { status: 'settled', result: 'refund' }, serverTime: ['closedAt'] });
       } else {
         tx.write(`users/${winner}`, { incr: { balance: b.prize } });
+        // Les paris (Duel, Défi 7) comptent dans le total misé des deux joueurs.
+        tx.write(`users/${b.proposerUid}`, { incr: { wagered: b.amount } });
+        tx.write(`users/${b.opponentUid}`, { incr: { wagered: b.amount } });
         tx.write(`deuxdes/${roomId}`, { incr: { betCommission: 2 * b.amount - b.prize } });
         houseBets += 2 * b.amount - b.prize;
         tx.write(path, {
@@ -1448,6 +1462,9 @@ function settleLocalBets(tx, bets, players, scores, names) {
       tx.write(path, { set: { status: 'settled', result: 'refund' }, serverTime: ['closedAt'] });
     } else {
       tx.write(`users/${winner}`, { incr: { balance: b.prize } });
+      // Les paris (Duel, Défi 7) comptent dans le total misé des deux joueurs.
+      tx.write(`users/${b.proposerUid}`, { incr: { wagered: b.amount } });
+      tx.write(`users/${b.opponentUid}`, { incr: { wagered: b.amount } });
       tx.write(path, {
         set: { status: 'settled', result: 'win', winnerUid: winner },
         serverTime: ['closedAt'],
@@ -1937,6 +1954,16 @@ async function adminPartners({ uid, env }) {
   };
 }
 
+/** Filleuls directs d'un partenaire : total, et nombre de filleuls « actifs »
+ *  (ceux qui ont misé au moins PARTNER_MIN_WAGERED FCFA au total). */
+async function partnerQualified(env, uid) {
+  const kids = await queryDocs(env, 'users', eqFilter('referrerUid', uid), 500);
+  const qualified = kids.filter(
+    (k) => Math.max(0, intOr(k.wagered, 0)) >= PARTNER_MIN_WAGERED,
+  ).length;
+  return { total: kids.length, qualified };
+}
+
 /** Partenaire : ses gains, ses filleuls et son historique. */
 async function partnerStats({ uid, env }) {
   const me = await readDoc(env, `users/${uid}`);
@@ -1959,6 +1986,8 @@ async function partnerStats({ uid, env }) {
   const list = await queryDocs(env, 'partnerEarnings', eqFilter('partner', uid), 300);
   list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const available = Math.max(0, intOr(me.partnerBalance, 0));
+  const { qualified } = await partnerQualified(env, uid);
+  const conditionsMet = qualified >= PARTNER_MIN_REFERRALS;
   return {
     code: String(me.promoCode || me.pseudo || ''),
     percent: PARTNER_PERCENT,
@@ -1966,7 +1995,12 @@ async function partnerStats({ uid, env }) {
     available,
     withdrawn: Math.max(0, intOr(me.partnerWithdrawn, 0)),
     min: PARTNER_WITHDRAW_MIN,
-    canWithdraw: available >= PARTNER_WITHDRAW_MIN,
+    canWithdraw: available >= PARTNER_WITHDRAW_MIN && conditionsMet,
+    // Conditions de retrait : 25 filleuls ayant chacun misé au moins 1000 FCFA
+    qualified,
+    needReferrals: PARTNER_MIN_REFERRALS,
+    needWagered: PARTNER_MIN_WAGERED,
+    conditionsMet,
     referrals,
     games: list.length,
     recent: list.slice(0, 50).map((e) => ({
@@ -1979,6 +2013,16 @@ async function partnerStats({ uid, env }) {
 
 /** Partenaire : transfère ses gains vers son solde principal. */
 async function partnerWithdraw({ uid, env }) {
+  // Condition : au moins PARTNER_MIN_REFERRALS filleuls ayant chacun misé au
+  // moins PARTNER_MIN_WAGERED FCFA au total.
+  const { qualified } = await partnerQualified(env, uid);
+  if (qualified < PARTNER_MIN_REFERRALS) {
+    throw new HttpError(
+      'failed-precondition',
+      `Retrait possible quand ${PARTNER_MIN_REFERRALS} filleuls ont chacun misé au moins ` +
+        `${PARTNER_MIN_WAGERED} FCFA (actuellement ${qualified}).`,
+    );
+  }
   return runTx(env, async (tx) => {
     const me = await tx.get(`users/${uid}`);
     if (!me || me.partner !== true) {
