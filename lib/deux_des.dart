@@ -2060,7 +2060,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     final max = (d['maxPlayers'] as num).toInt();
     final isHost = d['hostUid'] == uid;
     final stake = (d['stake'] as num?)?.toInt() ?? 0;
-    final pot = (d['pot'] as num?)?.toInt() ?? 0;
+    // Cagnotte finale : mise x nombre de joueurs de la salle.
+    final pot = stake * max;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
     final createdLabel =
         _createdText(d['createdAt']).replaceFirst(' • ', '');
