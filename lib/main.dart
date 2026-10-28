@@ -1575,6 +1575,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _presenceSub;
   bool _proxy = false; // vrai pendant qu'on joue à la place d'un absent
 
+  /// Emojis envoyés aux joueurs (parties en ligne) : l'emoji s'affiche
+  /// devant le joueur touché, chez tout le monde.
+  EmojiReactions? _reactions;
+
   /// Ma connexion fonctionne (sinon je ne joue pas : mes écritures seraient
   /// en attente et écraseraient la partie au retour).
   bool get _connected =>
@@ -1587,6 +1591,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// a et b sont-ils dans la même équipe ?
   bool _isMate(int a, int b) =>
       widget.partners != null && widget.partners![a] == b;
+
+  /// Deux pions (ou plus) du même joueur sur la même case forment un bloc :
+  /// ils sont protégés de la capture, comme les pions d'une même équipe.
+  bool _isBlock(int p, int pos) =>
+      players[p].pawns.where((x) => x == pos).length >= 2;
 
   /// « Anna & Paul » en mode équipe, sinon juste le nom.
   String teamLabel(int c) {
@@ -1604,6 +1613,28 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final a = activeIdx;
     return a.length == 1 ||
         (widget.partners != null && a.length == 2 && _mateOf(a[0]) == a[1]);
+  }
+
+  /// uid du compte qui joue cette couleur (parties en ligne).
+  String _uidOfColor(int color) {
+    final o = widget.online;
+    if (o == null) return '';
+    final seat = baseIdx.indexOf(color);
+    return (seat >= 0 && seat < o.uids.length) ? o.uids[seat] : '';
+  }
+
+  /// On touche un joueur : la grille d'emojis s'ouvre à côté de lui, et
+  /// l'emoji choisi s'affiche devant lui chez tous les joueurs.
+  void _tagPlayer(BuildContext anchor, int color) {
+    final r = _reactions;
+    if (r == null) return;
+    final target = _uidOfColor(color);
+    if (target.isEmpty) return;
+    showEmojiPicker(
+      anchor,
+      title: tr('Emoji pour ${nameOf(color)}', 'Emoji for ${nameOf(color)}'),
+      onPick: (e) => r.send(target, e),
+    );
   }
 
   /// Nom affiché pour une couleur (pseudo choisi, pseudo en ligne,
@@ -2424,6 +2455,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         players[i].avatar = av[i];
       }
     }
+    if (isOnline && !isSpectator) {
+      _reactions = EmojiReactions(
+        collection: 'games',
+        gameId: widget.online!.gameId,
+        myName: nameOf(_myColor),
+      );
+    }
     _listenOnline();
     _startPresence();
     _autoTimer = Timer.periodic(
@@ -2445,6 +2483,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _sub?.cancel();
     _beat?.cancel();
     _presenceSub?.cancel();
+    _reactions?.dispose();
     _autoTimer?.cancel();
     _pulse.dispose();
     _flight.dispose();
@@ -2496,7 +2535,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       for (final pos in players[p].pawns) {
         if (pos >= 0 &&
             pos < 51 &&
-            (players[p].start + pos) % 52 == absolutePosition) {
+            (players[p].start + pos) % 52 == absolutePosition &&
+            !_isBlock(p, pos)) {
           return true;
         }
       }
@@ -2753,7 +2793,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             if (opponentPosition >= 0 &&
                 opponentPosition < 51 &&
                 (players[p].start + opponentPosition) % 52 ==
-                    absolutePosition) {
+                    absolutePosition &&
+                !_isBlock(p, opponentPosition)) {
               players[p].pawns[i] = -1;
               captured = true;
             }
@@ -3277,6 +3318,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ],
             ),
           ),
+          // Salon d'attente : toutes les informations de la partie
+          if (isOnline) ...[
+            RoomInfoButton(
+              collection: 'games',
+              gameId: widget.online!.gameId,
+            ),
+            const SizedBox(width: 4),
+          ],
           // Chat de la partie en ligne (messages et emojis, sans quitter le jeu)
           if (isOnline && !isSpectator) ...[
             GameChat(
@@ -3411,7 +3460,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
 
     // Anneau de progression autour de l'avatar
-    final avatarWithRing = SizedBox(
+    final ringCore = SizedBox(
       width: 52,
       height: 52,
       child: Stack(
@@ -3432,6 +3481,38 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             ),
           ),
           avatar,
+        ],
+      ),
+    );
+
+    // Emoji reçu : il s'affiche devant le joueur. On touche l'avatar d'un
+    // joueur pour lui envoyer un emoji (parties en ligne).
+    final reactions = _reactions;
+    final avatarWithRing = SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Builder(
+            builder: (ctx) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: reactions != null ? () => _tagPlayer(ctx, index) : null,
+              child: ringCore,
+            ),
+          ),
+          if (reactions != null)
+            Positioned(
+              top: -18,
+              left: avatarOnRight ? -16 : null,
+              right: avatarOnRight ? null : -16,
+              child: EmojiBubble(
+                reactions: reactions,
+                uid: _uidOfColor(index),
+                size: 34,
+              ),
+            ),
         ],
       ),
     );
