@@ -382,7 +382,15 @@ class _DiceTable extends StatefulWidget {
     this.endExtra,
     this.onTimeout,
     this.onForce,
+    this.uids = const [],
+    this.reactions,
   });
+
+  /// uid de chaque joueur (parties en ligne) : sert à envoyer un emoji.
+  final List<String> uids;
+
+  /// Emojis envoyés aux joueurs : ils s'affichent devant le joueur.
+  final EmojiReactions? reactions;
 
   /// Le joueur n'a pas joué dans les 30 s : cet appareil joue à sa place
   /// (appelé seulement quand [canAct] est vrai).
@@ -774,7 +782,22 @@ class _DiceTableState extends State<_DiceTable>
                     return Column(
                       children: [
                         for (int i = 0; i < widget.names.length; i++)
-                          Container(
+                          Builder(
+                            builder: (rowCtx) => GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              // On touche un joueur pour lui envoyer un emoji.
+                              onTap: (widget.reactions != null &&
+                                      i < widget.uids.length)
+                                  ? () => showEmojiPicker(
+                                        rowCtx,
+                                        title: tr(
+                                            'Emoji pour ${widget.names[i]}',
+                                            'Emoji for ${widget.names[i]}'),
+                                        onPick: (e) => widget.reactions!
+                                            .send(widget.uids[i], e),
+                                      )
+                                  : null,
+                              child: Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 10),
@@ -804,6 +827,20 @@ class _DiceTableState extends State<_DiceTable>
                                     ),
                                   ),
                                 ),
+                                // Emoji reçu : il s'affiche devant le joueur.
+                                if (widget.reactions != null &&
+                                    i < widget.uids.length)
+                                  SizedBox(
+                                    width: 36,
+                                    height: 30,
+                                    child: Center(
+                                      child: EmojiBubble(
+                                        reactions: widget.reactions!,
+                                        uid: widget.uids[i],
+                                        size: 28,
+                                      ),
+                                    ),
+                                  ),
                                 Text(
                                   // Le score du joueur qui lance reste caché
                                   // pendant que les dés roulent.
@@ -817,6 +854,8 @@ class _DiceTableState extends State<_DiceTable>
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
                             ),
                           ),
                       ],
@@ -1917,6 +1956,15 @@ class _OnlineRoomState extends State<_OnlineRoom> {
   bool _settled = false;
   int _tries = 0;
 
+  /// Emojis envoyés aux joueurs (créé quand on est assis à la table).
+  EmojiReactions? _reactions;
+
+  @override
+  void dispose() {
+    _reactions?.dispose();
+    super.dispose();
+  }
+
   DocumentReference<Map<String, dynamic>> get _ref => _rooms.doc(widget.roomId);
 
   Widget _info(String text, {bool loading = false}) {
@@ -2188,6 +2236,13 @@ class _OnlineRoomState extends State<_OnlineRoom> {
           return _waiting(d, players, user.uid);
         }
 
+        if (seat >= 0 && _reactions == null) {
+          _reactions = EmojiReactions(
+            collection: 'deuxdes',
+            gameId: widget.roomId,
+            myName: '${players[seat]['name']}',
+          );
+        }
         final over = d['over'] == true;
         if (over && seat >= 0) _settle();
         final cur = (d['cur'] as num?)?.toInt() ?? 0;
@@ -2206,13 +2261,24 @@ class _OnlineRoomState extends State<_OnlineRoom> {
           },
           child: _Shell(
             title: 'Deux dés · en ligne',
-            trailing: seat < 0
-                ? null
-                : GameChat(
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Salon d'attente : toutes les informations de la partie
+                RoomInfoButton(
+                  collection: 'deuxdes',
+                  gameId: widget.roomId,
+                ),
+                if (seat >= 0) ...[
+                  const SizedBox(width: 6),
+                  GameChat(
                     collection: 'deuxdes',
                     gameId: widget.roomId,
                     myName: '${players[seat]['name']}',
                   ),
+                ],
+              ],
+            ),
             child: Column(
               children: [
                 if (stake > 0 && seat >= 0)
@@ -2220,6 +2286,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                 Expanded(
                   child: _DiceTable(
                     names: [for (final p in players) '${p['name']}'],
+                    uids: [for (final p in players) '${p['uid']}'],
+                    reactions: seat >= 0 ? _reactions : null,
                     scores: _ints(d['scores'], const []),
                     cur: cur,
                     d1: (d['d1'] as num?)?.toInt() ?? 1,
