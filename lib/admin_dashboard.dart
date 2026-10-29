@@ -309,7 +309,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             houseShare > 0 && houseShare < 100
                 ? '💰 Ma part des commissions ($houseShare %)'
                 : '💰 Commissions de Katika',
