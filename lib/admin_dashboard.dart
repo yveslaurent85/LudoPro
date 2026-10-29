@@ -1,9 +1,9 @@
-
 import 'package:flutter/material.dart';
 
 import 'accounts.dart';
 import 'deux_des.dart';
 import 'online.dart';
+import 'player_stats.dart';
 
 /// Tableau de bord administrateur : toutes les parties (Ludo et Deux dés,
 /// en ligne et en présentiel), les commissions, les jackpots.
@@ -26,12 +26,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int limit = 150;
   Map<String, dynamic> fetched = {};
 
-  // Commissions de Katika
+  // Commissions de Katika (compte retirable vers le solde de l'admin)
   int houseAvailable = 0;
   int houseEarned = 0;
   int houseWithdrawn = 0;
   int houseMin = 2500;
-  int houseShare = 0;
+  int houseShare = 0; // part de cet admin en % (50 si 2 admins)
   bool houseCan = false;
   bool houseBusy = false;
 
@@ -41,15 +41,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final TextEditingController partnerCtrl = TextEditingController();
   bool partnerBusy = false;
 
-  // Vue partenaire
+  // Vue partenaire (compte non administrateur ayant le statut de partenaire)
   bool partnerView = false;
   Map<String, dynamic> pStats = {};
   bool pBusy = false;
 
   // Filtres
-  String kind = 'all';
-  String mode = 'all';
-  int days = 0;
+  String kind = 'all'; // all | ludo | deuxdes
+  String mode = 'all'; // all | online | local
+  int days = 0; // 0 = tout, 1 = aujourd'hui, 7, 30
 
   @override
   void initState() {
@@ -68,52 +68,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
       loading = true;
       error = null;
     });
-
     try {
       final res = await Wallet.adminStats(limit: limit);
       final list = (res['rows'] as List?) ?? const [];
-
       if (!mounted) return;
-
       setState(() {
-        rows = [
-          for (final r in list)
-            Map<String, dynamic>.from(r as Map),
-        ];
-
+        rows = [for (final r in list) Map<String, dynamic>.from(r as Map)];
         pool = _i(res['pool']);
-        users = res['users'] is num
-            ? (res['users'] as num).toInt()
-            : null;
-
+        users = res['users'] is num ? (res['users'] as num).toInt() : null;
         fetched = res['fetched'] is Map
             ? Map<String, dynamic>.from(res['fetched'] as Map)
             : {};
-
         final h = res['house'] is Map
             ? Map<String, dynamic>.from(res['house'] as Map)
             : <String, dynamic>{};
-
         houseAvailable = _i(h['available']);
         houseEarned = _i(h['earned']);
         houseWithdrawn = _i(h['withdrawn']);
         houseMin = _i(h['min']) > 0 ? _i(h['min']) : 2500;
         houseShare = _i(h['sharePercent']);
-        houseCan =
-            h['canWithdraw'] == true || houseAvailable >= houseMin;
-
+        houseCan = h['canWithdraw'] == true || houseAvailable >= houseMin;
         partnerView = false;
         loading = false;
       });
-
       _loadPartners();
     } catch (e) {
-      // Si ce n'est pas un administrateur, vérifier le compte partenaire.
+      if (!mounted) return;
+      // Pas administrateur : peut-être un compte partenaire.
       try {
         final ps = await Wallet.partnerStats();
-
         if (!mounted) return;
-
         setState(() {
           partnerView = true;
           pStats = ps;
@@ -122,7 +106,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       } catch (_) {
         if (!mounted) return;
-
         setState(() {
           error = Wallet.errorText(e);
           loading = false;
@@ -134,13 +117,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Future<void> _loadPartners() async {
     try {
       final res = await Wallet.adminPartners();
-
       if (!mounted) return;
-
       setState(() {
-        partnerPercent =
-            _i(res['percent']) > 0 ? _i(res['percent']) : 40;
-
+        partnerPercent = _i(res['percent']) > 0 ? _i(res['percent']) : 40;
         partners = [
           for (final p in (res['partners'] as List? ?? const []))
             Map<String, dynamic>.from(p as Map),
@@ -151,92 +130,62 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   void _snack(String m) {
     if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(m)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  /// Ajoute ou retire un partenaire grâce à son code promo.
+  /// Administrateur : ajoute ou retire un partenaire grâce à son code promo.
   Future<void> _setPartner(String code, bool on) async {
     final c = code.trim();
-
     if (c.isEmpty || partnerBusy) return;
-
     setState(() => partnerBusy = true);
-
     try {
       await Wallet.adminSetPartner(c, on);
-
       if (on) partnerCtrl.clear();
-
       _snack(on ? 'Partenaire ajouté.' : 'Partenaire retiré.');
-
       await _loadPartners();
     } catch (e) {
       _snack(Wallet.errorText(e));
     } finally {
-      if (mounted) {
-        setState(() => partnerBusy = false);
-      }
+      if (mounted) setState(() => partnerBusy = false);
     }
   }
 
-  /// Transfère les gains du partenaire vers son solde principal.
+  /// Partenaire : transfère ses gains vers son solde principal.
   Future<void> _partnerWithdraw() async {
     if (pBusy) return;
-
     setState(() => pBusy = true);
-
     try {
       final r = await Wallet.partnerWithdraw();
-
       _snack('${_money(_i(r['amount']))} ajoutés à ton solde !');
-
       final ps = await Wallet.partnerStats();
-
-      if (mounted) {
-        setState(() => pStats = ps);
-      }
+      if (mounted) setState(() => pStats = ps);
     } catch (e) {
       _snack(Wallet.errorText(e));
     } finally {
-      if (mounted) {
-        setState(() => pBusy = false);
-      }
+      if (mounted) setState(() => pBusy = false);
     }
   }
 
   /// Transfère les commissions de Katika vers le solde de l'administrateur.
   Future<void> _withdrawHouse() async {
     if (houseBusy) return;
-
     setState(() => houseBusy = true);
-
     try {
       final res = await Wallet.adminHouseWithdraw();
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '${_money(_i(res['amount']))} ajoutés à ton solde !',
-          ),
+          content: Text('${_money(_i(res['amount']))} ajoutés à ton solde !'),
         ),
       );
-
       await _load();
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(Wallet.errorText(e))),
       );
     } finally {
-      if (mounted) {
-        setState(() => houseBusy = false);
-      }
+      if (mounted) setState(() => houseBusy = false);
     }
   }
 
@@ -247,14 +196,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
   String _money(int v) {
     final s = v.abs().toString();
     final b = StringBuffer();
-
     for (int i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) {
-        b.write(' ');
-      }
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(' ');
       b.write(s[i]);
     }
-
     return '${v < 0 ? '-' : ''}$b ${Wallet.currency}';
   }
 
@@ -265,42 +210,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   String _dateText(Map<String, dynamic> r) {
     final d = _date(r);
-
     if (d == null) return 'date inconnue';
-
     String two(int n) => n < 10 ? '0$n' : '$n';
-
-    return '${two(d.day)}/${two(d.month)}/${d.year} '
-        '${two(d.hour)}:${two(d.minute)}';
+    return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
   }
 
   bool _keep(Map<String, dynamic> r) {
     if (kind != 'all' && r['kind'] != kind) return false;
     if (mode != 'all' && r['mode'] != mode) return false;
-
     if (days > 0) {
       final d = _date(r);
-
       if (d == null) return false;
-
       final now = DateTime.now();
       final since = days == 1
           ? DateTime(now.year, now.month, now.day)
           : now.subtract(Duration(days: days));
-
       if (d.isBefore(since)) return false;
     }
-
     return true;
   }
 
   String _kindLabel(String k) =>
       k == 'ludo' ? 'Ludo' : (k == 'deuxdes' ? 'Deux dés' : 'Autre');
 
-  String _modeLabel(String m) =>
-      m == 'online' ? 'En ligne' : 'Présentiel';
+  String _modeLabel(String m) => m == 'online' ? 'En ligne' : 'Présentiel';
 
-  // --- Éléments d'interface -------------------------------------------
+  // --- Éléments d'interface ----------------------------------------------
 
   Widget _chip(String label, bool selected, VoidCallback onTap) {
     return ChoiceChip(
@@ -318,32 +253,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 4),
-          Wrap(
-            spacing: 8,
-            runSpacing: 2,
-            children: chips,
-          ),
+          Wrap(spacing: 8, runSpacing: 2, children: chips),
         ],
       ),
     );
   }
 
-  Widget _stat(
-    String label,
-    String value, {
-    Color color = Colors.white,
-  }) {
+  Widget _stat(String label, String value, {Color color = Colors.white}) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 10,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
         color: Colors.white.withOpacity(0.12),
@@ -355,10 +276,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           Text(
             label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           const SizedBox(height: 2),
           FittedBox(
@@ -377,7 +295,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  /// Carte des commissions de Katika.
+  /// Commissions de Katika : montant disponible et bouton « Retirer »
+  /// (actif à partir de houseMin).
   Widget _houseCard() {
     return Container(
       margin: const EdgeInsets.only(top: 12),
@@ -390,13 +309,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // CORRECTION : Text n'est pas const car le titre dépend
-          // de houseShare, une variable modifiable.
-          Text(
+          const Text(
             houseShare > 0 && houseShare < 100
                 ? '💰 Ma part des commissions ($houseShare %)'
                 : '💰 Commissions de Katika',
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w800,
@@ -405,10 +322,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 6),
           const Text(
             'Disponibles à retirer',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.white70, fontSize: 12),
           ),
           FittedBox(
             fit: BoxFit.scaleDown,
@@ -425,10 +339,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Text(
             'Total gagné ${_money(houseEarned)} · déjà retiré '
             '${_money(houseWithdrawn)}',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 10),
           SizedBox(
@@ -441,14 +352,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 disabledBackgroundColor: Colors.white24,
                 disabledForegroundColor: Colors.white54,
               ),
-              onPressed:
-                  houseCan && !houseBusy ? _withdrawHouse : null,
+              onPressed: houseCan && !houseBusy ? _withdrawHouse : null,
               icon: const Icon(Icons.account_balance_wallet),
               label: Text(
                 houseBusy ? '...' : 'Retirer vers mon compte',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -457,22 +365,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 "Le bouton s'active à partir de ${_money(houseMin)}.",
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ),
           const SizedBox(height: 6),
           const Text(
             'Part nette de Katika (commission moins la part des parrains et '
             'des partenaires), partagée entre les deux administrateurs : '
-            '50 % chacun, sur les parties terminées depuis l’activation de '
+            "50 % chacun, sur les parties terminées depuis l'activation de "
             'ce compte.',
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 11,
-            ),
+            style: TextStyle(color: Colors.white54, fontSize: 11),
           ),
         ],
       ),
@@ -505,10 +407,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'Un partenaire touche $partnerPercent % de la commission de '
             'Katika (après la part du parrain) sur les parties de ses '
             'filleuls.',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 10),
           Row(
@@ -536,9 +435,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   backgroundColor: const Color(0xFF22B14C),
                   foregroundColor: Colors.white,
                 ),
-                onPressed: partnerBusy
-                    ? null
-                    : () => _setPartner(partnerCtrl.text, true),
+                onPressed:
+                    partnerBusy ? null : () => _setPartner(partnerCtrl.text, true),
                 child: const Text('Ajouter'),
               ),
             ],
@@ -547,10 +445,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (partners.isEmpty)
             const Text(
               'Aucun partenaire pour le moment.',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
           for (final p in partners)
             Container(
@@ -590,9 +485,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         : () => _setPartner('${p['code']}', false),
                     child: const Text(
                       'Retirer',
-                      style: TextStyle(
-                        color: Color(0xFFFF8A80),
-                      ),
+                      style: TextStyle(color: Color(0xFFFF8A80)),
                     ),
                   ),
                 ],
@@ -603,7 +496,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  /// Vue d'un compte partenaire.
+  /// Vue d'un compte partenaire : ses gains, ses filleuls, son historique.
   Widget _partnerBody() {
     final available = _i(pStats['available']);
     final can = pStats['canWithdraw'] == true;
@@ -616,18 +509,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final needWag = _i(pStats['needWagered']) > 0
         ? _i(pStats['needWagered'])
         : 1000;
-    final cond =
-        pStats['conditionsMet'] == true || qualified >= needRef;
-
+    final cond = pStats['conditionsMet'] == true || qualified >= needRef;
     String when(dynamic s) {
       final d = s is String ? DateTime.tryParse(s)?.toLocal() : null;
-
       if (d == null) return '';
-
       String two(int n) => n < 10 ? '0$n' : '$n';
-
-      return '${two(d.day)}/${two(d.month)}/${d.year} '
-          '${two(d.hour)}:${two(d.minute)}';
+      return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
     }
 
     return RefreshIndicator(
@@ -657,10 +544,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 6),
                 const Text(
                   'Gains disponibles',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 FittedBox(
                   fit: BoxFit.scaleDown,
@@ -688,9 +572,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     icon: const Icon(Icons.account_balance_wallet),
                     label: Text(
                       pBusy ? '...' : 'Retirer vers mon compte',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
                 ),
@@ -698,9 +580,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Text(
                   'Filleuls actifs : $qualified / $needRef',
                   style: TextStyle(
-                    color: cond
-                        ? const Color(0xFF7CFFB0)
-                        : Colors.white,
+                    color: cond ? const Color(0xFF7CFFB0) : Colors.white,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -708,15 +588,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: LinearProgressIndicator(
-                    value: (qualified / needRef)
-                        .clamp(0.0, 1.0)
-                        .toDouble(),
+                    value: (qualified / needRef).clamp(0.0, 1.0).toDouble(),
                     minHeight: 8,
                     backgroundColor: Colors.white24,
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      cond
-                          ? const Color(0xFF22B14C)
-                          : _gold,
+                      cond ? const Color(0xFF22B14C) : _gold,
                     ),
                   ),
                 ),
@@ -727,10 +603,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       'Retrait possible quand $needRef filleuls ont chacun '
                       'misé au moins ${_money(needWag)} (parties et duels), '
                       "et à partir de ${_money(min)} de gains.",
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                   ),
               ],
@@ -745,11 +619,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             crossAxisSpacing: 8,
             childAspectRatio: 2.3,
             children: [
-              _stat(
-                'Total gagné',
-                _money(_i(pStats['earned'])),
-                color: _gold,
-              ),
+              _stat('Total gagné', _money(_i(pStats['earned'])), color: _gold),
               _stat('Déjà retiré', _money(_i(pStats['withdrawn']))),
               _stat('Mes filleuls', '${_i(pStats['referrals'])}'),
               _stat('Parties comptées', '${_i(pStats['games'])}'),
@@ -760,10 +630,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'Tu touches ${_i(pStats['percent'])} % de la commission de Katika '
             '(après la part du parrain) sur les parties de tes filleuls. '
             'Ton code : ${pStats['code']}',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           _title('Derniers gains'),
           if (recent.isEmpty)
@@ -774,10 +641,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           for (final e in recent)
             Container(
               margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 color: Colors.white.withOpacity(0.1),
@@ -844,147 +708,117 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  /// Revoir une partie en ligne en lecture seule.
+  /// Revoir une partie en ligne (lecture seule) : plateau de Ludo ou
+  /// scores de Deux dés. Les parties en présentiel n'ont pas de plateau
+  /// enregistré.
   void _review(Map<String, dynamic> r) {
     final id = '${r['id']}';
-
     if (r['mode'] != 'online') {
       _snack('Les parties en présentiel ne peuvent pas être revues.');
       return;
     }
-
     if (r['state'] == 'waiting') {
       _snack("Cette partie n'a pas encore commencé.");
       return;
     }
-
     final Widget page = r['kind'] == 'deuxdes'
         ? DeuxDesSpectator(roomId: id)
-        : OnlineGameRoom(
-            gameId: id,
-            spectate: true,
-            adminView: true,
-          );
-
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => page),
-    );
+        : OnlineGameRoom(gameId: id, spectate: true, adminView: true);
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
   Widget _gameTile(Map<String, dynamic> r) {
     final state = '${r['state']}';
     final stake = _i(r['stake']);
-    final names = ((r['names'] as List?) ?? const [])
-        .map((e) => '$e')
-        .toList();
-    final commission =
-        _i(r['commission']) + _i(r['betCommission']);
+    final names = ((r['names'] as List?) ?? const []).map((e) => '$e').toList();
+    final commission = _i(r['commission']) + _i(r['betCommission']);
     final isDice = r['kind'] == 'deuxdes';
 
     return GestureDetector(
       onTap: () => _review(r),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: Colors.white.withOpacity(0.1),
-          border: Border.all(color: Colors.white24),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  isDice ? Icons.casino : Icons.grid_view,
-                  color: _gold,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${_kindLabel('${r['kind']}')} · '
-                    '${_modeLabel('${r['mode']}')}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: _stateColor(state).withOpacity(0.25),
-                    border: Border.all(color: _stateColor(state)),
-                  ),
-                  child: Text(
-                    _stateLabel(state),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              names.isEmpty ? 'Joueurs inconnus' : names.join(' • '),
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.white.withOpacity(0.1),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isDice ? Icons.casino : Icons.grid_view,
+                color: _gold,
+                size: 20,
               ),
-            ),
-            Text(
-              _dateText(r),
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    stake > 0
-                        ? 'Mise ${_money(stake)} · '
-                            'cagnotte ${_money(_i(r['pot']))}'
-                        : 'Partie gratuite',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${_kindLabel('${r['kind']}')} · ${_modeLabel('${r['mode']}')}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                if (commission > 0)
-                  Text(
-                    '+${_money(commission)}',
-                    style: const TextStyle(
-                      color: _gold,
-                      fontWeight: FontWeight.w900,
-                    ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: _stateColor(state).withOpacity(0.25),
+                  border: Border.all(color: _stateColor(state)),
+                ),
+                child: Text(
+                  _stateLabel(state),
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            names.isEmpty ? 'Joueurs inconnus' : names.join(' • '),
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          Text(
+            _dateText(r),
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  stake > 0
+                      ? 'Mise ${_money(stake)} · cagnotte ${_money(_i(r['pot']))}'
+                      : 'Partie gratuite',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+              if (commission > 0)
+                Text(
+                  '+${_money(commission)}',
+                  style: const TextStyle(
+                    color: _gold,
+                    fontWeight: FontWeight.w900,
                   ),
-              ],
-            ),
-          ],
-        ),
+                ),
+            ],
+          ),
+        ],
+      ),
       ),
     );
   }
 
   Widget _body() {
     if (loading && rows.isEmpty) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
-
     if (error != null) {
       return Center(
         child: Padding(
@@ -995,16 +829,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
               SelectableText(
                 error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xFFFF8A80),
-                  fontSize: 15,
-                ),
+                style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 15),
               ),
               const SizedBox(height: 14),
-              ElevatedButton(
-                onPressed: _load,
-                child: const Text('Réessayer'),
-              ),
+              ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
             ],
           ),
         ),
@@ -1015,27 +843,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     final shown = rows.where(_keep).toList();
 
-    int gameCommission = 0;
-    int betCommission = 0;
-    int potPlayed = 0;
-    int referrals = 0;
-    int partnerPaid = 0;
-    int done = 0;
-    int playing = 0;
-    int waiting = 0;
-    int refunds = 0;
-
-    final groups = <String, List<int>>{};
+    int gameCommission = 0, betCommission = 0, potPlayed = 0;
+    int referrals = 0, partnerPaid = 0;
+    int done = 0, playing = 0, waiting = 0, refunds = 0;
+    final groups = <String, List<int>>{}; // clé -> [parties, commission]
 
     for (final r in shown) {
       final c = _i(r['commission']);
       final b = _i(r['betCommission']);
-
       gameCommission += c;
       betCommission += b;
       referrals += _i(r['referralPaid']);
       partnerPaid += _i(r['partnerPaid']);
-
       switch ('${r['state']}') {
         case 'done':
           done++;
@@ -1050,15 +869,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         default:
           waiting++;
       }
-
-      final key =
-          '${_kindLabel('${r['kind']}')} · ${_modeLabel('${r['mode']}')}';
-
+      final key = '${_kindLabel('${r['kind']}')} · ${_modeLabel('${r['mode']}')}';
       final g = groups.putIfAbsent(key, () => [0, 0]);
       g[0] += 1;
       g[1] += c + b;
     }
-
     final total = gameCommission + betCommission;
 
     return RefreshIndicator(
@@ -1071,60 +886,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
           _partnersCard(),
           _title('Filtres'),
           _filterRow('Jeu', [
-            _chip(
-              'Tous',
-              kind == 'all',
-              () => setState(() => kind = 'all'),
-            ),
-            _chip(
-              'Ludo',
-              kind == 'ludo',
-              () => setState(() => kind = 'ludo'),
-            ),
-            _chip(
-              'Deux dés',
-              kind == 'deuxdes',
-              () => setState(() => kind = 'deuxdes'),
-            ),
+            _chip('Tous', kind == 'all', () => setState(() => kind = 'all')),
+            _chip('Ludo', kind == 'ludo', () => setState(() => kind = 'ludo')),
+            _chip('Deux dés', kind == 'deuxdes',
+                () => setState(() => kind = 'deuxdes')),
           ]),
           _filterRow('Mode', [
-            _chip(
-              'Tous',
-              mode == 'all',
-              () => setState(() => mode = 'all'),
-            ),
-            _chip(
-              'En ligne',
-              mode == 'online',
-              () => setState(() => mode = 'online'),
-            ),
-            _chip(
-              'Présentiel',
-              mode == 'local',
-              () => setState(() => mode = 'local'),
-            ),
+            _chip('Tous', mode == 'all', () => setState(() => mode = 'all')),
+            _chip('En ligne', mode == 'online',
+                () => setState(() => mode = 'online')),
+            _chip('Présentiel', mode == 'local',
+                () => setState(() => mode = 'local')),
           ]),
           _filterRow('Période', [
-            _chip(
-              'Tout',
-              days == 0,
-              () => setState(() => days = 0),
-            ),
-            _chip(
-              "Aujourd'hui",
-              days == 1,
-              () => setState(() => days = 1),
-            ),
-            _chip(
-              '7 jours',
-              days == 7,
-              () => setState(() => days = 7),
-            ),
-            _chip(
-              '30 jours',
-              days == 30,
-              () => setState(() => days = 30),
-            ),
+            _chip('Tout', days == 0, () => setState(() => days = 0)),
+            _chip("Aujourd'hui", days == 1, () => setState(() => days = 1)),
+            _chip('7 jours', days == 7, () => setState(() => days = 7)),
+            _chip('30 jours', days == 30, () => setState(() => days = 30)),
           ]),
           _title('Résumé'),
           GridView.count(
@@ -1142,17 +920,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
               _stat('Versé aux parrains', _money(referrals)),
               _stat('Versé aux partenaires', _money(partnerPaid)),
               _stat('Parties affichées', '${shown.length}'),
-              _stat('Joueurs inscrits', users == null ? '?' : '$users'),
+              GestureDetector(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const AdminPlayersScreen(),
+                  ),
+                ),
+                child: _stat(
+                  'Joueurs inscrits · voir la liste ›',
+                  users == null ? '?' : '$users',
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            'Terminées : $done · En cours : $playing · '
-            'En attente : $waiting · Remboursées : $refunds',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
+            'Terminées : $done · En cours : $playing · En attente : $waiting · '
+            'Remboursées : $refunds',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           _title('Commissions par catégorie'),
           if (groups.isEmpty)
@@ -1163,10 +948,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           for (final e in groups.entries)
             Container(
               margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 color: Colors.white.withOpacity(0.1),
@@ -1192,10 +974,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           _title('Toutes les parties'),
           const Text(
             'Touche une partie en ligne pour la revoir.',
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.white54, fontSize: 12),
           ),
           const SizedBox(height: 6),
           for (final r in shown) _gameTile(r),
@@ -1219,9 +998,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   limit = (limit + 150).clamp(150, 500).toInt();
                   _load();
                 },
-                child: const Text(
-                  'Charger des parties plus anciennes',
-                ),
+                child: const Text('Charger des parties plus anciennes'),
               ),
             ),
         ],
@@ -1239,11 +1016,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF1F5BFF),
-              Color(0xFF0B2FA6),
-              Color(0xFF061A66),
-            ],
+            colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
           ),
         ),
         child: SafeArea(
@@ -1254,19 +1027,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () =>
-                          Navigator.of(context).maybePop(),
-                      icon: const Icon(
-                        Icons.arrow_back,
-                        color: Colors.white,
-                      ),
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
                     ),
                     Expanded(
                       child: Text(
-                        partnerView
-                            ? '👑 Espace partenaire'
-                            : '👑 Tableau de bord',
-                        style: const TextStyle(
+                        partnerView ? '👑 Espace partenaire' : '👑 Tableau de bord',
+                        style: TextStyle(
                           color: Colors.white,
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
@@ -1275,10 +1042,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                     IconButton(
                       onPressed: loading ? null : _load,
-                      icon: const Icon(
-                        Icons.refresh,
-                        color: Colors.white,
-                      ),
+                      icon: const Icon(Icons.refresh, color: Colors.white),
                     ),
                   ],
                 ),
