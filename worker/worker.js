@@ -958,6 +958,64 @@ async function leaveGame({ uid, data, env }) {
 /** Fin d'une partie en ligne : verse la cagnotte (une seule fois).
  *  La commission et la part versée aux parrains sont enregistrées sur la
  *  partie (tableau de bord). */
+/** Statistiques des joueurs, mises à jour à la fin d'une partie avec gagnant :
+ *  users/{uid} : statPlayed, statWon, statLost, statStaked (mises jouées),
+ *  statWonAmt (gains reçus), statLostAmt (mises perdues). */
+function recordStats(tx, participants, winners, stake, pot, percent, jackpot) {
+  const all = [...new Set((participants || []).filter((u) => typeof u === 'string'))];
+  const win = new Set(winners || []);
+  const n = Math.max(1, win.size);
+  const prizeShare =
+    stake > 0 && pot > 0
+      ? Math.floor(prizeOf(pot, percent) / n) + Math.floor(intOr(jackpot, 0) / n)
+      : 0;
+  for (const u of all) {
+    const isWin = win.has(u);
+    tx.write(`users/${u}`, {
+      incr: {
+        statPlayed: 1,
+        statStaked: stake > 0 ? stake : 0,
+        ...(isWin
+          ? { statWon: 1, statWonAmt: prizeShare }
+          : { statLost: 1, statLostAmt: stake > 0 ? stake : 0 }),
+      },
+    });
+  }
+}
+
+/** Administrateur : tous les joueurs inscrits avec leurs statistiques. */
+async function adminPlayers({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const limit = Math.min(2000, Math.max(50, intOr(data.limit, 1000)));
+  const res = await fsCall(env, 'runQuery', {
+    structuredQuery: { from: [{ collectionId: 'users' }], limit },
+  });
+  const players = (Array.isArray(res) ? res : [])
+    .filter((r) => r.document)
+    .map((r) => {
+      const id = r.document.name.split('/').pop();
+      const u = fieldsToObj(r.document.fields || {});
+      const played = intOr(u.statPlayed, 0);
+      const won = intOr(u.statWon, 0);
+      return {
+        uid: id,
+        pseudo: typeof u.pseudo === 'string' ? u.pseudo : '',
+        balance: balanceOf(u),
+        createdAt: typeof u.createdAt === 'string' ? u.createdAt : null,
+        played,
+        won,
+        lost: intOr(u.statLost, 0),
+        staked: intOr(u.statStaked, 0),
+        wonAmt: intOr(u.statWonAmt, 0),
+        lostAmt: intOr(u.statLostAmt, 0),
+        winRate: played > 0 ? Math.floor((won * 1000) / played) / 10 : 0,
+        partner: u.partner === true,
+      };
+    })
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return { players, total: players.length };
+}
+
 async function settleGame({ uid, data, env }) {
   const gameId = idOf(data);
   return runTx(env, async (tx) => {
@@ -1006,6 +1064,7 @@ async function settleGame({ uid, data, env }) {
       gameId,
       mode: 'online',
     });
+    recordStats(tx, paid.length ? paid : uids, winners, stake, pot, COMMISSION_PERCENT, jackpot);
     await houseAdd(tx, house);
     const commission = stake > 0 && pot > 0 ? pot - prizeOf(pot) : 0;
     tx.write(g.path, {
@@ -1124,6 +1183,7 @@ async function settleLocalGame({ uid, data, env }) {
       gameId,
       mode: 'local',
     });
+    recordStats(tx, players, winners, stake, pot, COMMISSION_LOCAL_PERCENT, jackpot);
     const betsSummary = settleLocalBets(
       tx,
       bets,
@@ -2281,6 +2341,7 @@ const HANDLERS = {
   referralInfo,
   payStake,
   captureFee,
+  adminPlayers,
   leaveGame,
   settleGame,
   startLocalGame,
