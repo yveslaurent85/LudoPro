@@ -248,6 +248,13 @@ class Wallet {
     return _call('adminHouseWithdraw', <String, dynamic>{});
   }
 
+  /// Administrateur : tous les joueurs inscrits avec leurs statistiques.
+  /// Renvoie { players: [ { uid, pseudo, balance, createdAt, played, won,
+  /// lost, staked, wonAmt, lostAmt, winRate } ], total }.
+  static Future<Map<String, dynamic>> adminPlayers({int limit = 1000}) {
+    return _call('adminPlayers', <String, dynamic>{'limit': limit});
+  }
+
   /// Administrateur : donne ou retire le statut de partenaire (code promo).
   static Future<Map<String, dynamic>> adminSetPartner(String code, bool on) {
     return _call('adminSetPartner', <String, dynamic>{'code': code, 'on': on});
