@@ -25,7 +25,6 @@ import 'rejouer.dart';
 import 'promo_screen.dart';
 import 'password_screen.dart';
 import 'player_stats.dart';
-import 'update_checker.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -62,32 +61,8 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
-      home: const UpdateCheckHome(),
+      home: const HomeScreen(),
     );
-  }
-}
-class UpdateCheckHome extends StatefulWidget {
-  const UpdateCheckHome({super.key});
-
-  @override
-  State<UpdateCheckHome> createState() => _UpdateCheckHomeState();
-}
-
-class _UpdateCheckHomeState extends State<UpdateCheckHome> {
-  @override
-  void initState() {
-    super.initState();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        UpdateChecker.check(context);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const HomeScreen();
   }
 }
 
