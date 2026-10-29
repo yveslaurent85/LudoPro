@@ -24,6 +24,7 @@ import 'painters.dart';
 import 'rejouer.dart';
 import 'promo_screen.dart';
 import 'password_screen.dart';
+import 'player_stats.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -385,6 +386,9 @@ class HomeScreen extends StatelessWidget {
                 }),
                 item(Icons.card_giftcard, 'Code promo',
                     const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
+                if (user != null)
+                  item(Icons.bar_chart, 'Détails', const Color(0xFF00838F),
+                      () => go((_) => const MyDetailsScreen())),
                 if (user != null)
                   item(Icons.lock_reset, 'Modifier le mot de passe',
                       const Color(0xFF455A9E),
