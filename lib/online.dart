@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'game_chat.dart';
 import 'lang.dart';
 import 'main.dart';
 
@@ -1369,9 +1370,10 @@ class OnlineGameRoom extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   teamOn
-                      ? 'La partie démarre quand les 4 joueurs sont là et que '
-                          'les binômes sont formés.'
-                      : 'La partie démarre dès que tout le monde est là.',
+                      ? 'Le créateur lance la partie. En équipe (2 contre 2), '
+                          'il faut les 4 joueurs et les binômes formés.'
+                      : "Le créateur lance la partie quand il veut, dès 2 "
+                          "joueurs (même si la salle n'est pas pleine).",
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 if (d['stake'] != null) ...[
@@ -1422,6 +1424,13 @@ class OnlineGameRoom extends StatelessWidget {
                       ),
                     ),
                 ],
+                WaitingBell(collection: 'games', gameId: gameId),
+                HostStartButton(
+                  gameId: gameId,
+                  isHost: d['hostUid'] == uid,
+                  playerCount: players.length,
+                  paidCount: paid.length,
+                ),
                 if (d['code'] != null) _codeCard(context, d),
                 const SizedBox(height: 20),
                 for (int i = 0; i < max; i++)
