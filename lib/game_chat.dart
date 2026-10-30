@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -123,10 +124,9 @@ class _GameChatState extends State<GameChat> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF14267A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      // Le plateau reste visible au-dessus : le chat n'occupe que le bas.
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black26,
       builder: (ctx) => _ChatSheet(
         col: _col,
         myUid: _uid,
@@ -210,7 +210,10 @@ class _ChatSheet extends StatefulWidget {
 }
 
 class _ChatSheetState extends State<_ChatSheet> {
+  static const Color _blue = Color(0xFF2F6BEF);
+
   final TextEditingController ctrl = TextEditingController();
+  bool showEmojis = false;
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream = widget.col
       .orderBy('createdAt', descending: true)
       .limit(40)
@@ -229,44 +232,108 @@ class _ChatSheetState extends State<_ChatSheet> {
     ctrl.clear();
   }
 
+  String _time(dynamic v) {
+    if (v is! Timestamp) return '';
+    final d = v.toDate();
+    String two(int n) => n < 10 ? '0$n' : '$n';
+    return '${two(d.hour)}:${two(d.minute)}';
+  }
+
   Widget _bubble(Map<String, dynamic> d) {
     final mine = d['uid'] == widget.myUid;
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+    final name = '${d['name'] ?? 'Joueur'}';
+    final time = _time(d['createdAt']);
+    final maxW = MediaQuery.of(context).size.width * 0.72;
+
+    final bubble = Container(
+      constraints: BoxConstraints(maxWidth: maxW),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: mine ? _blue : Colors.white,
+        boxShadow: mine
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+      ),
+      child: Text(
+        '${d['text'] ?? ''}',
+        style: TextStyle(
+          color: mine ? Colors.white : const Color(0xFF1A1F3A),
+          fontSize: 17,
         ),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: mine
-              ? const Color(0xFFFFC21A)
-              : Colors.white.withOpacity(0.15),
-        ),
+      ),
+    );
+
+    if (mine) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (!mine)
-              Text(
-                '${d['name'] ?? 'Joueur'}',
-                style: const TextStyle(
-                  color: Color(0xFFFFE082),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
+            bubble,
+            if (time.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 3, right: 6),
+                child: Text(
+                  time,
+                  style: const TextStyle(color: Colors.black45, fontSize: 12),
                 ),
               ),
-            Text(
-              '${d['text'] ?? ''}',
-              style: TextStyle(
-                color: mine ? Colors.black : Colors.white,
-                fontSize: 15,
-              ),
-            ),
           ],
         ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: _blue,
+            child: Text(
+              name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                bubble,
+                if (time.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3, left: 6),
+                    child: Text(
+                      time,
+                      style:
+                          const TextStyle(color: Colors.black45, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -276,121 +343,178 @@ class _ChatSheetState extends State<_ChatSheet> {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.6,
-        child: Column(
-          children: [
-            // Titre + croix pour fermer la messagerie
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 4, 0),
-              child: Row(
-                children: [
-                  const SizedBox(width: 48),
-                  const Expanded(
-                    child: Text(
-                      '💬 Discussion de la partie',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        child: Container(
+          color: const Color(0xFFF7F9FC),
+          // Moitié basse de l'écran : on voit encore le plateau au-dessus.
+          height: MediaQuery.of(context).size.height * 0.5,
+          child: Column(
+            children: [
+              // Titre « Chat » + croix pour fermer
+              Container(
+                color: _blue,
+                padding: const EdgeInsets.fromLTRB(18, 10, 14, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.chat_bubble_outline,
+                        color: Colors.white, size: 26),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Chat',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Fermer',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  if (snap.hasError) {
-                    return const Center(
-                      child: Text(
-                        'Chat indisponible pour le moment.',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    );
-                  }
-                  final docs = snap.data?.docs ?? const [];
-                  if (docs.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        'Aucun message. Dis bonjour 👋',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    );
-                  }
-                  return ListView(
-                    reverse: true,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    children: [for (final d in docs) _bubble(d.data())],
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              height: 46,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                children: [
-                  for (final e in widget.emojis)
                     InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () => widget.onSend(e),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          color: Colors.white.withOpacity(0.2),
                         ),
-                        child: Text(e, style: const TextStyle(fontSize: 26)),
+                        child: const Icon(Icons.close, color: Colors.white),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 8, 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: ctrl,
-                      maxLength: 200,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _submit(),
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        counterText: '',
-                        hintText: 'Écris un message...',
-                        hintStyle: const TextStyle(color: Colors.white38),
-                        filled: true,
-                        fillColor: Colors.white.withOpacity(0.12),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
+              Expanded(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _stream,
+                  builder: (context, snap) {
+                    if (snap.hasError) {
+                      return const Center(
+                        child: Text(
+                          'Chat indisponible pour le moment.',
+                          style: TextStyle(color: Colors.black54),
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(22),
-                          borderSide: BorderSide.none,
+                      );
+                    }
+                    final docs = snap.data?.docs ?? const [];
+                    if (docs.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'Aucun message. Dis bonjour 👋',
+                          style: TextStyle(color: Colors.black54),
+                        ),
+                      );
+                    }
+                    return ListView(
+                      reverse: true,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      children: [
+                        for (final d in docs)
+                          if (d.data()['to'] == null) _bubble(d.data()),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              if (showEmojis)
+                SizedBox(
+                  height: 46,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    children: [
+                      for (final e in widget.emojis)
+                        InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () => widget.onSend(e),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            child:
+                                Text(e, style: const TextStyle(fontSize: 26)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                child: Row(
+                  children: [
+                    InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => setState(() => showEmojis = !showEmojis),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.black12, width: 1.5),
+                        ),
+                        child: const Text('😊', style: TextStyle(fontSize: 26)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: ctrl,
+                        maxLength: 200,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _submit(),
+                        style: const TextStyle(
+                          color: Color(0xFF1A1F3A),
+                          fontSize: 16,
+                        ),
+                        decoration: InputDecoration(
+                          counterText: '',
+                          hintText: 'Tapez un message...',
+                          hintStyle: const TextStyle(color: Colors.black38),
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 12,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(26),
+                            borderSide: const BorderSide(
+                              color: Colors.black12,
+                              width: 1.5,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(26),
+                            borderSide:
+                                const BorderSide(color: _blue, width: 1.5),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    onPressed: _submit,
-                    icon: const Icon(Icons.send, color: Color(0xFFFFC21A)),
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _submit,
+                      child: Container(
+                        width: 50,
+                        height: 50,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _blue,
+                        ),
+                        child: const Icon(Icons.send, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -517,6 +641,7 @@ class EmojiBubble extends StatelessWidget {
     required this.uid,
     this.size = 36,
     this.margin = EdgeInsets.zero,
+    this.placeholder = false,
   });
 
   final EmojiReactions reactions;
@@ -524,13 +649,33 @@ class EmojiBubble extends StatelessWidget {
   final double size;
   final EdgeInsets margin;
 
+  /// Vrai : quand aucun emoji n'est affiché, montre une petite boîte 😀
+  /// (on la touche pour taguer le joueur).
+  final bool placeholder;
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: reactions,
       builder: (context, _) {
         final e = reactions.emojiOf(uid);
-        if (e == null) return const SizedBox.shrink();
+        if (e == null) {
+          if (!placeholder) return const SizedBox.shrink();
+          return IgnorePointer(
+            child: Container(
+              width: size,
+              height: size,
+              margin: margin,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black.withOpacity(0.35),
+                border: Border.all(color: Colors.white70, width: 1.5),
+              ),
+              child: Text('😀', style: TextStyle(fontSize: size * 0.52)),
+            ),
+          );
+        }
         return IgnorePointer(
           child: TweenAnimationBuilder<double>(
             key: ValueKey('${uid}_${reactions.stampOf(uid)}'),
@@ -668,10 +813,10 @@ Future<void> showEmojiPicker(
 const List<Color> _ludoSeatColors = [
   Color(0xFFE5262B),
   Color(0xFF22B14C),
-  Color(0xFF1E6BFF),
   Color(0xFFFFC21A),
+  Color(0xFF1E6BFF),
 ];
-const List<String> _ludoSeatNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
+const List<String> _ludoSeatNames = ['Rouge', 'Vert', 'Jaune', 'Bleu'];
 
 const List<Color> _deSeatColors = [
   Color(0xFFE5262B),
@@ -1147,6 +1292,326 @@ class _RoomInfoSheetState extends State<_RoomInfoSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+// ----------------------------------------------------------------------
+// Cloche de la salle d'attente
+// ----------------------------------------------------------------------
+
+/// Fait sonner la cloche (son + vibration).
+Future<void> playBell() async {
+  try {
+    HapticFeedback.heavyImpact();
+  } catch (_) {}
+  try {
+    final p = AudioPlayer();
+    p.onPlayerComplete.first.then((_) => p.dispose(), onError: (_) => p.dispose());
+    await p.play(AssetSource('sfx_bell.wav'), volume: 1.0);
+    Future<void>.delayed(const Duration(seconds: 8), () {
+      try {
+        p.dispose();
+      } catch (_) {}
+    });
+  } catch (_) {}
+}
+
+/// Salle d'attente : la cloche sonne chez le créateur quand un joueur
+/// rejoint la partie, et chaque joueur qui a rejoint peut sonner la cloche
+/// pour prévenir le créateur qu'il est là (le créateur lance la partie).
+class WaitingBell extends StatefulWidget {
+  const WaitingBell({
+    super.key,
+    required this.collection,
+    required this.gameId,
+  });
+
+  final String collection;
+  final String gameId;
+
+  @override
+  State<WaitingBell> createState() => _WaitingBellState();
+}
+
+class _WaitingBellState extends State<WaitingBell> {
+  late final DocumentReference<Map<String, dynamic>> _ref = FirebaseFirestore
+      .instance
+      .collection(widget.collection)
+      .doc(widget.gameId);
+  final String _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
+
+  bool _isHost = false;
+  bool _first = true;
+  int _players = 0;
+  int _bellN = 0;
+  String? _banner;
+  Timer? _bannerTimer;
+  bool _cooldown = false;
+  bool _sent = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = _ref.snapshots().listen((snap) {
+      final d = snap.data();
+      if (d == null || !mounted) return;
+      final host = d['hostUid'] == _uid;
+      final list = (d['players'] as List?) ?? const [];
+      final bell = d['bell'] is Map ? Map<String, dynamic>.from(d['bell'] as Map) : null;
+      final n = (bell?['n'] as num?)?.toInt() ?? 0;
+      if (host != _isHost) setState(() => _isHost = host);
+
+      if (_first) {
+        _first = false;
+        _players = list.length;
+        _bellN = n;
+        return;
+      }
+      String? text;
+      if (host && list.length > _players && d['status'] == 'waiting') {
+        final last = list.last;
+        final who = last is Map ? '${last['name'] ?? 'Un joueur'}' : 'Un joueur';
+        text = tr('$who a rejoint la partie', '$who joined the game');
+      } else if (host && n != _bellN && bell != null && bell['uid'] != _uid) {
+        text = tr('${bell['name'] ?? 'Un joueur'} te signale qu\'il est là',
+            '${bell['name'] ?? 'A player'} signals they are here');
+      }
+      _players = list.length;
+      _bellN = n;
+      if (text != null) _ring(text);
+    }, onError: (Object _) {});
+  }
+
+  void _ring(String text) {
+    playBell();
+    _bannerTimer?.cancel();
+    setState(() => _banner = text);
+    _bannerTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted) setState(() => _banner = null);
+    });
+  }
+
+  Future<void> _sendBell() async {
+    if (_cooldown) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    setState(() {
+      _cooldown = true;
+      _sent = true;
+    });
+    final name = (user.displayName ?? '').trim().isNotEmpty
+        ? user.displayName!.trim()
+        : 'Un joueur';
+    try {
+      await _ref.update({
+        'bell': {
+          'uid': user.uid,
+          'name': name.length > 40 ? name.substring(0, 40) : name,
+          'n': DateTime.now().millisecondsSinceEpoch,
+        },
+      });
+    } catch (_) {}
+    playBell();
+    Future<void>.delayed(const Duration(seconds: 6), () {
+      if (mounted) setState(() => _cooldown = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _bannerTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isHost) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: _banner != null
+              ? const Color(0xFFFFC21A)
+              : Colors.white.withOpacity(0.10),
+          border: Border.all(
+            color: _banner != null ? Colors.white : Colors.white24,
+            width: _banner != null ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            const Text('🔔', style: TextStyle(fontSize: 22)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _banner ??
+                    tr('La cloche sonne quand un joueur rejoint la partie.',
+                        'The bell rings when a player joins.'),
+                style: TextStyle(
+                  color: _banner != null ? Colors.black : Colors.white70,
+                  fontSize: _banner != null ? 15 : 12,
+                  fontWeight:
+                      _banner != null ? FontWeight.w900 : FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFFC21A),
+            foregroundColor: Colors.black,
+            disabledBackgroundColor: Colors.white24,
+            disabledForegroundColor: Colors.white70,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          onPressed: _cooldown ? null : _sendBell,
+          icon: const Text('🔔', style: TextStyle(fontSize: 20)),
+          label: Text(
+            _cooldown
+                ? tr('Cloche envoyée au créateur', 'Bell sent to the host')
+                : (_sent
+                    ? tr('Sonner à nouveau', 'Ring again')
+                    : tr('Sonner la cloche : je suis là', 'Ring the bell: I am here')),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Salle d'attente : le créateur lance la partie quand il veut, dès 2 joueurs
+/// (même si la salle n'est pas pleine). Les autres joueurs attendent.
+class HostStartButton extends StatefulWidget {
+  const HostStartButton({
+    super.key,
+    required this.gameId,
+    required this.isHost,
+    required this.playerCount,
+    required this.paidCount,
+  });
+
+  final String gameId;
+  final bool isHost;
+  final int playerCount;
+  final int paidCount;
+
+  @override
+  State<HostStartButton> createState() => _HostStartButtonState();
+}
+
+class _HostStartButtonState extends State<HostStartButton> {
+  bool _busy = false;
+
+  Future<void> _start() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await Wallet.startGame(widget.gameId);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(Wallet.errorText(e))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.isHost) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text(
+          tr('Le créateur lancera la partie quand il le souhaite.',
+              'The host will start the game when ready.'),
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+      );
+    }
+    final enough = widget.playerCount >= 2;
+    final allPaid = widget.paidCount >= widget.playerCount;
+    final can = enough && allPaid && !_busy;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF22B14C),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white24,
+                disabledForegroundColor: Colors.white54,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              onPressed: can ? _start : null,
+              icon: const Icon(Icons.play_arrow),
+              label: Text(
+                _busy
+                    ? '...'
+                    : tr('Lancer la partie (${widget.playerCount} joueurs)',
+                        'Start the game (${widget.playerCount} players)'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+          if (!enough)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                tr('Attends au moins 1 autre joueur pour lancer la partie.',
+                    'Wait for at least 1 other player to start.'),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            )
+          else if (!allPaid)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                tr('Tous les joueurs doivent avoir validé leur mise.',
+                    'All players must have confirmed their stake.'),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                tr('Tu peux lancer maintenant, même si la salle n\'est pas pleine.',
+                    'You can start now, even if the room is not full.'),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+        ],
       ),
     );
   }
