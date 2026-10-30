@@ -174,6 +174,11 @@ class Wallet {
     await _call('payStake', <String, dynamic>{'gameId': gameId});
   }
 
+  /// Le créateur lance la partie (dès 2 joueurs, salle pleine ou non).
+  static Future<void> startGame(String gameId) async {
+    await _call('startGame', <String, dynamic>{'gameId': gameId});
+  }
+
   /// Partie en ligne pas encore commencée : quitter (ou annuler si on est
   /// le créateur) et récupérer sa mise.
   static Future<void> leaveGame(String gameId) async {
