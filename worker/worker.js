@@ -1258,3 +1258,1204 @@ async function settleLocalGame({ uid, data, env }) {
   });
 }
 
+// ======================================================================
+// Paris entre joueurs : Duel et Défi 7 (Deux dés en ligne, avec mise)
+// ======================================================================
+// Données :
+//   deuxdes/{roomId}/bets/{betId}   le pari (lisible par les joueurs)
+//   deuxdes/{roomId}/betMeta/index  { ids: [...] } liste tenue par le serveur
+// La liste est gardée à part (et pas dans le salon) pour qu'un joueur ne
+// puisse pas la fausser depuis l'appli.
+//
+// Les mises sont débitées à la proposition / à l'acceptation, puis rendues
+// ou versées par sideBetSync. Gain = 2 mises moins la commission (prizeOf).
+
+const BET_MIN = MIN_STAKE;
+const BET_MAX = 5000;
+const BET_MAX_OPEN_PER_PLAYER = 3;
+const BET_MAX_PER_ROOM = 40; // jusqu'à 8 joueurs
+
+const betPath = (roomId, id) => `deuxdes/${roomId}/bets/${id}`;
+const betIndexPath = (roomId) => `deuxdes/${roomId}/betMeta/index`;
+
+function idStr(v) {
+  return typeof v === 'string' && ID_RE.test(v) ? v : '';
+}
+
+function seatOf(room, uid) {
+  return playersOf(room).findIndex((p) => p.uid === uid);
+}
+
+/** Ce joueur a déjà lancé ses dés (ou la partie est finie). */
+function hasRolled(room, seat) {
+  const cur = intOr(room.cur, 0);
+  return seat < 0 || room.over === true || cur > seat || (cur === seat && room.rolled === true);
+}
+
+/** Lit tous les paris d'un salon (au plus BET_MAX_PER_ROOM). */
+async function loadBets(tx, roomId) {
+  const idx = await tx.get(betIndexPath(roomId));
+  const ids = idx && Array.isArray(idx.ids) ? idx.ids.slice(0, BET_MAX_PER_ROOM) : [];
+  const out = [];
+  for (const id of ids) {
+    const b = await tx.get(betPath(roomId, id));
+    if (b) out.push({ id, path: betPath(roomId, id), b });
+  }
+  return out;
+}
+
+/** Propose un pari (la mise du parieur est débitée tout de suite). */
+async function sideBetPropose({ uid, data, env }) {
+  const roomId = idStr(data.roomId);
+  const type = data.type;
+  const amount = intOr(data.amount, -1);
+  const targetUid = typeof data.targetUid === 'string' && data.targetUid ? data.targetUid : null;
+  const side = data.side === 'under' ? 'under' : 'over';
+
+  if (!roomId || (type !== 'duel' && type !== 'seven')) {
+    throw new HttpError('invalid-argument', 'Pari invalide.');
+  }
+  if (amount < BET_MIN || amount > BET_MAX) {
+    throw new HttpError('invalid-argument', 'Mise invalide.');
+  }
+
+  await runTx(env, async (tx) => {
+    const room = await tx.get(`deuxdes/${roomId}`);
+    if (!room) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    if (intOr(room.stake, 0) <= 0) {
+      throw new HttpError('failed-precondition', 'Pas de pari dans une partie gratuite.');
+    }
+    if (room.status !== 'playing' || room.over === true) {
+      throw new HttpError('failed-precondition', "La partie n'est pas en cours.");
+    }
+    const seat = seatOf(room, uid);
+    if (seat < 0) {
+      throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
+    }
+    if (hasRolled(room, seat)) {
+      throw new HttpError('failed-precondition', 'Tu as déjà lancé tes dés.');
+    }
+
+    let target = null;
+    if (type === 'duel' && targetUid) {
+      const ts = seatOf(room, targetUid);
+      if (ts < 0 || targetUid === uid) {
+        throw new HttpError('invalid-argument', 'Adversaire invalide.');
+      }
+      if (hasRolled(room, ts)) {
+        throw new HttpError('failed-precondition', 'Ce joueur a déjà lancé ses dés.');
+      }
+      target = playersOf(room)[ts];
+    }
+
+    const bets = await loadBets(tx, roomId);
+    if (bets.length >= BET_MAX_PER_ROOM) {
+      throw new HttpError('failed-precondition', 'Trop de paris dans cette partie.');
+    }
+    const mine = bets.filter((x) => x.b.status === 'open' && x.b.proposerUid === uid);
+    if (mine.length >= BET_MAX_OPEN_PER_PLAYER) {
+      throw new HttpError('failed-precondition', 'Trop de paris en attente.');
+    }
+
+    const me = await tx.get(`users/${uid}`);
+    if (balanceOf(me) < amount) {
+      throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    }
+
+    const id = newId();
+    tx.write(`users/${uid}`, { incr: { balance: -amount } });
+    tx.write(betPath(roomId, id), {
+      create: true,
+      set: {
+        type,
+        amount,
+        prize: prizeOf(amount * 2),
+        side: type === 'seven' ? side : null,
+        proposerUid: uid,
+        proposerName: playersOf(room)[seat].name || 'Joueur',
+        targetUid: target ? target.uid : null,
+        targetName: target ? target.name || null : null,
+        opponentUid: null,
+        opponentName: null,
+        status: 'open',
+      },
+      serverTime: ['createdAt'],
+    });
+    tx.write(betIndexPath(roomId), {
+      set: { n: bets.length + 1 },
+      union: { ids: [id] },
+    });
+  });
+  return { ok: true };
+}
+
+/** Relève un pari ouvert (la mise de l'adversaire est débitée). */
+async function sideBetAccept({ uid, data, env }) {
+  const roomId = idStr(data.roomId);
+  const id = idStr(data.betId);
+  if (!roomId || !id) throw new HttpError('invalid-argument', 'Pari invalide.');
+
+  await runTx(env, async (tx) => {
+    const room = await tx.get(`deuxdes/${roomId}`);
+    const bet = await tx.get(betPath(roomId, id));
+    if (!room || !bet) throw new HttpError('not-found', 'Pari introuvable.');
+    if (bet.status !== 'open') {
+      throw new HttpError('failed-precondition', "Ce pari n'est plus disponible.");
+    }
+    if (bet.proposerUid === uid) {
+      throw new HttpError('failed-precondition', 'Tu ne peux pas relever ton propre pari.');
+    }
+    if (bet.targetUid && bet.targetUid !== uid) {
+      throw new HttpError('permission-denied', "Ce pari ne t'est pas destiné.");
+    }
+    if (room.over === true || room.status !== 'playing') {
+      throw new HttpError('failed-precondition', "La partie n'est pas en cours.");
+    }
+    const seat = seatOf(room, uid);
+    if (seat < 0) {
+      throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
+    }
+    if (hasRolled(room, seat)) {
+      throw new HttpError('failed-precondition', 'Tu as déjà lancé tes dés.');
+    }
+    if (hasRolled(room, seatOf(room, bet.proposerUid))) {
+      throw new HttpError('failed-precondition', 'Le parieur a déjà lancé ses dés.');
+    }
+    const me = await tx.get(`users/${uid}`);
+    if (balanceOf(me) < bet.amount) {
+      throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    }
+
+    tx.write(`users/${uid}`, { incr: { balance: -bet.amount } });
+    tx.write(betPath(roomId, id), {
+      set: {
+        status: 'accepted',
+        opponentUid: uid,
+        opponentName: playersOf(room)[seat].name || 'Joueur',
+      },
+      serverTime: ['acceptedAt'],
+    });
+  });
+  return { ok: true };
+}
+
+/** Annule (le parieur) ou refuse (l'adversaire visé) : mise rendue. */
+async function sideBetCancel({ uid, data, env }) {
+  const roomId = idStr(data.roomId);
+  const id = idStr(data.betId);
+  if (!roomId || !id) throw new HttpError('invalid-argument', 'Pari invalide.');
+
+  await runTx(env, async (tx) => {
+    const bet = await tx.get(betPath(roomId, id));
+    if (!bet) throw new HttpError('not-found', 'Pari introuvable.');
+    if (bet.status !== 'open') {
+      throw new HttpError('failed-precondition', "Ce pari n'est plus en attente.");
+    }
+    const isProposer = bet.proposerUid === uid;
+    if (!isProposer && bet.targetUid !== uid) {
+      throw new HttpError('permission-denied', "Ce pari n'est pas le tien.");
+    }
+    tx.write(`users/${bet.proposerUid}`, { incr: { balance: bet.amount } });
+    tx.write(betPath(roomId, id), {
+      set: { status: isProposer ? 'cancelled' : 'declined' },
+      serverTime: ['closedAt'],
+    });
+  });
+  return { ok: true };
+}
+
+/** Règle les paris prêts : gains, remboursements, paris expirés.
+ *  Appelée par les appareils à chaque lancer et en fin de partie ;
+ *  sans danger si elle est appelée plusieurs fois.
+ *  La commission de chaque pari gagné est ajoutée à la partie (betCommission). */
+async function sideBetSync({ uid, data, env }) {
+  const roomId = idStr(data.roomId);
+  if (!roomId) throw new HttpError('invalid-argument', 'Partie invalide.');
+
+  await runTx(env, async (tx) => {
+    const room = await tx.get(`deuxdes/${roomId}`);
+    if (!room) return;
+    if (!playersOf(room).some((p) => p.uid === uid)) {
+      throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
+    }
+    const bets = await loadBets(tx, roomId);
+    const scores = Array.isArray(room.scores) ? room.scores : [];
+    let houseBets = 0; // commissions de Katika sur les paris gagnés
+
+    for (const { path, b } of bets) {
+      const pSeat = seatOf(room, b.proposerUid);
+
+      // Pari jamais relevé : fermé dès qu'on ne peut plus le relever.
+      if (b.status === 'open') {
+        const expired =
+          room.over === true ||
+          hasRolled(room, pSeat) ||
+          (b.targetUid && hasRolled(room, seatOf(room, b.targetUid)));
+        if (expired) {
+          tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
+          tx.write(path, { set: { status: 'expired' }, serverTime: ['closedAt'] });
+        }
+        continue;
+      }
+      if (b.status !== 'accepted') continue;
+
+      // Pari relevé : on cherche le gagnant (null = égalité).
+      const oSeat = seatOf(room, b.opponentUid);
+      let winner;
+      if (b.type === 'seven') {
+        if (!hasRolled(room, pSeat)) continue;
+        const s = scores[pSeat];
+        if (typeof s !== 'number') continue;
+        if (s === 7) winner = null;
+        else winner = s > 7 === (b.side !== 'under') ? b.proposerUid : b.opponentUid;
+      } else {
+        if (room.over !== true) continue;
+        const a = scores[pSeat];
+        const c = scores[oSeat];
+        if (typeof a !== 'number' || typeof c !== 'number') continue;
+        winner = a === c ? null : a > c ? b.proposerUid : b.opponentUid;
+      }
+
+      if (winner === null) {
+        tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
+        tx.write(`users/${b.opponentUid}`, { incr: { balance: b.amount } });
+        tx.write(path, { set: { status: 'settled', result: 'refund' }, serverTime: ['closedAt'] });
+      } else {
+        tx.write(`users/${winner}`, { incr: { balance: b.prize } });
+        // Les paris (Duel, Défi 7) comptent dans le total misé des deux joueurs.
+        tx.write(`users/${b.proposerUid}`, { incr: { wagered: b.amount } });
+        tx.write(`users/${b.opponentUid}`, { incr: { wagered: b.amount } });
+        tx.write(`deuxdes/${roomId}`, { incr: { betCommission: 2 * b.amount - b.prize } });
+        houseBets += 2 * b.amount - b.prize;
+        tx.write(path, {
+          set: { status: 'settled', result: 'win', winnerUid: winner },
+          serverTime: ['closedAt'],
+        });
+      }
+    }
+    await houseAdd(tx, houseBets);
+  });
+  return { ok: true };
+}
+
+// ======================================================================
+// Paris en présentiel (Deux dés, un seul téléphone) — commission 10 %
+// ======================================================================
+// localGames/{id}/bets/{betId}      le pari
+// localGames/{id}/betMeta/index     { ids: [...] }
+// Le joueur principal envoie les jetons du parieur et de l'adversaire :
+// les deux mises sont débitées tout de suite. Règlement dans settleLocalGame.
+
+const localBetPath = (id, betId) => `localGames/${id}/bets/${betId}`;
+const localBetIndexPath = (id) => `localGames/${id}/betMeta/index`;
+
+async function loadLocalBets(tx, id) {
+  const idx = await tx.get(localBetIndexPath(id));
+  const ids = idx && Array.isArray(idx.ids) ? idx.ids.slice(0, BET_MAX_PER_ROOM) : [];
+  const out = [];
+  for (const betId of ids) {
+    const b = await tx.get(localBetPath(id, betId));
+    if (b) out.push({ id: betId, path: localBetPath(id, betId), b });
+  }
+  return out;
+}
+
+async function localBetCreate({ uid, data, env }) {
+  const id = idOf(data);
+  const type = data.type;
+  const amount = intOr(data.amount, -1);
+  const side = data.side === 'under' ? 'under' : 'over';
+  if (!id || (type !== 'duel' && type !== 'seven')) {
+    throw new HttpError('invalid-argument', 'Pari invalide.');
+  }
+  if (amount < BET_MIN || amount > BET_MAX) {
+    throw new HttpError('invalid-argument', 'Mise invalide.');
+  }
+  const pUid = await verifyIdToken(String(data.proposerToken || ''), env);
+  const oUid = await verifyIdToken(String(data.opponentToken || ''), env);
+  if (pUid === oUid) {
+    throw new HttpError('invalid-argument', 'Choisis deux joueurs différents.');
+  }
+
+  await runTx(env, async (tx) => {
+    const g = await tx.get(`localGames/${id}`);
+    if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    if (g.hostUid !== uid) {
+      throw new HttpError('permission-denied', 'Seul le joueur principal peut créer un pari.');
+    }
+    if (g.settled === true || g.status !== 'playing') {
+      throw new HttpError('failed-precondition', 'La partie est terminée.');
+    }
+    if (intOr(g.stake, 0) <= 0) {
+      throw new HttpError('failed-precondition', 'Pas de pari dans une partie gratuite.');
+    }
+    const players = Array.isArray(g.uids) ? g.uids : [];
+    if (!players.includes(pUid) || !players.includes(oUid)) {
+      throw new HttpError('permission-denied', 'Ces joueurs ne sont pas dans la partie.');
+    }
+    const names = Array.isArray(g.names) ? g.names : [];
+    const nameOf = (u) => String(names[players.indexOf(u)] || 'Joueur');
+
+    const bets = await loadLocalBets(tx, id);
+    if (bets.length >= BET_MAX_PER_ROOM) {
+      throw new HttpError('failed-precondition', 'Trop de paris dans cette partie.');
+    }
+    const p = await tx.get(`users/${pUid}`);
+    const o = await tx.get(`users/${oUid}`);
+    if (balanceOf(p) < amount) {
+      throw new HttpError('failed-precondition', `Solde insuffisant : ${nameOf(pUid)}`);
+    }
+    if (balanceOf(o) < amount) {
+      throw new HttpError('failed-precondition', `Solde insuffisant : ${nameOf(oUid)}`);
+    }
+
+    const betId = newId();
+    tx.write(`users/${pUid}`, { incr: { balance: -amount } });
+    tx.write(`users/${oUid}`, { incr: { balance: -amount } });
+    tx.write(localBetPath(id, betId), {
+      create: true,
+      set: {
+        type,
+        amount,
+        prize: prizeOf(amount * 2, COMMISSION_LOCAL_PERCENT),
+        side: type === 'seven' ? side : null,
+        proposerUid: pUid,
+        proposerName: nameOf(pUid),
+        opponentUid: oUid,
+        opponentName: nameOf(oUid),
+        status: 'accepted',
+      },
+      serverTime: ['createdAt'],
+    });
+    tx.write(localBetIndexPath(id), {
+      set: { n: bets.length + 1 },
+      union: { ids: [betId] },
+    });
+  });
+  return { ok: true };
+}
+
+/** Règle les paris d'une partie en présentiel. Scores alignés sur `players`.
+ *  Score manquant, égalité ou 7 pile : mises remboursées. */
+function settleLocalBets(tx, bets, players, scores, names) {
+  const out = [];
+  const nameOf = (u) => String(names[players.indexOf(u)] || 'Joueur');
+  for (const { path, b } of bets) {
+    if (b.status !== 'accepted') continue;
+    const ps = scores[players.indexOf(b.proposerUid)];
+    const os = scores[players.indexOf(b.opponentUid)];
+    let winner = null;
+    if (b.type === 'seven') {
+      if (typeof ps === 'number' && ps !== 7) {
+        winner = ps > 7 === (b.side !== 'under') ? b.proposerUid : b.opponentUid;
+      }
+    } else if (typeof ps === 'number' && typeof os === 'number' && ps !== os) {
+      winner = ps > os ? b.proposerUid : b.opponentUid;
+    }
+
+    if (winner === null) {
+      tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
+      tx.write(`users/${b.opponentUid}`, { incr: { balance: b.amount } });
+      tx.write(path, { set: { status: 'settled', result: 'refund' }, serverTime: ['closedAt'] });
+    } else {
+      tx.write(`users/${winner}`, { incr: { balance: b.prize } });
+      // Les paris (Duel, Défi 7) comptent dans le total misé des deux joueurs.
+      tx.write(`users/${b.proposerUid}`, { incr: { wagered: b.amount } });
+      tx.write(`users/${b.opponentUid}`, { incr: { wagered: b.amount } });
+      tx.write(path, {
+        set: { status: 'settled', result: 'win', winnerUid: winner },
+        serverTime: ['closedAt'],
+      });
+    }
+    out.push({
+      type: b.type,
+      side: b.side || null,
+      amount: b.amount,
+      prize: b.prize,
+      proposerName: nameOf(b.proposerUid),
+      opponentName: nameOf(b.opponentUid),
+      winnerName: winner === null ? null : nameOf(winner),
+      result: winner === null ? 'refund' : 'win',
+    });
+  }
+  return out;
+}
+
+// ======================================================================
+// Tableau de bord administrateur (commissions, parties)
+// ======================================================================
+// Réservé aux comptes dont l'identifiant figure dans la variable ADMIN_UIDS.
+// Lit les parties récentes (Ludo en ligne, Deux dés en ligne, présentiel) et
+// renvoie une ligne par partie : l'appli calcule les totaux.
+
+function adminIds(env) {
+  return String(env.ADMIN_UIDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Dernières parties d'une collection (champs utiles seulement : plus léger). */
+async function recentDocs(env, collectionId, limit) {
+  const fields = [
+    'createdAt', 'status', 'stake', 'pot', 'settled', 'jackpot', 'commission',
+    'betCommission', 'referralPaid', 'partnerPaid', 'refunded', 'maxPlayers', 'players', 'names',
+    'uids', 'game',
+  ];
+  const res = await fsCall(env, 'runQuery', {
+    structuredQuery: {
+      from: [{ collectionId }],
+      orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+      select: { fields: fields.map((f) => ({ fieldPath: f })) },
+      limit,
+    },
+  });
+  return (Array.isArray(res) ? res : [])
+    .filter((r) => r.document)
+    .map((r) => ({
+      id: r.document.name.split('/').pop(),
+      ...fieldsToObj(r.document.fields || {}),
+    }));
+}
+
+/** Une partie => une ligne du tableau de bord. */
+function adminRow(kind, mode, d) {
+  const stake = Math.max(0, intOr(d.stake, 0));
+  const pot = Math.max(0, intOr(d.pot, 0));
+  const percent = mode === 'local' ? COMMISSION_LOCAL_PERCENT : COMMISSION_PERCENT;
+  const settled = d.settled === true;
+  const refunded = d.refunded === true;
+
+  // Commission enregistrée à la fin de la partie ; sinon estimée (anciennes parties).
+  let commission = 0;
+  if (typeof d.commission === 'number') commission = d.commission;
+  else if (settled && stake > 0 && pot > 0) commission = pot - prizeOf(pot, percent);
+
+  const names =
+    mode === 'local'
+      ? (Array.isArray(d.names) ? d.names : []).map(String)
+      : playersOf(d).map((p) => String((p && p.name) || '?'));
+  const count =
+    mode === 'local' ? (Array.isArray(d.uids) ? d.uids.length : names.length) : names.length;
+
+  let state = 'playing';
+  if (settled) state = refunded ? 'refund' : 'done';
+  else if (d.status === 'waiting') state = 'waiting';
+
+  return {
+    id: d.id,
+    kind,
+    mode,
+    state,
+    createdAt: typeof d.createdAt === 'string' ? d.createdAt : null,
+    stake,
+    pot,
+    players: count,
+    names,
+    commission: refunded ? 0 : commission,
+    prize: settled && !refunded ? Math.max(0, pot - commission) : 0,
+    betCommission: Math.max(0, intOr(d.betCommission, 0)),
+    referralPaid: Math.max(0, intOr(d.referralPaid, 0)),
+    partnerPaid: Math.max(0, intOr(d.partnerPaid, 0)),
+    jackpot: Math.max(0, intOr(d.jackpot, 0)),
+  };
+}
+
+async function adminStats({ uid, data, env }) {
+  if (!adminIds(env).includes(uid)) {
+    throw new HttpError(
+      'permission-denied',
+      `Accès réservé à l'administrateur. Ton identifiant : ${uid}`,
+    );
+  }
+  const limit = Math.min(500, Math.max(20, intOr(data.limit, 150)));
+  await accessToken(env); // un seul jeton pour les 3 requêtes parallèles
+
+  const [ludo, deux, local] = await Promise.all([
+    recentDocs(env, 'games', limit),
+    recentDocs(env, 'deuxdes', limit),
+    recentDocs(env, 'localGames', limit),
+  ]);
+
+  const rows = [
+    ...ludo.map((d) => adminRow('ludo', 'online', d)),
+    ...deux.map((d) => adminRow('deuxdes', 'online', d)),
+    ...local.map((d) =>
+      adminRow(d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : 'unknown', 'local', d),
+    ),
+  ].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+  // Jackpot actuel
+  let pool = 0;
+  try {
+    const jr = await fsCall(env, 'batchGet', { documents: [docName(env, 'app/jackpot')] });
+    const f = Array.isArray(jr) && jr[0] && jr[0].found;
+    if (f) pool = intOr(fieldsToObj(f.fields || {}).pool, 0);
+  } catch (_) {}
+
+  // Commissions de Katika : MA moitié (disponible / retirée). Le 1er compte de
+  // ADMIN_UIDS touche 50 %, le 2e touche 50 %.
+  const adminList = adminIds(env);
+  const myIdx = adminList.indexOf(uid);
+  let house = { available: 0, earned: 0, withdrawn: 0, totalEarned: 0 };
+  try {
+    const hr = await fsCall(env, 'batchGet', { documents: [docName(env, HOUSE_PATH)] });
+    const hf = Array.isArray(hr) && hr[0] && hr[0].found;
+    if (hf) {
+      const h = fieldsToObj(hf.fields || {});
+      const { b0, b1 } = houseShares(h);
+      const mine = houseMyAmount(adminList.length, myIdx, b0, b1);
+      const wd = Math.max(0, intOr(myIdx === 1 ? h.withdrawn1 : myIdx === 0 ? h.withdrawn0 : 0, 0));
+      house = {
+        available: mine,
+        earned: mine + wd,
+        withdrawn: wd,
+        totalEarned: Math.max(0, intOr(h.earned, 0)),
+      };
+    }
+  } catch (_) {}
+
+  // Nombre de comptes joueurs
+  let users = null;
+  try {
+    const r = await fsCall(env, 'runAggregationQuery', {
+      structuredAggregationQuery: {
+        structuredQuery: { from: [{ collectionId: 'users' }] },
+        aggregations: [{ alias: 'n', count: {} }],
+      },
+    });
+    users = Number(r[0].result.aggregateFields.n.integerValue);
+  } catch (_) {}
+
+  return {
+    rows,
+    pool,
+    users,
+    limit,
+    fetched: { ludo: ludo.length, deuxdes: deux.length, local: local.length },
+    jackpotPercent: JACKPOT_PERCENT,
+    referralPercent: REFERRAL_PERCENT,
+    house: {
+      ...house,
+      sharePercent: adminList.length < 2 ? 100 : 50,
+      min: HOUSE_WITHDRAW_MIN,
+      canWithdraw: myIdx >= 0 && myIdx <= 1 && house.available >= HOUSE_WITHDRAW_MIN,
+    },
+  };
+}
+
+/** Administrateur : transfère SA part des commissions de Katika (50 %) vers son
+ *  compte principal (jetons). Possible quand elle atteint HOUSE_WITHDRAW_MIN.
+ *  Seuls les 2 premiers comptes de ADMIN_UIDS reçoivent des commissions. */
+async function adminHouseWithdraw({ uid, env }) {
+  const ids = adminIds(env);
+  if (!ids.includes(uid)) {
+    throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
+  }
+  const idx = ids.indexOf(uid);
+  if (idx > 1) {
+    throw new HttpError(
+      'permission-denied',
+      'Les commissions sont partagées entre les 2 premiers comptes administrateurs.',
+    );
+  }
+  return runTx(env, async (tx) => {
+    const h = await tx.get(HOUSE_PATH);
+    const { b0, b1 } = houseShares(h);
+    const amount = houseMyAmount(ids.length, idx, b0, b1);
+    if (amount < HOUSE_WITHDRAW_MIN) {
+      throw new HttpError(
+        'failed-precondition',
+        `Retrait possible à partir de ${HOUSE_WITHDRAW_MIN} FCFA de commissions.`,
+      );
+    }
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    // Il ne reste que la part de l'autre administrateur (rien si un seul admin).
+    const takesAll = idx === 0 && ids.length < 2;
+    const n0 = idx === 0 ? 0 : b0;
+    const n1 = idx === 1 || takesAll ? 0 : b1;
+    tx.write(`users/${uid}`, { incr: { balance: amount } });
+    tx.write(HOUSE_PATH, {
+      set: {
+        bal0: n0,
+        bal1: n1,
+        balance: n0 + n1,
+        withdrawn: Math.max(0, intOr(h.withdrawn, 0)) + amount,
+        ...(idx === 0
+          ? { withdrawn0: Math.max(0, intOr(h.withdrawn0, 0)) + amount }
+          : { withdrawn1: Math.max(0, intOr(h.withdrawn1, 0)) + amount }),
+      },
+    });
+    return { amount, balance: balanceOf(me) + amount };
+  });
+}
+
+// ======================================================================
+// Dépôts Mobile Money via Campay
+// ======================================================================
+// deposits/{id} : { uid, amount, phone, status, campayRef, tokens, operator }
+//   status : pending -> credited | failed | mismatch
+// Variables : CAMPAY_BASE_URL, CAMPAY_USERNAME, CAMPAY_PASSWORD, CAMPAY_WEBHOOK_KEY
+// Le portefeuille n'est crédité qu'après avoir redemandé le statut à Campay,
+// et une seule fois par dépôt (transaction Firestore).
+
+const TOKENS_PER_XAF = 1; // 1 FCFA = 1 jeton
+const DEPOSIT_MIN = 25; // le mode test de Campay (demo) accepte 25 FCFA
+const DEPOSIT_MAX = 250000;
+
+let campayTokenCache = { value: null, exp: 0 };
+
+function campayBase(env) {
+  const b = String(env.CAMPAY_BASE_URL || '').replace(/\/+$/, '');
+  if (!b) throw new HttpError('internal', 'Campay non configuré.');
+  return b;
+}
+
+async function campayToken(env) {
+  const now = Date.now();
+  if (campayTokenCache.value && campayTokenCache.exp - 60000 > now) {
+    return campayTokenCache.value;
+  }
+  const res = await fetch(`${campayBase(env)}/api/token/`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: env.CAMPAY_USERNAME, password: env.CAMPAY_PASSWORD }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.token) {
+    console.error('Campay token', res.status, JSON.stringify(j));
+    throw new HttpError('internal', 'Paiement indisponible.');
+  }
+  campayTokenCache = { value: j.token, exp: now + (Number(j.expires_in) || 3000) * 1000 };
+  return j.token;
+}
+
+async function campayCall(env, method, path, body) {
+  const res = await fetch(`${campayBase(env)}${path}`, {
+    method,
+    headers: {
+      authorization: `Token ${await campayToken(env)}`,
+      'content-type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, j };
+}
+
+function normPhone(p) {
+  let s = String(p || '').replace(/\D/g, '');
+  if (s.length === 9) s = '237' + s;
+  return /^2376\d{8}$/.test(s) ? s : '';
+}
+
+async function hs256Verify(token, secret) {
+  const parts = String(token).split('.');
+  if (parts.length !== 3 || !secret) return false;
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      te.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    );
+    return await crypto.subtle.verify(
+      'HMAC',
+      key,
+      b64urlDecode(parts[2]),
+      te.encode(`${parts[0]}.${parts[1]}`),
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Demande un dépôt : le joueur reçoit la demande de paiement sur son téléphone. */
+async function campayDeposit({ uid, data, env }) {
+  const amount = intOr(data.amount, -1);
+  if (amount < DEPOSIT_MIN || amount > DEPOSIT_MAX) {
+    throw new HttpError('invalid-argument', `Montant entre ${DEPOSIT_MIN} et ${DEPOSIT_MAX} FCFA.`);
+  }
+  const phone = normPhone(data.phone);
+  if (!phone) throw new HttpError('invalid-argument', 'Numéro MTN ou Orange invalide.');
+
+  const id = newId();
+  await runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    tx.write(`deposits/${id}`, {
+      create: true,
+      set: { uid, amount, phone, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+  });
+
+  const r = await campayCall(env, 'POST', '/api/collect/', {
+    amount: String(amount),
+    currency: 'XAF',
+    from: phone,
+    description: 'Depot Katika',
+    external_reference: id,
+  });
+  if (!r.ok || !r.j.reference) {
+    console.error('Campay collect', r.status, JSON.stringify(r.j));
+    await runTx(env, async (tx) => tx.write(`deposits/${id}`, { set: { status: 'failed' } }));
+    throw new HttpError('failed-precondition', r.j.message || 'Campay a refusé la demande.');
+  }
+  await runTx(env, async (tx) =>
+    tx.write(`deposits/${id}`, { set: { campayRef: r.j.reference } }),
+  );
+  return { depositId: id, reference: r.j.reference };
+}
+
+/** Interroge Campay et crédite le portefeuille si le paiement a réussi (une seule fois). */
+async function settleDeposit(env, id) {
+  const dep = await readDoc(env, `deposits/${id}`);
+  if (!dep) return { status: 'unknown' };
+  if (dep.status !== 'pending' || !dep.campayRef) return { status: dep.status };
+
+  const r = await campayCall(env, 'GET', `/api/transaction/${encodeURIComponent(dep.campayRef)}/`);
+  if (!r.ok) {
+    console.error('Campay status', r.status, JSON.stringify(r.j));
+    return { status: 'pending' };
+  }
+  const st = String(r.j.status || '').toUpperCase();
+  if (!st || st === 'PENDING') return { status: 'pending' };
+
+  return runTx(env, async (tx) => {
+    const d = await tx.get(`deposits/${id}`);
+    if (!d || d.status !== 'pending') return { status: d ? d.status : 'unknown' };
+
+    if (st !== 'SUCCESSFUL') {
+      tx.write(`deposits/${id}`, { set: { status: 'failed' }, serverTime: ['closedAt'] });
+      return { status: 'failed' };
+    }
+    const sameAmount = Number(r.j.amount) === d.amount;
+    const sameRef = !r.j.external_reference || r.j.external_reference === id;
+    if (!sameAmount || !sameRef) {
+      tx.write(`deposits/${id}`, { set: { status: 'mismatch' }, serverTime: ['closedAt'] });
+      return { status: 'mismatch' };
+    }
+    const tokens = d.amount * TOKENS_PER_XAF;
+    tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
+    tx.write(`deposits/${id}`, {
+      set: { status: 'credited', tokens, operator: r.j.operator || null },
+      serverTime: ['closedAt'],
+    });
+    return { status: 'credited' };
+  });
+}
+
+/** L'appli demande où en est son dépôt. */
+async function campayDepositStatus({ uid, data, env }) {
+  const id = idStr(data.depositId);
+  const dep = id ? await readDoc(env, `deposits/${id}`) : null;
+  if (!dep || dep.uid !== uid) throw new HttpError('not-found', 'Dépôt introuvable.');
+  const r = await settleDeposit(env, id);
+  const me = await readDoc(env, `users/${uid}`);
+  return { status: r.status, balance: balanceOf(me) };
+}
+
+// ----------------------------------------------------------------------
+// Retrait des gains de parrainage vers le solde principal
+// ----------------------------------------------------------------------
+// Les commissions de parrainage s'accumulent dans users/{uid}.referralBalance
+// (et dans referralEarned, cumul total). Quand referralBalance atteint
+// REFERRAL_WITHDRAW_MIN, le joueur peut les « retirer » : elles sont ajoutées
+// à son solde principal (balance) et referralBalance repart à zéro.
+
+/** Transfère les gains de parrainage vers le solde principal. */
+async function referralWithdraw({ uid, env }) {
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const amount = Math.max(0, intOr(me.referralBalance, 0));
+    if (amount < REFERRAL_WITHDRAW_MIN) {
+      throw new HttpError(
+        'failed-precondition',
+        `Retrait possible à partir de ${REFERRAL_WITHDRAW_MIN} FCFA de gains.`,
+      );
+    }
+    tx.write(`users/${uid}`, {
+      incr: { balance: amount, referralBalance: -amount, referralWithdrawn: amount },
+    });
+    return { amount, balance: balanceOf(me) + amount };
+  });
+}
+
+// ======================================================================
+// Comptes partenaires et débloquage des parties
+// ======================================================================
+// Un compte partenaire (users/{uid}.partner = true, désigné par
+// l'administrateur grâce à son code promo) touche PARTNER_PERCENT % de la
+// commission de Katika, après la part du parrain, sur les parties des joueurs
+// qu'il a parrainés (ou que ses filleuls ont parrainés). Gains : partnerBalance
+// (disponible), partnerEarned (cumul), partnerWithdrawn ; historique dans
+// partnerEarnings/{id}.
+
+function requireAdmin(uid, env) {
+  if (!adminIds(env).includes(uid)) {
+    throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
+  }
+}
+
+function eqFilter(field, value) {
+  return {
+    fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: toFs(value) },
+  };
+}
+
+async function queryDocs(env, collectionId, where, limit = 200) {
+  const res = await fsCall(env, 'runQuery', {
+    structuredQuery: { from: [{ collectionId }], where, limit },
+  });
+  return (Array.isArray(res) ? res : [])
+    .filter((r) => r.document)
+    .map((r) => ({
+      id: r.document.name.split('/').pop(),
+      ...fieldsToObj(r.document.fields || {}),
+    }));
+}
+
+/** Administrateur : donne ou retire le statut de partenaire (par code promo). */
+async function adminSetPartner({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const key = promoKey(data.code);
+  if (!key) throw new HttpError('invalid-argument', 'Code promo invalide.');
+  const on = data.on !== false;
+  return runTx(env, async (tx) => {
+    const owner = await tx.get(`promoCodes/${key}`);
+    if (!owner || typeof owner.uid !== 'string') {
+      throw new HttpError('not-found', 'Aucun joueur avec ce code promo.');
+    }
+    tx.write(`users/${owner.uid}`, { set: { partner: on } });
+    return { ok: true, uid: owner.uid, code: key, partner: on };
+  });
+}
+
+/** Administrateur : liste des partenaires et de leurs gains. */
+async function adminPartners({ uid, env }) {
+  requireAdmin(uid, env);
+  const list = await queryDocs(env, 'users', eqFilter('partner', true), 100);
+  return {
+    percent: PARTNER_PERCENT,
+    partners: list.map((u) => ({
+      uid: u.id,
+      code: String(u.promoCode || u.pseudo || '?'),
+      earned: Math.max(0, intOr(u.partnerEarned, 0)),
+      available: Math.max(0, intOr(u.partnerBalance, 0)),
+      withdrawn: Math.max(0, intOr(u.partnerWithdrawn, 0)),
+    })),
+  };
+}
+
+/** Filleuls directs d'un partenaire : total, et nombre de filleuls « actifs »
+ *  (ceux qui ont misé au moins PARTNER_MIN_WAGERED FCFA au total). */
+async function partnerQualified(env, uid) {
+  const kids = await queryDocs(env, 'users', eqFilter('referrerUid', uid), 500);
+  const qualified = kids.filter(
+    (k) => Math.max(0, intOr(k.wagered, 0)) >= PARTNER_MIN_WAGERED,
+  ).length;
+  return { total: kids.length, qualified };
+}
+
+/** Partenaire : ses gains, ses filleuls et son historique. */
+async function partnerStats({ uid, env }) {
+  const me = await readDoc(env, `users/${uid}`);
+  if (!me || me.partner !== true) {
+    throw new HttpError('permission-denied', 'Accès réservé aux administrateurs et partenaires.');
+  }
+  let referrals = 0;
+  try {
+    const r = await fsCall(env, 'runAggregationQuery', {
+      structuredAggregationQuery: {
+        structuredQuery: {
+          from: [{ collectionId: 'users' }],
+          where: eqFilter('referrerUid', uid),
+        },
+        aggregations: [{ alias: 'n', count: {} }],
+      },
+    });
+    referrals = Number(r[0].result.aggregateFields.n.integerValue) || 0;
+  } catch (_) {}
+  const list = await queryDocs(env, 'partnerEarnings', eqFilter('partner', uid), 300);
+  list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const available = Math.max(0, intOr(me.partnerBalance, 0));
+  const { qualified } = await partnerQualified(env, uid);
+  const conditionsMet = qualified >= PARTNER_MIN_REFERRALS;
+  return {
+    code: String(me.promoCode || me.pseudo || ''),
+    percent: PARTNER_PERCENT,
+    earned: Math.max(0, intOr(me.partnerEarned, 0)),
+    available,
+    withdrawn: Math.max(0, intOr(me.partnerWithdrawn, 0)),
+    min: PARTNER_WITHDRAW_MIN,
+    canWithdraw: available >= PARTNER_WITHDRAW_MIN && conditionsMet,
+    // Conditions de retrait : 25 filleuls ayant chacun misé au moins 1000 FCFA
+    qualified,
+    needReferrals: PARTNER_MIN_REFERRALS,
+    needWagered: PARTNER_MIN_WAGERED,
+    conditionsMet,
+    referrals,
+    games: list.length,
+    recent: list.slice(0, 50).map((e) => ({
+      amount: intOr(e.amount, 0),
+      mode: String(e.mode || ''),
+      createdAt: typeof e.createdAt === 'string' ? e.createdAt : null,
+    })),
+  };
+}
+
+/** Partenaire : transfère ses gains vers son solde principal. */
+async function partnerWithdraw({ uid, env }) {
+  // Condition : au moins PARTNER_MIN_REFERRALS filleuls ayant chacun misé au
+  // moins PARTNER_MIN_WAGERED FCFA au total.
+  const { qualified } = await partnerQualified(env, uid);
+  if (qualified < PARTNER_MIN_REFERRALS) {
+    throw new HttpError(
+      'failed-precondition',
+      `Retrait possible quand ${PARTNER_MIN_REFERRALS} filleuls ont chacun misé au moins ` +
+        `${PARTNER_MIN_WAGERED} FCFA (actuellement ${qualified}).`,
+    );
+  }
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me || me.partner !== true) {
+      throw new HttpError('permission-denied', 'Réservé aux partenaires.');
+    }
+    const amount = Math.max(0, intOr(me.partnerBalance, 0));
+    if (amount < PARTNER_WITHDRAW_MIN) {
+      throw new HttpError(
+        'failed-precondition',
+        `Retrait possible à partir de ${PARTNER_WITHDRAW_MIN} FCFA de gains.`,
+      );
+    }
+    tx.write(`users/${uid}`, {
+      incr: { balance: amount, partnerBalance: -amount, partnerWithdrawn: amount },
+    });
+    return { amount, balance: balanceOf(me) + amount };
+  });
+}
+
+async function readDoc(env, path) {
+  const r = await fsCall(env, 'batchGet', { documents: [docName(env, path)] });
+  const f = Array.isArray(r) && r[0] && r[0].found;
+  return f ? fieldsToObj(f.fields || {}) : null;
+}
+
+/** Administrateur : débloque les parties restées bloquées depuis plus de
+ *  REVIVE_AFTER_MIN minutes (en attente ou en cours, jamais terminées) :
+ *  toutes les mises sont remboursées et la partie est clôturée. */
+async function adminReviveGames({ uid, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const limitMs = Date.now() - REVIVE_AFTER_MIN * 60 * 1000;
+  const targets = [];
+  for (const col of ['games', 'deuxdes', 'localGames']) {
+    for (const status of ['waiting', 'playing']) {
+      const docs = await queryDocs(env, col, eqFilter('status', status), 200);
+      for (const d of docs) {
+        const t = typeof d.createdAt === 'string' ? Date.parse(d.createdAt) : 0;
+        if (d.settled !== true && d.over !== true && t > 0 && t < limitMs) targets.push({ col, id: d.id });
+      }
+    }
+  }
+  let revived = 0;
+  let refunded = 0;
+  for (const { col, id } of targets) {
+    try {
+      const amount = await runTx(env, async (tx) => {
+        const path = `${col}/${id}`;
+        const d = await tx.get(path);
+        if (!d || d.settled === true) return -1;
+        if (d.status !== 'waiting' && d.status !== 'playing') return -1;
+        if (d.over === true) return -1; // terminée : les joueurs la règlent à l'ouverture
+        const stake = Math.max(0, intOr(d.stake, 0));
+        const who =
+          col === 'localGames'
+            ? (Array.isArray(d.uids) ? d.uids : [])
+            : (Array.isArray(d.paid) ? d.paid : []);
+        refund(tx, who, stake);
+        tx.write(path, {
+          set: {
+            settled: true,
+            refunded: true,
+            status: 'finished',
+            over: true,
+            commission: 0,
+            referralPaid: 0,
+            partnerPaid: 0,
+          },
+        });
+        return stake > 0 ? stake * who.length : 0;
+      });
+      if (amount >= 0) {
+        revived++;
+        refunded += amount;
+      }
+    } catch (_) {}
+  }
+  return { found: targets.length, revived, refunded, afterMinutes: REVIVE_AFTER_MIN };
+}
+
+/** Transfert d'argent d'un joueur vers un autre (par pseudo ou code promo). */
+async function transfer({ uid, data, env }) {
+  const amount = intOr(data.amount, -1);
+  if (amount < TRANSFER_MIN || amount > TRANSFER_MAX) {
+    throw new HttpError('invalid-argument', `Montant entre ${TRANSFER_MIN} et ${TRANSFER_MAX} FCFA.`);
+  }
+  const raw = String(data.to || '').trim().slice(0, 60);
+  if (!raw) throw new HttpError('invalid-argument', 'Indique le pseudo du destinataire.');
+
+  // Retrouve le destinataire : code promo (= pseudo) d'abord, puis pseudo exact.
+  let toUid = '';
+  const key = promoKey(raw);
+  if (key) {
+    const o = await readDoc(env, `promoCodes/${key}`);
+    if (o && typeof o.uid === 'string') toUid = o.uid;
+  }
+  if (!toUid) {
+    const list = await queryDocs(env, 'users', eqFilter('pseudo', raw), 2);
+    if (list.length > 1) {
+      throw new HttpError('failed-precondition', 'Plusieurs joueurs ont ce pseudo : utilise son code promo.');
+    }
+    if (list.length === 1) toUid = list[0].id;
+  }
+  if (!toUid) throw new HttpError('not-found', 'Aucun joueur avec ce pseudo ou ce code promo.');
+  if (toUid === uid) throw new HttpError('invalid-argument', "Tu ne peux pas t'envoyer de l'argent.");
+
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    const to = await tx.get(`users/${toUid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (!to) throw new HttpError('not-found', 'Compte du destinataire introuvable.');
+    if (balanceOf(me) < amount) {
+      throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    }
+    const toName = String(to.pseudo || to.promoCode || raw);
+    tx.write(`users/${uid}`, { incr: { balance: -amount } });
+    tx.write(`users/${toUid}`, { incr: { balance: amount } });
+    tx.write(`transfers/${newId()}`, {
+      create: true,
+      set: {
+        from: uid,
+        to: toUid,
+        amount,
+        fromName: String(me.pseudo || me.promoCode || ''),
+        toName,
+      },
+      serverTime: ['createdAt'],
+    });
+    return { amount, toName, balance: balanceOf(me) - amount };
+  });
+}
+
+/** Appelé par Campay (sans connexion joueur) : déclenche la vérification du dépôt. */
+async function campayWebhook(request, env) {
+  const p = Object.fromEntries(new URL(request.url).searchParams);
+  if (request.method === 'POST') {
+    try {
+      Object.assign(p, await request.json());
+    } catch (_) {}
+  }
+  if (p.signature && !(await hs256Verify(p.signature, env.CAMPAY_WEBHOOK_KEY))) {
+    return new Response('bad signature', { status: 401 });
+  }
+  const id = idStr(p.external_reference);
+  if (id) {
+    try {
+      await settleDeposit(env, id);
+    } catch (e) {
+      console.error(e);
+      return new Response('error', { status: 500 });
+    }
+  }
+  return new Response('ok');
+}
+
+// ======================================================================
+// Point d'entrée
+// ======================================================================
+
+const HANDLERS = {
+  ensureWallet,
+  applyPromo,
+  referralInfo,
+  payStake,
+  startGame,
+  captureFee,
+  adminPlayers,
+  leaveGame,
+  settleGame,
+  startLocalGame,
+  settleLocalGame,
+  sideBetPropose,
+  sideBetAccept,
+  sideBetCancel,
+  sideBetSync,
+  localBetCreate,
+  adminStats,
+  adminHouseWithdraw,
+  campayDeposit,
+  campayDepositStatus,
+  referralWithdraw,
+  adminSetPartner,
+  adminPartners,
+  partnerStats,
+  partnerWithdraw,
+  transfer,
+};
+
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'authorization, content-type',
+  'access-control-allow-methods': 'POST, OPTIONS',
+};
+
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...CORS },
+  });
+}
+
+export default {
+  async fetch(request, env) {
+    // Webhook Campay : appelé par Campay, sans connexion joueur.
+    const p0 = new URL(request.url).pathname.replace(/^\/+|\/+$/g, '');
+    if (p0 === 'campay/webhook') return campayWebhook(request, env);
+
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    if (request.method !== 'POST') {
+      return json({ error: 'POST requis.' }, 405);
+    }
+
+    const name = new URL(request.url).pathname.replace(/^\/+|\/+$/g, '');
+    const handler = HANDLERS[name];
+    if (!handler) {
+      return json({ error: 'Fonction inconnue.' }, 404);
+    }
+
+    try {
+      const m = (request.headers.get('authorization') || '').match(/^Bearer (.+)$/i);
+      if (!m) throw new HttpError('unauthenticated', 'Connexion requise.');
+      const uid = await verifyIdToken(m[1], env);
+
+      let data = {};
+      try {
+        data = (await request.json()) || {};
+      } catch (_) {}
+
+      const result = await handler({ uid, data, env });
+      return json({ data: result });
+    } catch (e) {
+      if (e instanceof HttpError) {
+        return json({ error: e.message }, STATUS[e.code] || 400);
+      }
+      console.error(e);
+      return json({ error: 'Erreur serveur.' }, 500);
+    }
+  },
+};
