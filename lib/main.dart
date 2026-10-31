@@ -121,7 +121,7 @@ class Player {
   final String display; // ex : Rouge
   final Color color;
   final Color lightColor;
-  int start;
+  final int start;
   IconData avatar; // modifiable : le joueur choisit son avatar
   List<int> pawns = [-1, -1, -1, -1];
 
@@ -1014,12 +1014,12 @@ class _SetupScreenState extends State<SetupScreen> {
     Icons.local_fire_department,
     Icons.music_note,
   ];
-  static const List<String> colorNames = ['Rouge', 'Vert', 'Jaune', 'Bleu'];
+  static const List<String> colorNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
   static const List<Color> colorList = [
     Color(0xFFE5262B),
     Color(0xFF22B14C),
-    Color(0xFFFFC21A),
     Color(0xFF1E6BFF),
+    Color(0xFFFFC21A),
   ];
 
   late final List<TextEditingController> nameCtrls;
@@ -1552,7 +1552,7 @@ class LudoGame extends StatefulWidget {
   final bool startDoor;
   final OnlineSession? online; // null = jeu en présentiel
 
-  /// Pseudos choisis, indexés par couleur (Rouge, Vert, Jaune, Bleu).
+  /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
   /// Une chaîne vide = nom par défaut.
   final List<String>? names;
 
@@ -1856,25 +1856,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         gameStarted = true;
         message = 'Pilotage automatique : $v.';
       });
-      if (v == 6 && cornerMode && !cornerSet[currentPlayer]) {
-        final who = currentPlayer;
-        final taken = [
-          for (int i = 0; i < 4; i++)
-            if (cornerSet[i]) corner[i],
-        ];
-        final free = [
-          for (int c = 0; c < 4; c++)
-            if (!taken.contains(c)) c,
-        ];
-        final pick = taken.length == 1
-            ? (taken.first + 2) % 4
-            : free[random.nextInt(free.length)];
-        setState(() {
-          cornerSet[who] = true;
-          corner[who] = pick;
-          _layoutCorners();
-        });
-      }
       if (legalMoves().isEmpty) {
         if (v == 6) {
           setState(() {
@@ -2283,15 +2264,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           lastRoll[i] = (lr[i] as num).toInt();
         }
       }
-      final cs = d['corSet'];
-      final co = d['cor'];
-      if (cs is List && co is List && cs.length == 4 && co.length == 4) {
-        for (int i = 0; i < 4; i++) {
-          cornerSet[i] = cs[i] == true;
-          if (cornerSet[i]) corner[i] = (co[i] as num).toInt();
-        }
-        _layoutCorners();
-      }
       final f = d['forfeited'];
       if (f is List) {
         forfeited
@@ -2487,8 +2459,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'hasRolled': hasRolled,
         'dice': dice,
         'lastRoll': lastRoll,
-        'cor': corner,
-        'corSet': cornerSet,
         'msg': message,
         'over': gameOver,
         'forfeited': forfeited.toList(),
@@ -2505,8 +2475,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
-  /// Joueurs de la partie au départ : 2 = Rouge + Jaune (face à face),
-  /// 3 = Rouge + Vert + Jaune, 4 = tous.
+  /// Joueurs de la partie au départ : 2 = Rouge + Bleu (face à face),
+  /// 3 = Rouge + Vert + Bleu, 4 = tous.
   List<int> get baseIdx => numPlayers == 2
       ? [0, 2]
       : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
@@ -2523,7 +2493,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   final GlobalKey boardKey = GlobalKey();
   final List<GlobalKey> diceKeys = List.generate(4, (_) => GlobalKey());
 
-  // Ordre des tours (sens horaire) : Rouge, Vert, Jaune, Bleu
+  // Ordre des tours (sens horaire) : Rouge, Vert, Bleu, Jaune
   late final List<Player> players = [
     Player(
       display: 'Rouge',
@@ -2540,16 +2510,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       avatar: Icons.face,
     ),
     Player(
-      display: 'Jaune',
-      color: const Color(0xFFFFC21A),
-      lightColor: const Color(0xFFFFF3CC),
+      display: 'Bleu',
+      color: const Color(0xFF1E6BFF),
+      lightColor: const Color(0xFFDFEAFF),
       start: 26,
       avatar: Icons.face_3,
     ),
     Player(
-      display: 'Bleu',
-      color: const Color(0xFF1E6BFF),
-      lightColor: const Color(0xFFDFEAFF),
+      display: 'Jaune',
+      color: const Color(0xFFFFC21A),
+      lightColor: const Color(0xFFFFF3CC),
       start: 39,
       avatar: Icons.person_outline,
     ),
@@ -2829,11 +2799,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     sfx.land();
     if (dice == 6) sfx.six();
 
-    if (dice == 6 && cornerMode && !cornerSet[currentPlayer]) {
-      await _resolveCorner(currentPlayer);
-      if (!mounted || rollToken != _token) return;
-    }
-
     final legal = legalMoves();
     final distinct = distinctMoves(legal);
     final forced =
@@ -3074,7 +3039,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         finishThrows[i] = 0;
       }
       forfeited.clear();
-      _resetCorners();
       winnerOverride = null;
       arrivalColor = null;
       gameStarted = false;
@@ -3094,150 +3058,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Positions des pions (en unités de cases)
   // ---------------------------------------------------------------------
 
-  // ---------------------------------------------------------------------
-  // Jeu à 3 : choix des cases (coins) au premier 6
-  // ---------------------------------------------------------------------
-
-  /// Coin (0 haut-gauche, 1 haut-droite, 2 bas-droite, 3 bas-gauche) de
-  /// chaque joueur. Tant qu'un joueur n'a pas choisi, son coin est provisoire.
-  final List<int> corner = [0, 1, 2, 3];
-  final List<bool> cornerSet = [false, false, false, false];
-
-  /// Choix des cases : uniquement à 3 joueurs, quand il faut sortir sur un 6.
-  bool get cornerMode =>
-      numPlayers == 3 && !widget.startOut && !widget.startDoor;
-
-  /// Joueur installé dans le coin [c].
-  int _playerAtCorner(int c) {
-    final i = corner.indexOf(c);
-    return i < 0 ? c : i;
-  }
-
-  /// Joueurs dont la case est désactivée (dernier coin, une fois les 3
-  /// joueurs installés).
-  Set<int> get _disabledPlayers =>
-      (cornerMode && baseIdx.every((i) => cornerSet[i]))
-          ? {
-              for (int i = 0; i < 4; i++)
-                if (!baseIdx.contains(i)) i,
-            }
-          : <int>{};
-
-  /// Recalcule les coins : les joueurs installés gardent le leur, les autres
-  /// reçoivent les coins libres (provisoirement).
-  void _layoutCorners() {
-    final taken = <int>{
-      for (int i = 0; i < 4; i++)
-        if (cornerSet[i]) corner[i],
-    };
-    final free = [
-      for (int c = 0; c < 4; c++)
-        if (!taken.contains(c)) c,
-    ];
-    for (int i = 0; i < 4; i++) {
-      if (!cornerSet[i]) corner[i] = free.removeAt(0);
-    }
-    for (int i = 0; i < 4; i++) {
-      players[i].start = corner[i] * 13;
-    }
-  }
-
-  void _resetCorners() {
-    for (int i = 0; i < 4; i++) {
-      cornerSet[i] = false;
-      corner[i] = i;
-    }
-    _layoutCorners();
-  }
-
-  /// Le joueur [p] vient de sortir un 6 sans avoir de case : 1er = choisit
-  /// parmi les 4, 2e = placé en face du 1er, 3e = choisit parmi les 2 restantes.
-  Future<void> _resolveCorner(int p, {bool auto = false}) async {
-    if (!cornerMode || cornerSet[p]) return;
-    final taken = <int>{
-      for (int i = 0; i < 4; i++)
-        if (cornerSet[i]) corner[i],
-    };
-    final free = [
-      for (int c = 0; c < 4; c++)
-        if (!taken.contains(c)) c,
-    ];
-    int pick;
-    String msg;
-    if (taken.length == 1) {
-      pick = (taken.first + 2) % 4; // face au 1er joueur
-      msg = '6 ! Ta case est placée en face de la première.';
-    } else if (auto || free.length == 1) {
-      pick = free[random.nextInt(free.length)];
-      msg = '6 ! Une case t\'a été attribuée.';
-    } else {
-      final r = await _cornerDialog(p, taken);
-      if (!mounted) return;
-      pick = r ?? free[random.nextInt(free.length)];
-      msg = '6 ! Case choisie. Sors un pion ou avance.';
-    }
-    setState(() {
-      cornerSet[p] = true;
-      corner[p] = pick;
-      _layoutCorners();
-      message = msg;
-    });
-  }
-
-  Future<int?> _cornerDialog(int p, Set<int> taken) {
-    Widget tile(BuildContext ctx, int k) {
-      final owner = [
-        for (int i = 0; i < 4; i++)
-          if (cornerSet[i] && corner[i] == k) i,
-      ];
-      final isTaken = owner.isNotEmpty;
-      final col = isTaken ? players[owner.first].color : players[p].color;
-      return Material(
-        color: col.withOpacity(isTaken ? 0.3 : 0.95),
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: isTaken ? null : () => Navigator.of(ctx).pop(k),
-          child: Center(
-            child: Icon(
-              isTaken ? Icons.lock : Icons.touch_app,
-              color: Colors.white,
-              size: 34,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return showDialog<int>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF14267A),
-        title: Text(
-          '${nameOf(p)} : ${tr('choisis ta case', 'choose your corner')}',
-          style: const TextStyle(color: Colors.white, fontSize: 17),
-        ),
-        content: SizedBox(
-          width: 230,
-          height: 230,
-          child: GridView.count(
-            crossAxisCount: 2,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [for (final k in const [0, 1, 3, 2]) tile(ctx, k)],
-          ),
-        ),
-      ),
-    );
-  }
-
   /// Pions à la base : aux 4 coins, pour laisser la place au logo central.
   List<double> homeCenter(int p, int i) {
-    final k = corner[p];
-    final rowStart = k < 2 ? 0 : 9;
-    final colStart = (k == 0 || k == 3) ? 0 : 9;
+    final rowStart = p < 2 ? 0 : 9;
+    final colStart = (p == 0 || p == 3) ? 0 : 9;
     final r = i < 2 ? 1.5 : 4.5;
     final c = i.isEven ? 1.1 : 4.9;
     return [rowStart + r, colStart + c];
@@ -3249,7 +3073,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (position == -1) return homeCenter(p, i);
 
     final cell = position >= 51
-        ? homeLane(corner[p])[position - 51]
+        ? homeLane(p)[position - 51]
         : track[(players[p].start + position) % 52];
     return [cell[0] + 0.5, cell[1] + 0.5];
   }
@@ -3388,8 +3212,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     return [
       Positioned(
-        left: xs[corner[a]] * c - size / 2,
-        top: ys[corner[a]] * c - size / 2,
+        left: xs[a] * c - size / 2,
+        top: ys[a] * c - size / 2,
         width: size,
         height: size,
         child: IgnorePointer(
@@ -3412,9 +3236,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (w == null) return const <Widget>[];
     final winner = players[w];
 
-    final wk = corner[w];
-    final rowStart = wk < 2 ? 0 : 9;
-    final colStart = (wk == 0 || wk == 3) ? 0 : 9;
+    final rowStart = w < 2 ? 0 : 9;
+    final colStart = (w == 0 || w == 3) ? 0 : 9;
     final crownBox = c * 3.2;
 
     return [
@@ -3552,27 +3375,17 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   Positioned.fill(
                     child: CustomPaint(
                       painter: BoardPainter(
-                        colors: [
-                          for (int k = 0; k < 4; k++)
-                            _disabledPlayers.contains(_playerAtCorner(k))
-                                ? const Color(0xFF9AA3B5)
-                                : players[_playerAtCorner(k)].color,
-                        ],
-                        lights: [
-                          for (int k = 0; k < 4; k++)
-                            _disabledPlayers.contains(_playerAtCorner(k))
-                                ? const Color(0xFFE3E6EE)
-                                : players[_playerAtCorner(k)].lightColor,
-                        ],
+                        colors: players.map((p) => p.color).toList(),
+                        lights: players.map((p) => p.lightColor).toList(),
                         track: track,
-                        lanes: [for (int k = 0; k < 4; k++) homeLane(k)],
-                        starts: const [0, 13, 26, 39],
+                        lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
+                        starts: players.map((p) => p.start).toList(),
                         safeStars: widget.starSafe ? safeStars : const <int>{},
                         showDoorStars: widget.doorSafe,
                       ),
                     ),
                   ),
-                  ...buildBaseLogos(c, corners: corner, hidden: _disabledPlayers),
+                  ...buildBaseLogos(c),
                   ...buildPawns(c),
                   ...buildArrival(c),
                   ...buildVictory(c),
@@ -4667,18 +4480,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           // Jackpot en direct pendant la partie
                           Column(
                             mainAxisSize: MainAxisSize.min,
-                            children: [
-                              badgesRow(_playerAtCorner(0), _playerAtCorner(1)),
-                              diceRow(_playerAtCorner(0), _playerAtCorner(1)),
-                            ],
+                            children: [badgesRow(0, 1), diceRow(0, 1)],
                           ),
                           buildBoard(boardSize),
                           Column(
                             mainAxisSize: MainAxisSize.min,
-                            children: [
-                              diceRow(_playerAtCorner(3), _playerAtCorner(2)),
-                              badgesRow(_playerAtCorner(3), _playerAtCorner(2)),
-                            ],
+                            children: [diceRow(3, 2), badgesRow(3, 2)],
                           ),
                           buildStatusBar(),
                         ],
