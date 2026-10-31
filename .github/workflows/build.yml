@@ -27,8 +27,8 @@ jobs:
           channel: stable
 
       - name: Creer la structure Android et Web
-        
         run: flutter create --org com.yveslaurent85 --project-name ludopro --platforms=android,web .
+
       - name: Configurer Firebase
         run: cp google-services.json android/app/google-services.json
 
@@ -42,19 +42,38 @@ jobs:
             exit 1
           fi
 
+      # Cle de signature FIXE : sans elle, chaque compilation est signee avec
+      # une cle differente et Android refuse la mise a jour par-dessus
+      # l'ancienne version. La cle est stockee dans le secret KATIKA_KEYSTORE_B64.
+      - name: Installer la cle de signature
+        env:
+          KEYSTORE_B64: ${{ secrets.KATIKA_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "Secret KATIKA_KEYSTORE_B64 manquant (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          mkdir -p "$HOME/.android"
+          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+
       - name: Installer les dependances
         run: flutter pub get
+
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
+      # Le numero de version monte tout seul a chaque compilation (1000 + numero
+      # d'execution) : Android accepte alors la mise a jour.
       - name: Construire l APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-number $((1000 + ${{ github.run_number }}))
 
       - name: Construire la version web
         run: flutter build web --release --base-href "/LudoPro/"
 
-      - name: Ajouter l APK au site
-        run: cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
+      - name: Ajouter l APK et la version au site
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
+          echo "{\"build\": $((1000 + ${{ github.run_number }})), \"date\": \"$(date -u +%Y-%m-%d)\"}" > build/web/version.json
 
       - name: Garder aussi l APK en artefact
         uses: actions/upload-artifact@v4
