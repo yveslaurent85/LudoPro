@@ -75,6 +75,26 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
           echo "{\"build\": $((1000 + ${{ github.run_number }})), \"date\": \"$(date -u +%Y-%m-%d)\"}" > build/web/version.json
 
+      # APK publie dans les Releases du depot du site (github.com, accessible
+      # partout). Le bouton du site pointe vers :
+      # https://github.com/yveslaurent85/katikagames-web/releases/latest/download/Katika.apk
+      # Secret requis : WEB_RELEASE_TOKEN (jeton avec droit d'ecriture sur
+      # le depot katikagames-web).
+      - name: Publier l APK dans les Releases du site
+        env:
+          GH_TOKEN: ${{ secrets.WEB_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "Secret WEB_RELEASE_TOKEN manquant."
+            exit 1
+          fi
+          BUILD=$((1000 + ${{ github.run_number }}))
+          cp build/app/outputs/flutter-apk/app-release.apk Katika.apk
+          gh release delete latest --repo yveslaurent85/katikagames-web --yes --cleanup-tag || true
+          gh release create latest Katika.apk --repo yveslaurent85/katikagames-web \
+            --title "Katika build $BUILD" \
+            --notes "Build $BUILD du $(date -u +%d/%m/%Y)"
+
       - name: Garder aussi l APK en artefact
         uses: actions/upload-artifact@v4
         with:
