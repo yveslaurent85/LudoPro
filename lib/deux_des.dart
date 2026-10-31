@@ -838,6 +838,7 @@ class _DiceTableState extends State<_DiceTable>
                                         reactions: widget.reactions!,
                                         uid: widget.uids[i],
                                         size: 28,
+                                        placeholder: true,
                                       ),
                                     ),
                                   ),
@@ -1556,8 +1557,13 @@ class _OnlineHubState extends State<_OnlineHub> {
 
   late final Stream<QuerySnapshot<Map<String, dynamic>>> openStream =
       _rooms.where('status', isEqualTo: 'waiting').limit(30).snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> liveStream =
+      _rooms.where('status', isEqualTo: 'playing').limit(30).snapshots();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
       _rooms.where('uids', arrayContains: uid).snapshots();
+
+  bool showOpen = false; // liste « Parties ouvertes » dépliée
+  bool showLive = false; // liste « Parties en cours » dépliée
 
   @override
   void dispose() {
@@ -1764,6 +1770,94 @@ class _OnlineHubState extends State<_OnlineHub> {
     );
   }
 
+  /// Bouton qui déplie / replie une liste de parties.
+  Widget _listButton(String label, bool open, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SizedBox(
+        height: 50,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white.withOpacity(0.16),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Colors.white30),
+            ),
+          ),
+          onPressed: onTap,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Icon(open ? Icons.expand_less : Icons.expand_more),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _watch(String id) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _OnlineRoom(roomId: id, spectate: true),
+      ),
+    );
+  }
+
+  Widget _liveList() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: liveStream,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return _hint('Impossible de charger les parties en cours.');
+        }
+        if (!snap.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final docs = snap.data!.docs
+            .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+            .where((d) => d.data()['private'] != true)
+            .where((d) => d.data()['over'] != true)
+            .toList()
+          ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+        if (docs.isEmpty) {
+          return _hint('Aucune partie en cours à regarder pour le moment.');
+        }
+        return Column(
+          children: [
+            for (final doc in docs)
+              Builder(builder: (context) {
+                final d = doc.data();
+                final names = _playersOf(d).map((p) => '${p['name']}');
+                final when = _createdText(d['createdAt']);
+                return _tile(
+                  names.join(' vs '),
+                  tr(
+                    '${(d['maxPlayers'] as num).toInt()} joueurs${_stakeText(d)}$when',
+                    '${(d['maxPlayers'] as num).toInt()} players${_stakeText(d)}$when',
+                  ),
+                  'Regarder',
+                  () => _watch(doc.id),
+                );
+              }),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _openList() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: openStream,
@@ -1922,8 +2016,18 @@ class _OnlineHubState extends State<_OnlineHub> {
             ],
           ),
           _mine(),
-          _label('Parties ouvertes'),
-          _openList(),
+          _listButton(
+            '🎲 Parties ouvertes',
+            showOpen,
+            () => setState(() => showOpen = !showOpen),
+          ),
+          if (showOpen) _openList(),
+          _listButton(
+            '👀 Parties en cours',
+            showLive,
+            () => setState(() => showLive = !showLive),
+          ),
+          if (showLive) _liveList(),
         ],
       ),
     );
@@ -2083,8 +2187,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
             ),
           const SizedBox(height: 4),
           const Text(
-            'La partie démarre quand la salle est pleine et que tout le monde '
-            'a payé sa mise.',
+            "Le créateur lance la partie quand il veut, dès 2 joueurs (même "
+            "si la salle n'est pas pleine) et quand tout le monde a payé sa mise.",
             style: TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 8),
@@ -2132,6 +2236,13 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                 ),
               ),
             ),
+          WaitingBell(collection: 'deuxdes', gameId: widget.roomId),
+          HostStartButton(
+            gameId: widget.roomId,
+            isHost: isHost,
+            playerCount: players.length,
+            paidCount: paid.length,
+          ),
           Container(
             margin: const EdgeInsets.only(top: 14, bottom: 14),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
