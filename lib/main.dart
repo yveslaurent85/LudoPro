@@ -348,14 +348,64 @@ class HomeScreen extends StatelessWidget {
                             ),
                             StreamBuilder<int>(
                               stream: Wallet.watch(user.uid),
-                              builder: (context, snap) => Text(
-                                '💰 ${Wallet.format(snap.data ?? 0)}',
-                                style: const TextStyle(
-                                  color: Color(0xFFFFE082),
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
+                              builder: (context, snap) {
+                                return GestureDetector(
+                                  onLongPress: () {
+                                    final email = FirebaseAuth.instance.currentUser
+                                        ?.email
+                                        ?.trim()
+                                        .toLowerCase();
+
+                                    if (email == 'ychachouang@gmail.com') {
+                                      showDialog<void>(
+                                        context: context,
+                                        builder: (dialogContext) => AlertDialog(
+                                          backgroundColor: const Color(0xFF0B2FA6),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(18),
+                                          ),
+                                          title: const Text(
+                                            'Katika',
+                                            style: TextStyle(
+                                              color: Color(0xFFFFE082),
+                                              fontWeight: FontWeight.w900,
+                                            ),
+                                          ),
+                                          content: const Text(
+                                            'Créateur et concepteur :\n'
+                                            'Chachouang Kejouboui Yves',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.of(dialogContext).pop(),
+                                              child: const Text(
+                                                'Fermer',
+                                                style: TextStyle(
+                                                  color: Color(0xFFFFE082),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: Text(
+                                    '💰 ${Wallet.format(snap.data ?? 0)}',
+                                    style: const TextStyle(
+                                      color: Color(0xFFFFE082),
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
