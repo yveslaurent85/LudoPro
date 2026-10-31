@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'accounts.dart';
 import 'deux_des.dart';
+import 'hostess_screen.dart';
 import 'online.dart';
 import 'player_stats.dart';
 
@@ -105,6 +106,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           loading = false;
         });
       } catch (_) {
+        // Ni administrateur ni partenaire : peut-être une hôtesse.
+        try {
+          await Wallet.hostessStats();
+          if (!mounted) return;
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(builder: (_) => const HostessScreen()),
+          );
+          return;
+        } catch (_) {}
         if (!mounted) return;
         setState(() {
           error = Wallet.errorText(e);
@@ -884,6 +894,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           _houseCard(),
           _partnersCard(),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.16),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const HostessScreen(admin: true),
+                  ),
+                ),
+                icon: const Text('💁', style: TextStyle(fontSize: 18)),
+                label: const Text(
+                  'Hôtesses (inscriptions)',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ),
           _title('Filtres'),
           _filterRow('Jeu', [
             _chip('Tous', kind == 'all', () => setState(() => kind = 'all')),
