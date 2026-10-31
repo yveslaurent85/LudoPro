@@ -813,10 +813,10 @@ Future<void> showEmojiPicker(
 const List<Color> _ludoSeatColors = [
   Color(0xFFE5262B),
   Color(0xFF22B14C),
-  Color(0xFFFFC21A),
   Color(0xFF1E6BFF),
+  Color(0xFFFFC21A),
 ];
-const List<String> _ludoSeatNames = ['Rouge', 'Vert', 'Jaune', 'Bleu'];
+const List<String> _ludoSeatNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
 
 const List<Color> _deSeatColors = [
   Color(0xFFE5262B),
