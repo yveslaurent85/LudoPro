@@ -352,6 +352,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int captureAmount = Wallet.minCapture; // montant par capture
   bool busy = false;
   bool optionsStep = false; // 2e page : options de jeu
+  bool showOpen = false; // liste « Parties ouvertes » dépliée
+  bool showLive = false; // liste « Parties en cours » dépliée
   String? error;
 
   final TextEditingController codeCtrl = TextEditingController();
@@ -625,6 +627,41 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           ],
         );
       },
+    );
+  }
+
+  /// Bouton qui déplie / replie une liste de parties.
+  Widget _listButton(String label, bool open, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SizedBox(
+        height: 50,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white.withOpacity(0.16),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Colors.white30),
+            ),
+          ),
+          onPressed: onTap,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Icon(open ? Icons.expand_less : Icons.expand_more),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1052,10 +1089,18 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                 ),
               _codeSection(),
               _mineSection(),
-              _sectionTitle('Parties ouvertes'),
-              _openSection(),
-              _sectionTitle('Parties en cours'),
-              _liveSection(),
+              _listButton(
+                '🎲 Parties ouvertes',
+                showOpen,
+                () => setState(() => showOpen = !showOpen),
+              ),
+              if (showOpen) _openSection(),
+              _listButton(
+                '👀 Parties en cours',
+                showLive,
+                () => setState(() => showLive = !showLive),
+              ),
+              if (showLive) _liveSection(),
               ],
             ],
           ),
