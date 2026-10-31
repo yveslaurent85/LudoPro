@@ -276,6 +276,37 @@ class Wallet {
     return _call('transfer', <String, dynamic>{'to': to, 'amount': amount});
   }
 
+  /// Administrateur : donne ou retire le statut d'hôtesse (par code promo).
+  static Future<Map<String, dynamic>> adminSetHostess(String code, bool on) {
+    return _call('adminSetHostess', <String, dynamic>{'code': code, 'on': on});
+  }
+
+  /// Administrateur : les hôtesses et leurs inscrits sur la période
+  /// ([from] inclus, [to] exclu, en ISO UTC ; null = sans limite).
+  static Future<Map<String, dynamic>> adminHostesses({
+    String? from,
+    String? to,
+  }) {
+    return _call('adminHostesses', <String, dynamic>{
+      if (from != null) 'from': from,
+      if (to != null) 'to': to,
+    });
+  }
+
+  /// Hôtesse : mes inscrits sur la période (l'administrateur peut donner le
+  /// [code] d'une hôtesse pour la consulter).
+  static Future<Map<String, dynamic>> hostessStats({
+    String? from,
+    String? to,
+    String? code,
+  }) {
+    return _call('hostessStats', <String, dynamic>{
+      if (from != null) 'from': from,
+      if (to != null) 'to': to,
+      if (code != null) 'code': code,
+    });
+  }
+
   /// Partenaire : mes gains, mes filleuls et mon historique.
   static Future<Map<String, dynamic>> partnerStats() {
     return _call('partnerStats', <String, dynamic>{});
