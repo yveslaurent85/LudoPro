@@ -472,6 +472,9 @@ async function referralPayout(tx, participants, commission, info = {}) {
     const d = await tx.get(`users/${u}`);
     const r = d && typeof d.referrerUid === 'string' ? d.referrerUid : '';
     if (!r || r === u) continue;
+    // Hôtesse : son code sert seulement à compter les inscrits, sans commission.
+    const rh = await tx.get(`users/${r}`);
+    if (rh && rh.hostess === true) continue;
     if (bonus > 0) gains.set(r, (gains.get(r) || 0) + bonus);
 
     if (partnerBonus > 0) {
@@ -2135,6 +2138,91 @@ async function adminSetPartner({ uid, data, env }) {
   });
 }
 
+// --- Hôtesses ---------------------------------------------------------
+// Une hôtesse est un compte (users/{uid}.hostess = true) dont le code promo
+// sert uniquement à compter les joueurs qu'elle inscrit : aucune commission.
+
+/** Administrateur : donne ou retire le statut d'hôtesse (par code promo). */
+async function adminSetHostess({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const key = promoKey(data.code);
+  if (!key) throw new HttpError('invalid-argument', 'Code promo invalide.');
+  const on = data.on !== false;
+  return runTx(env, async (tx) => {
+    const owner = await tx.get(`promoCodes/${key}`);
+    if (!owner || typeof owner.uid !== 'string') {
+      throw new HttpError('not-found', 'Aucun joueur avec ce code promo.');
+    }
+    tx.write(`users/${owner.uid}`, { set: { hostess: on } });
+    return { ok: true, uid: owner.uid, code: key, hostess: on };
+  });
+}
+
+function periodOf(data) {
+  const from = typeof data.from === 'string' && data.from ? data.from : null;
+  const to = typeof data.to === 'string' && data.to ? data.to : null;
+  return { from, to };
+}
+
+/** Joueurs inscrits avec le code d'une hôtesse, sur une période. */
+async function hostessReport(env, uid, from, to) {
+  const kids = await queryDocs(env, 'users', eqFilter('referrerUid', uid), 5000);
+  const all = kids.map((k) => {
+    const at = typeof k.referredAt === 'string' ? k.referredAt : k.createdAt;
+    return { pseudo: String(k.pseudo || '?'), at: typeof at === 'string' ? at : null };
+  });
+  const members = all
+    .filter((m) => m.at && (!from || m.at >= from) && (!to || m.at < to))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return { total: all.length, count: members.length, members: members.slice(0, 1000) };
+}
+
+/** Administrateur : liste des hôtesses avec leurs inscrits sur la période. */
+async function adminHostesses({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const { from, to } = periodOf(data);
+  const list = await queryDocs(env, 'users', eqFilter('hostess', true), 200);
+  const hostesses = await Promise.all(
+    list.map(async (u) => {
+      const r = await hostessReport(env, u.id, from, to);
+      return {
+        uid: u.id,
+        code: String(u.promoCode || u.pseudo || '?'),
+        pseudo: String(u.pseudo || ''),
+        total: r.total,
+        count: r.count,
+      };
+    }),
+  );
+  hostesses.sort((a, b) => b.count - a.count);
+  return { hostesses, count: hostesses.reduce((s, h) => s + h.count, 0) };
+}
+
+/** Hôtesse : ses inscrits sur la période. L'administrateur peut consulter
+ *  une hôtesse précise en donnant son code promo. */
+async function hostessStats({ uid, data, env }) {
+  const { from, to } = periodOf(data);
+  let target = uid;
+  let code = '';
+  if (typeof data.code === 'string' && data.code.trim()) {
+    requireAdmin(uid, env);
+    const key = promoKey(data.code);
+    const owner = key ? await readDoc(env, `promoCodes/${key}`) : null;
+    if (!owner || typeof owner.uid !== 'string') {
+      throw new HttpError('not-found', 'Aucune hôtesse avec ce code.');
+    }
+    target = owner.uid;
+    code = key;
+  }
+  const me = await readDoc(env, `users/${target}`);
+  if (!me || me.hostess !== true) {
+    throw new HttpError('permission-denied', 'Accès réservé aux hôtesses.');
+  }
+  if (!code) code = String(me.promoCode || me.pseudo || '');
+  const r = await hostessReport(env, target, from, to);
+  return { code, pseudo: String(me.pseudo || ''), ...r };
+}
+
 /** Administrateur : liste des partenaires et de leurs gains. */
 async function adminPartners({ uid, env }) {
   requireAdmin(uid, env);
@@ -2403,6 +2491,9 @@ const HANDLERS = {
   referralWithdraw,
   adminSetPartner,
   adminPartners,
+  adminSetHostess,
+  adminHostesses,
+  hostessStats,
   partnerStats,
   partnerWithdraw,
   transfer,
