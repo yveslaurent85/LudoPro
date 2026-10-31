@@ -3667,6 +3667,28 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ),
     );
 
+    // Boîte d'emojis visible devant la case de chaque joueur : on la touche
+    // pour taguer le joueur (parties en ligne).
+    final Widget? emojiBtn = reactions == null
+        ? null
+        : Builder(
+            builder: (ctx) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _tagPlayer(ctx, index),
+              child: Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withOpacity(0.35),
+                  border: Border.all(color: Colors.white70, width: 1.5),
+                ),
+                child: const Text('😀', style: TextStyle(fontSize: 16)),
+              ),
+            ),
+          );
+
     final info = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment:
@@ -3743,8 +3765,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: avatarOnRight
-                ? [info, const SizedBox(width: 6), avatarWithRing]
-                : [avatarWithRing, const SizedBox(width: 6), info],
+                ? [
+                    if (emojiBtn != null) ...[emojiBtn, const SizedBox(width: 6)],
+                    info,
+                    const SizedBox(width: 6),
+                    avatarWithRing,
+                  ]
+                : [
+                    avatarWithRing,
+                    const SizedBox(width: 6),
+                    info,
+                    if (emojiBtn != null) ...[const SizedBox(width: 6), emojiBtn],
+                  ],
           ),
         ),
       ),
