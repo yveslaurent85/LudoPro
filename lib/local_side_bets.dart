@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'stake_field.dart';
 
 // ----------------------------------------------------------------------
 // Paris en présentiel (Deux dés, un seul téléphone) : Duel et Défi 7.
@@ -17,7 +18,7 @@ const List<Color> _seatColors = [
   Color(0xFFFFC21A),
 ];
 
-const List<int> _betAmounts = [100, 200, 500, 1000];
+const List<int> _betAmounts = [100, 200, 500, 1000, 2000, 5000];
 
 /// Pari préparé avant le début de la partie (placé dès que la partie
 /// démarre, quand les mises sont débitées).
@@ -268,7 +269,7 @@ class _BetSheetState extends State<_BetSheet> {
   Future<void> _submit() async {
     final p = pSeat;
     final o = oSeat;
-    if (p == null || o == null || busy) return;
+    if (p == null || o == null || busy || amount <= 0) return;
     if (widget.localId == null) {
       Navigator.pop(context, PendingBet(type, p, o, amount, over7));
       return;
@@ -352,7 +353,7 @@ class _BetSheetState extends State<_BetSheet> {
   Widget build(BuildContext context) {
     _fix();
     final noProposer = _proposers.isEmpty;
-    final canSend = !busy && pSeat != null && oSeat != null;
+    final canSend = !busy && pSeat != null && oSeat != null && amount > 0;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -451,14 +452,21 @@ class _BetSheetState extends State<_BetSheet> {
                     ),
                 ],
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  tr('Gain du vainqueur : ${Wallet.format(Wallet.prize(amount * 2, local: true))}',
-                      'Winner gets: ${Wallet.format(Wallet.prize(amount * 2, local: true))}'),
-                  style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
-                ),
+              const SizedBox(height: 10),
+              BetAmountField(
+                amount: amount,
+                enabled: !busy,
+                onChanged: (v) => setState(() => amount = v),
               ),
+              if (amount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    tr('Gain du vainqueur : ${Wallet.format(Wallet.prize(amount * 2, local: true))}',
+                        'Winner gets: ${Wallet.format(Wallet.prize(amount * 2, local: true))}'),
+                    style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+                  ),
+                ),
               if (noProposer)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
