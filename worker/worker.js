@@ -1030,6 +1030,56 @@ function recordStats(tx, participants, winners, stake, pot, percent, jackpot) {
   }
 }
 
+/** Administrateur : ajoute aux statistiques des joueurs les parties EN LIGNE
+ *  terminées avant la date `before` (ISO) et pas encore comptées. À relancer
+ *  tant que `remaining` > 0. Les parties en présentiel ne peuvent pas être
+ *  reprises (leurs gagnants n'avaient pas été enregistrés). Chaque partie
+ *  traitée reçoit le marqueur statsBackfilled : aucun double comptage. */
+async function adminBackfillStats({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const before = typeof data.before === 'string' ? data.before : '';
+  if (!before || Number.isNaN(Date.parse(before))) {
+    throw new HttpError('invalid-argument', 'Date invalide.');
+  }
+  const maxGames = Math.min(400, Math.max(40, intOr(data.max, 200)));
+
+  const todo = [];
+  for (const col of ONLINE_COLLECTIONS) {
+    const list = await queryDocs(env, col, eqFilter('settled', true), 1000);
+    for (const g of list) {
+      if (g.statsBackfilled === true || g.refunded === true) continue;
+      if (typeof g.createdAt !== 'string' || g.createdAt >= before) continue;
+      todo.push({ path: `${col}/${g.id}`, col });
+    }
+  }
+
+  const batch = todo.slice(0, maxGames);
+  let counted = 0;
+  for (let i = 0; i < batch.length; i += 40) {
+    const chunk = batch.slice(i, i + 40);
+    counted += await runTx(env, async (tx) => {
+      let n = 0;
+      for (const item of chunk) {
+        const g = await tx.get(item.path);
+        if (!g || g.settled !== true || g.statsBackfilled === true || g.refunded === true) continue;
+        const uids = playersOf(g).map((p) => p.uid);
+        const paid = Array.isArray(g.paid) ? g.paid : [];
+        const stake = Math.max(0, intOr(g.stake, 0));
+        const pot = Math.max(0, intOr(g.pot, 0));
+        let winners = item.col === 'deuxdes' ? deuxDesWinners(g, uids) : ludoWinners(g, uids);
+        if (stake > 0) winners = winners.filter((u) => paid.includes(u));
+        if (winners.length > 0) {
+          recordStats(tx, paid.length ? paid : uids, winners, stake, pot, COMMISSION_PERCENT, intOr(g.jackpot, 0));
+          n++;
+        }
+        tx.write(item.path, { set: { statsBackfilled: true } });
+      }
+      return n;
+    });
+  }
+  return { counted, processed: batch.length, remaining: Math.max(0, todo.length - batch.length) };
+}
+
 /** Administrateur : tous les joueurs inscrits avec leurs statistiques. */
 async function adminPlayers({ uid, data, env }) {
   requireAdmin(uid, env);
@@ -2492,6 +2542,7 @@ const HANDLERS = {
   adminSetPartner,
   adminPartners,
   adminSetHostess,
+  adminBackfillStats,
   adminHostesses,
   hostessStats,
   partnerStats,
