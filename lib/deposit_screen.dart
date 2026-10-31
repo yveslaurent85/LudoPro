@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'accounts.dart';
 
@@ -49,7 +50,8 @@ class _DepositScreenState extends State<DepositScreen> {
     final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
     final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
     if (amount < _min || amount > _max) {
-      setState(() => error = 'Montant entre $_min et $_max FCFA.');
+      setState(() => error =
+          'Montant entre ${_fmt(_min)} et ${_fmt(_max)} FCFA.');
       return;
     }
     final okPhone = RegExp(r'^(237)?6\d{8}$').hasMatch(phone);
@@ -120,6 +122,17 @@ class _DepositScreenState extends State<DepositScreen> {
     });
   }
 
+  /// 250000 -> « 250 000 ».
+  static String _fmt(int v) {
+    final s = v.toString();
+    final b = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(' ');
+      b.write(s[i]);
+    }
+    return b.toString();
+  }
+
   Widget _card(List<Widget> children) {
     return Container(
       width: double.infinity,
@@ -188,30 +201,70 @@ class _DepositScreenState extends State<DepositScreen> {
       ),
       const SizedBox(height: 4),
       const Text(
-        'MTN ou Orange. 1 FCFA = 1 jeton. De 25 à 250000 FCFA.',
+        'MTN ou Orange. 1 FCFA = 1 jeton.',
         style: TextStyle(color: Colors.white70, fontSize: 12),
       ),
       const SizedBox(height: 12),
+      const Text(
+        'Montant à déposer',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 6),
+      TextField(
+        controller: amountCtrl,
+        enabled: !sending,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        onChanged: (_) => setState(() => error = null),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
+        ),
+        decoration: _dec('Écris ton montant', Icons.payments).copyWith(
+          suffixText: 'FCFA',
+          suffixStyle: const TextStyle(
+            color: _gold,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Minimum : ${_fmt(_min)} FCFA   ·   Maximum : ${_fmt(_max)} FCFA',
+        style: const TextStyle(
+          color: _gold,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      const SizedBox(height: 10),
+      const Text(
+        'Ou choisis un montant rapide :',
+        style: TextStyle(color: Colors.white70, fontSize: 12),
+      ),
+      const SizedBox(height: 6),
       Wrap(
         spacing: 8,
         runSpacing: 8,
         children: [
           for (final p in _presets)
             ActionChip(
-              label: Text('$p'),
-              onPressed: sending ? null : () => amountCtrl.text = '$p',
+              label: Text(_fmt(p)),
+              onPressed: sending
+                  ? null
+                  : () => setState(() {
+                        amountCtrl.text = '$p';
+                        error = null;
+                      }),
             ),
         ],
       ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: amountCtrl,
-        enabled: !sending,
-        keyboardType: TextInputType.number,
-        style: const TextStyle(color: Colors.white),
-        decoration: _dec('Montant (FCFA)', Icons.payments),
-      ),
-      const SizedBox(height: 10),
+      const SizedBox(height: 14),
       TextField(
         controller: phoneCtrl,
         enabled: !sending,
