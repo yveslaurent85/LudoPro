@@ -25,10 +25,10 @@ const BoxDecoration _bg = BoxDecoration(
 const List<Color> _seatPalette = [
   Color(0xFFE5262B), // Rouge
   Color(0xFF22B14C), // Vert
-  Color(0xFFFFC21A), // Jaune
   Color(0xFF1E6BFF), // Bleu
+  Color(0xFFFFC21A), // Jaune
 ];
-const List<String> _seatNames = ['Rouge', 'Vert', 'Jaune', 'Bleu'];
+const List<String> _seatNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
 
 /// Couleurs utilisées selon le nombre de joueurs (comme dans le jeu).
 List<int> _colorsFor(int maxPlayers) => maxPlayers == 2
@@ -107,7 +107,7 @@ List<Map<String, dynamic>> _playersOf(Map<String, dynamic> d) {
 
 // --- Mode équipe (2 contre 2) -----------------------------------------
 // Avec 4 joueurs, la place (seat) est égale à la couleur : 0 Rouge,
-// 1 Vert, 2 Jaune, 3 Bleu. « partners » donne le binôme de chaque place
+// 1 Vert, 2 Bleu, 3 Jaune. « partners » donne le binôme de chaque place
 // (-1 = pas encore de binôme). « invites » = invitations en attente.
 
 List<int> _partnersOf(Map<String, dynamic> d) {
