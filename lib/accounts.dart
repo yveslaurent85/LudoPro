@@ -276,6 +276,13 @@ class Wallet {
     return _call('transfer', <String, dynamic>{'to': to, 'amount': amount});
   }
 
+  /// Administrateur : compte dans les statistiques les parties en ligne
+  /// terminées avant [before] (ISO UTC). Renvoie { counted, processed,
+  /// remaining } : à relancer tant que remaining > 0.
+  static Future<Map<String, dynamic>> adminBackfillStats(String before) {
+    return _call('adminBackfillStats', <String, dynamic>{'before': before});
+  }
+
   /// Administrateur : donne ou retire le statut d'hôtesse (par code promo).
   static Future<Map<String, dynamic>> adminSetHostess(String code, bool on) {
     return _call('adminSetHostess', <String, dynamic>{'code': code, 'on': on});
