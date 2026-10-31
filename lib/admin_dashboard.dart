@@ -41,6 +41,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int partnerPercent = 40;
   final TextEditingController partnerCtrl = TextEditingController();
   bool partnerBusy = false;
+  bool statsBusy = false;
 
   // Vue partenaire (compte non administrateur ayant le statut de partenaire)
   bool partnerView = false;
@@ -136,6 +137,63 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ];
       });
     } catch (_) {}
+  }
+
+  /// Compte dans les statistiques des joueurs les anciennes parties en ligne
+  /// (terminées avant la date choisie = mise en service des statistiques).
+  Future<void> _backfillStats() async {
+    if (statsBusy) return;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2025),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+      helpText: 'Parties en ligne créées AVANT cette date',
+    );
+    if (picked == null || !mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Recalculer les statistiques ?'),
+        content: const Text(
+          'Les parties en ligne terminées avant la date choisie sont '
+          'ajoutées aux statistiques des joueurs. Choisis la date à '
+          'laquelle les statistiques ont commencé à être comptées, '
+          "sinon des parties seraient comptées deux fois. L'opération "
+          'ne se fait qu\'une fois par partie.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Lancer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => statsBusy = true);
+    final before =
+        DateTime(picked.year, picked.month, picked.day).toUtc().toIso8601String();
+    int counted = 0;
+    int processed = 0;
+    try {
+      for (int i = 0; i < 30; i++) {
+        final r = await Wallet.adminBackfillStats(before);
+        counted += _i(r['counted']);
+        processed += _i(r['processed']);
+        if (_i(r['remaining']) <= 0) break;
+      }
+      _snack('$counted parties ajoutées aux statistiques '
+          '($processed parties examinées).');
+    } catch (e) {
+      _snack(Wallet.errorText(e));
+    } finally {
+      if (mounted) setState(() => statsBusy = false);
+    }
   }
 
   void _snack(String m) {
@@ -912,6 +970,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 label: const Text(
                   'Hôtesses (inscriptions)',
                   style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.16),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: statsBusy ? null : _backfillStats,
+                icon: const Icon(Icons.calculate),
+                label: Text(
+                  statsBusy
+                      ? 'Calcul en cours...'
+                      : 'Statistiques des anciennes parties',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
             ),
