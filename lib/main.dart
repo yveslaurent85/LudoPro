@@ -25,6 +25,7 @@ import 'rejouer.dart';
 import 'promo_screen.dart';
 import 'password_screen.dart';
 import 'player_stats.dart';
+import 'update_check.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -439,6 +440,7 @@ class HomeScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
               children: [
+                const UpdateChecker(),
                 if (!resumable)
                   Row(
                     children: [
