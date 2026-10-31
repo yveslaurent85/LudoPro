@@ -371,14 +371,43 @@ class HomeScreen extends StatelessWidget {
                                               fontWeight: FontWeight.w900,
                                             ),
                                           ),
-                                          content: const Text(
-                                            'Créateur et concepteur :\n'
-                                            'Chachouang Kejouboui Yves',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
-                                            ),
+                                          content: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Container(
+                                                width: 140,
+                                                height: 140,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: const Color(0xFFFFE082),
+                                                    width: 3,
+                                                  ),
+                                                ),
+                                                child: ClipOval(
+                                                  child: Image.asset(
+                                                    'assets/createur.jpg',
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (_, __, ___) => const Icon(
+                                                      Icons.person,
+                                                      color: Colors.white,
+                                                      size: 80,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 14),
+                                              const Text(
+                                                'Créateur et concepteur :\n'
+                                                'Chachouang Kejouboui Yves',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                           actions: [
                                             TextButton(
