@@ -351,6 +351,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   bool capturePay = false; // captures payantes
   int captureAmount = Wallet.minCapture; // montant par capture
   bool busy = false;
+  bool optionsStep = false; // 2e page : options de jeu
   String? error;
 
   final TextEditingController codeCtrl = TextEditingController();
@@ -886,7 +887,9 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
               Row(
                 children: [
                   IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () => optionsStep
+                        ? setState(() => optionsStep = false)
+                        : Navigator.of(context).pop(),
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                   ),
                   const Text(
@@ -899,6 +902,76 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   ),
                 ],
               ),
+              if (optionsStep) ...[
+              _sectionTitle('Options de jeu'),
+              _switchRow(
+                'Protection des portes',
+                'Un pion sur une case de départ ne peut pas être capturé',
+                doorSafe,
+                (v) => setState(() => doorSafe = v),
+              ),
+              _switchRow(
+                'Protection des étoiles',
+                'Un pion sur une étoile ne peut pas être capturé',
+                starSafe,
+                (v) => setState(() => starSafe = v),
+              ),
+              _switchRow(
+                'Position 54',
+                'Les pions démarrent déjà sur le plateau, près du centre : '
+                    "pas besoin de 6 au début. Un pion capturé a besoin d'un "
+                    '6 pour ressortir. Se joue avec 2 pions chacun.',
+                startOut,
+                (v) => setState(() {
+                  startOut = v;
+                  if (v) {
+                    pawnCount = 2;
+                    startDoor = false;
+                  }
+                }),
+              ),
+              _switchRow(
+                'Départ sur la case de départ',
+                'Les pions démarrent déjà sur leur case de départ : pas '
+                    "besoin de 6 au début. Un pion capturé retourne à la base "
+                    'et a besoin d\'un 6 pour ressortir.',
+                startDoor,
+                (v) => setState(() {
+                  startDoor = v;
+                  if (v) startOut = false;
+                }),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF22B14C),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: busy ? null : _create,
+                  child: Text(
+                    busy ? 'Patiente...' : 'Créer la partie',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(
+                      color: Color(0xFFFF8A80),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ] else ...[
               const JackpotBanner(),
               _sectionTitle('Créer une partie'),
               _pickerRow(
@@ -939,43 +1012,6 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   (v) => setState(() => teamMode = v),
                 ),
               _switchRow(
-                'Protection des portes',
-                'Un pion sur une case de départ ne peut pas être capturé',
-                doorSafe,
-                (v) => setState(() => doorSafe = v),
-              ),
-              _switchRow(
-                'Protection des étoiles',
-                'Un pion sur une étoile ne peut pas être capturé',
-                starSafe,
-                (v) => setState(() => starSafe = v),
-              ),
-              _switchRow(
-                'Position 54',
-                'Les pions démarrent déjà sur le plateau, près du centre : '
-                    "pas besoin de 6 au début. Un pion capturé a besoin d'un "
-                    '6 pour ressortir. Se joue avec 2 pions chacun.',
-                startOut,
-                (v) => setState(() {
-                  startOut = v;
-                  if (v) {
-                    pawnCount = 2;
-                    startDoor = false;
-                  }
-                }),
-              ),
-              _switchRow(
-                'Départ sur la case de départ',
-                'Les pions démarrent déjà sur leur case de départ : pas '
-                    "besoin de 6 au début. Un pion capturé retourne à la base "
-                    'et a besoin d\'un 6 pour ressortir.',
-                startDoor,
-                (v) => setState(() {
-                  startDoor = v;
-                  if (v) startOut = false;
-                }),
-              ),
-              _switchRow(
                 'Partie privée',
                 'Invisible dans la liste : on la rejoint avec un code',
                 privateRoom,
@@ -989,9 +1025,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                     backgroundColor: const Color(0xFF22B14C),
                     foregroundColor: Colors.white,
                   ),
-                  onPressed: busy ? null : _create,
+                  onPressed: () => setState(() {
+                    error = null;
+                    optionsStep = true;
+                  }),
                   child: Text(
-                    busy ? 'Patiente...' : 'Créer la partie',
+                    tr('Suivant', 'Next'),
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
@@ -1017,6 +1056,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
               _openSection(),
               _sectionTitle('Parties en cours'),
               _liveSection(),
+              ],
             ],
           ),
         ),
