@@ -1,116 +1,101 @@
-
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class UpdateChecker {
-  static const String versionUrl =
-      'https://raw.githubusercontent.com/yveslaurent85/katikagames-web/main/version.json';
+/// Dernière version publiée (GitHub Releases du site) et lien de l'APK.
+const String kReleaseApi =
+    'https://api.github.com/repos/yveslaurent85/katikagames-web/releases/latest';
+const String kApkUrl =
+    'https://github.com/yveslaurent85/katikagames-web/releases/latest/download/Katika.apk';
 
-  static Future<void> check(BuildContext context) async {
+bool _updateChecked = false; // une seule vérification par lancement
+
+/// Widget invisible à placer sur l'accueil : au premier affichage, il compare
+/// la version installée à la dernière version publiée et propose la mise à
+/// jour si une version plus récente existe.
+class UpdateChecker extends StatefulWidget {
+  const UpdateChecker({super.key});
+
+  @override
+  State<UpdateChecker> createState() => _UpdateCheckerState();
+}
+
+class _UpdateCheckerState extends State<UpdateChecker> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _check());
+  }
+
+  Future<void> _check() async {
+    if (kIsWeb || _updateChecked) return;
+    _updateChecked = true;
     try {
-      final response = await http
-          .get(Uri.parse(versionUrl))
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode != 200) return;
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-      final latestVersion = data['latestVersion'] as String?;
-      final minimumVersion = data['minimumVersion'] as String?;
-      final apkUrl = data['apkUrl'] as String?;
-      final message = data['message'] as String? ??
-          'Une nouvelle version de Katika est disponible.';
-
-      if (latestVersion == null ||
-          minimumVersion == null ||
-          apkUrl == null ||
-          !context.mounted) {
-        return;
+      final info = await PackageInfo.fromPlatform();
+      final current = int.tryParse(info.buildNumber) ?? 0;
+      final res = await http
+          .get(
+            Uri.parse(kReleaseApi),
+            headers: const {'Accept': 'application/vnd.github+json'},
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return;
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
+      final m = RegExp(r'(\d+)').firstMatch('${j['name'] ?? ''}');
+      final latest = m == null ? 0 : int.parse(m.group(1)!);
+      if (current > 0 && latest > current && mounted) {
+        await _showDialog(latest);
       }
-
-      final packageInfo = await PackageInfo.fromPlatform();
-      if (!context.mounted) return;
-
-      final installedVersion = packageInfo.version;
-
-      final mustUpdate =
-          _compareVersions(installedVersion, minimumVersion) < 0;
-      final hasUpdate =
-          _compareVersions(installedVersion, latestVersion) < 0;
-
-      if (!mustUpdate && !hasUpdate) return;
-
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: !mustUpdate,
-        builder: (dialogContext) {
-          return PopScope(
-            canPop: !mustUpdate,
-            child: AlertDialog(
-              title: Text(
-                mustUpdate
-                    ? 'Mise à jour obligatoire'
-                    : 'Mise à jour disponible',
-              ),
-              content: Text(
-                mustUpdate
-                    ? 'Ta version de Katika est trop ancienne. '
-                        'Mets l’application à jour pour continuer.\n\n$message'
-                    : '$message\n\n'
-                        'Version installée : $installedVersion\n'
-                        'Nouvelle version : $latestVersion',
-              ),
-              actions: [
-                if (!mustUpdate)
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Plus tard'),
-                  ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final uri = Uri.tryParse(apkUrl);
-                    if (uri == null ||
-                        uri.scheme != 'https' ||
-                        !await canLaunchUrl(uri)) {
-                      return;
-                    }
-
-                    await launchUrl(
-                      uri,
-                      mode: LaunchMode.externalApplication,
-                    );
-                  },
-                  child: const Text('Mettre à jour'),
-                ),
-              ],
-            ),
-          );
-        },
-      );
     } catch (_) {
-      // En cas de problème Internet, Katika peut continuer normalement.
+      // Pas de connexion ou GitHub injoignable : on ne dit rien.
     }
   }
 
-  static int _compareVersions(String first, String second) {
-    final a = first.split('.').map((v) => int.tryParse(v) ?? 0).toList();
-    final b = second.split('.').map((v) => int.tryParse(v) ?? 0).toList();
-
-    final length = a.length > b.length ? a.length : b.length;
-
-    for (var i = 0; i < length; i++) {
-      final partA = i < a.length ? a[i] : 0;
-      final partB = i < b.length ? b[i] : 0;
-
-      if (partA < partB) return -1;
-      if (partA > partB) return 1;
-    }
-
-    return 0;
+  Future<void> _showDialog(int latest) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Nouvelle version disponible',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          'Une version plus récente de Katika (n° $latest) est disponible. '
+          'Télécharge-la et installe-la par-dessus : tes données sont '
+          'conservées.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Plus tard'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF22B14C),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              try {
+                await launchUrl(
+                  Uri.parse(kApkUrl),
+                  mode: LaunchMode.externalApplication,
+                );
+              } catch (_) {}
+            },
+            child: const Text('Télécharger'),
+          ),
+        ],
+      ),
+    );
   }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
