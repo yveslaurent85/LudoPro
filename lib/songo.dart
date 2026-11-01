@@ -285,9 +285,9 @@ class _SeedPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (n <= 0) return;
     final c = size.center(Offset.zero);
-    final rx = size.width * 0.40;
-    final ry = size.height * 0.36;
-    final r = min(size.width, size.height) * 0.16;
+    final rx = size.width * 0.34;
+    final ry = size.height * 0.34;
+    final r = min(size.width, size.height) * 0.12;
     final show = min(n, 30);
     final light = Paint()..color = const Color(0xFFFFE9A8);
     final dark = Paint()..color = const Color(0xFFC9801F);
@@ -308,8 +308,8 @@ class _SeedPainter extends CustomPainter {
   bool shouldRepaint(_SeedPainter old) => old.n != n;
 }
 
-/// Plateau en deux colonnes (ta colonne à droite, celle de l'adversaire à
-/// gauche) qui remplit tout l'écran. Les graines sont semées une à une, avec
+/// Plateau en deux rangées horizontales (ta rangée en bas, celle de
+/// l'adversaire en haut) qui remplit tout l'écran. Les graines sont semées une à une, avec
 /// animation et sons.
 class SongoBoardView extends StatefulWidget {
   const SongoBoardView({
@@ -327,7 +327,7 @@ class SongoBoardView extends StatefulWidget {
 
   final List<int> board;
 
-  /// Joueur dont la colonne est à droite.
+  /// Joueur dont la rangée est en bas.
   final int viewer;
   final List<int> legal;
   final ValueChanged<int> onPit;
@@ -487,6 +487,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
             : glow
                 ? Colors.white
                 : _seatColor[owner].withOpacity(0.5);
+    final m = min(w, h);
     return Positioned(
       left: topLeft.dx,
       top: topLeft.dy,
@@ -497,7 +498,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(h * 0.5),
+            borderRadius: BorderRadius.circular(m * 0.5),
             gradient: RadialGradient(
               colors: [
                 flash
@@ -510,13 +511,13 @@ class _SongoBoardViewState extends State<SongoBoardView> {
             ),
             border: Border.all(
               color: border,
-              width: canTap || glow || flash ? 3 : 1.5,
+              width: canTap || glow || flash ? 4 : 2,
             ),
             boxShadow: [
               if (canTap)
                 BoxShadow(
-                  color: _gold.withOpacity(0.45),
-                  blurRadius: 10,
+                  color: _gold.withOpacity(0.5),
+                  blurRadius: 14,
                 ),
             ],
           ),
@@ -526,20 +527,17 @@ class _SongoBoardViewState extends State<SongoBoardView> {
                 child: CustomPaint(painter: _SeedPainter(_shown[idx], idx)),
               ),
               Positioned(
-                left: h * 0.28,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: Text(
-                    '${_shown[idx]}',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: min(26.0, h * 0.5),
-                      fontWeight: FontWeight.w900,
-                      shadows: const [
-                        Shadow(color: Colors.black, blurRadius: 4),
-                      ],
-                    ),
+                right: m * 0.12,
+                bottom: m * 0.04,
+                child: Text(
+                  '${_shown[idx]}',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: max(16.0, min(34.0, m * 0.32)),
+                    fontWeight: FontWeight.w900,
+                    shadows: const [
+                      Shadow(color: Colors.black, blurRadius: 5),
+                    ],
                   ),
                 ),
               ),
@@ -556,25 +554,27 @@ class _SongoBoardViewState extends State<SongoBoardView> {
     final opp = 1 - v;
     return LayoutBuilder(
       builder: (context, c) {
-        const pad = 10.0;
-        const labelH = 26.0;
+        const pad = 8.0;
+        const nameH = 22.0;
         final W = c.maxWidth;
         final H = c.maxHeight;
-        final cw = (W - pad * 3) / 2;
-        final rh = (H - pad * 2 - labelH) / 7;
-        final ph = rh - 6;
+        final pw = (W - pad * 8) / 7;
+        final ph = (H - nameH * 2 - pad * 3) / 2;
+        final topY = nameH + pad;
+        final botY = nameH + pad * 2 + ph;
         final children = <Widget>[];
-        // Colonne de gauche : l'adversaire (de 6 vers 0, de haut en bas).
-        // Colonne de droite : toi (de 0 vers 6, de haut en bas).
-        for (int r = 0; r < 7; r++) {
-          final top = pad + labelH + r * rh + 3;
-          final li = SongoEngine.base(opp) + (6 - r);
-          final ri = SongoEngine.base(v) + r;
-          _centers[li] = Offset(pad + cw / 2, top + ph / 2);
-          _centers[ri] = Offset(pad * 2 + cw + cw / 2, top + ph / 2);
-          children.add(_pit(li, Offset(pad, top), cw, ph));
-          children.add(_pit(ri, Offset(pad * 2 + cw, top), cw, ph));
+        // Rangée du haut : l'adversaire (de gauche à droite : 0 -> 6).
+        // Rangée du bas : toi (de gauche à droite : 6 -> 0).
+        for (int k = 0; k < 7; k++) {
+          final x = pad + k * (pw + pad);
+          final ti = SongoEngine.base(opp) + k;
+          final bi = SongoEngine.base(v) + (6 - k);
+          _centers[ti] = Offset(x + pw / 2, topY + ph / 2);
+          _centers[bi] = Offset(x + pw / 2, botY + ph / 2);
+          children.add(_pit(ti, Offset(x, topY), pw, ph));
+          children.add(_pit(bi, Offset(x, botY), pw, ph));
         }
+        final chip = (min(pw, ph) * 0.4).clamp(30.0, 46.0);
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
@@ -584,9 +584,9 @@ class _SongoBoardViewState extends State<SongoBoardView> {
           child: Stack(
             children: [
               Positioned(
-                left: pad,
-                top: 4,
-                width: cw,
+                left: 0,
+                right: 0,
+                top: 3,
                 child: Text(
                   widget.names[opp],
                   textAlign: TextAlign.center,
@@ -600,9 +600,9 @@ class _SongoBoardViewState extends State<SongoBoardView> {
                 ),
               ),
               Positioned(
-                left: pad * 2 + cw,
-                top: 4,
-                width: cw,
+                left: 0,
+                right: 0,
+                bottom: 3,
                 child: Text(
                   widget.names[v],
                   textAlign: TextAlign.center,
@@ -623,12 +623,11 @@ class _SongoBoardViewState extends State<SongoBoardView> {
                   duration: Duration(milliseconds: _stepMs),
                   curve: Curves.easeInOut,
                   builder: (context, o, _) {
-                    const s = 34.0;
                     return Positioned(
-                      left: o.dx - s / 2,
-                      top: o.dy - s / 2 - 8,
-                      width: s,
-                      height: s,
+                      left: o.dx - chip / 2,
+                      top: o.dy - chip / 2 - 6,
+                      width: chip,
+                      height: chip,
                       child: IgnorePointer(
                         child: Container(
                           alignment: Alignment.center,
@@ -642,10 +641,10 @@ class _SongoBoardViewState extends State<SongoBoardView> {
                           ),
                           child: Text(
                             '$_hand',
-                            style: const TextStyle(
-                              color: Color(0xFF3E2410),
+                            style: TextStyle(
+                              color: const Color(0xFF3E2410),
                               fontWeight: FontWeight.w900,
-                              fontSize: 16,
+                              fontSize: chip * 0.5,
                             ),
                           ),
                         ),
@@ -657,6 +656,52 @@ class _SongoBoardViewState extends State<SongoBoardView> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Le Songô se joue en mode paysage (plateau plus grand) ; l'icône de
+/// rotation permet de revenir en portrait.
+class SongoOrient {
+  static bool landscape = true;
+
+  static void apply() {
+    try {
+      SystemChrome.setPreferredOrientations(landscape
+          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+          : [DeviceOrientation.portraitUp]);
+    } catch (_) {}
+  }
+
+  static void release() {
+    try {
+      SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    } catch (_) {}
+  }
+}
+
+class _RotateToggle extends StatefulWidget {
+  const _RotateToggle();
+
+  @override
+  State<_RotateToggle> createState() => _RotateToggleState();
+}
+
+class _RotateToggleState extends State<_RotateToggle> {
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Pivoter l\'écran',
+      onPressed: () {
+        setState(() => SongoOrient.landscape = !SongoOrient.landscape);
+        SongoOrient.apply();
+      },
+      icon: Icon(
+        SongoOrient.landscape
+            ? Icons.stay_current_portrait
+            : Icons.stay_current_landscape,
+        color: Colors.white,
+      ),
     );
   }
 }
@@ -686,6 +731,7 @@ class _SoundToggleState extends State<_SoundToggle> {
 Widget _gameActions(BuildContext context) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        const _RotateToggle(),
         const _SoundToggle(),
         IconButton(
           tooltip: 'Règles',
@@ -714,7 +760,7 @@ class _ScoreBar extends StatelessWidget {
     return Expanded(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           color: Colors.white.withOpacity(turn ? 0.22 : 0.1),
@@ -723,28 +769,26 @@ class _ScoreBar extends StatelessWidget {
             width: turn ? 3 : 1,
           ),
         ),
-        child: Column(
+        child: Row(
           children: [
-            Text(
-              names[i],
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: _seatColor[i],
-                fontWeight: FontWeight.w800,
+            Expanded(
+              child: Text(
+                turn ? '▶ ${names[i]}' : names[i],
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _seatColor[i],
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
             Text(
               '${scores[i]} / $kSongoWin',
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: FontWeight.w900,
               ),
-            ),
-            Text(
-              turn ? tr('À lui de jouer', 'To move') : ' ',
-              style: const TextStyle(color: _goldSoft, fontSize: 11),
             ),
           ],
         ),
@@ -1384,6 +1428,18 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
   bool get _busy => g.moveN != _doneMove;
   bool get _overShown => g.over && !_busy;
 
+  @override
+  void initState() {
+    super.initState();
+    SongoOrient.apply();
+  }
+
+  @override
+  void dispose() {
+    SongoOrient.release();
+    super.dispose();
+  }
+
   void _tap(int pit) {
     if (_busy || !g.play(pit)) return;
     _scoresAt[g.moveN] = List<int>.from(g.scores);
@@ -1448,61 +1504,72 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
       child: _SShell(
         title: 'Songô',
         trailing: _gameActions(context),
-        child: Column(
+        child: Stack(
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: _ScoreBar(
-                names: widget.names,
-                scores: shownScores,
-                cur: g.cur,
-                over: _overShown,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: SongoBoardView(
-                  board: g.board,
-                  viewer: 0,
-                  legal: (_busy || g.over) ? const [] : g.legal,
-                  onPit: _tap,
-                  moveN: g.moveN,
-                  lastFrom: g.lastFrom,
-                  onSettled: _settledMove,
-                  over: g.over,
-                  names: widget.names,
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: _ScoreBar(
+                    names: widget.names,
+                    scores: shownScores,
+                    cur: g.cur,
+                    over: _overShown,
+                  ),
                 ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                _overShown || _busy ? ' ' : _lastText,
-                style: const TextStyle(color: _goldSoft, fontSize: 15),
-              ),
+                const SizedBox(height: 6),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: SongoBoardView(
+                      board: g.board,
+                      viewer: 0,
+                      legal: (_busy || g.over) ? const [] : g.legal,
+                      onPit: _tap,
+                      moveN: g.moveN,
+                      lastFrom: g.lastFrom,
+                      onSettled: _settledMove,
+                      over: g.over,
+                      names: widget.names,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    _overShown || _busy ? ' ' : _lastText,
+                    style: const TextStyle(color: _goldSoft, fontSize: 15),
+                  ),
+                ),
+              ],
             ),
             if (_overShown)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 230),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: _ResultPanel(
-                    names: widget.names,
-                    scores: g.scores,
-                    winners: g.winners,
-                    stake: widget.stake,
-                    jackpot: jackpot,
-                    extra: Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF22B14C),
-                          foregroundColor: Colors.white,
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  alignment: Alignment.center,
+                  child: ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(maxWidth: 440, maxHeight: 330),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(12),
+                      child: _ResultPanel(
+                        names: widget.names,
+                        scores: g.scores,
+                        winners: g.winners,
+                        stake: widget.stake,
+                        jackpot: jackpot,
+                        extra: Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF22B14C),
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Terminer'),
+                          ),
                         ),
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Terminer'),
                       ),
                     ),
                   ),
@@ -2035,6 +2102,8 @@ class _SongoRoomState extends State<_SongoRoom> {
   DocumentReference<Map<String, dynamic>> get _ref =>
       _rooms.doc(widget.roomId);
 
+  bool _oriented = false;
+
   @override
   void initState() {
     super.initState();
@@ -2044,6 +2113,7 @@ class _SongoRoomState extends State<_SongoRoom> {
   @override
   void dispose() {
     _timer?.cancel();
+    if (_oriented) SongoOrient.release();
     super.dispose();
   }
 
@@ -2353,6 +2423,12 @@ class _SongoRoomState extends State<_SongoRoom> {
         }
         if (d['status'] == 'waiting') return _waiting(d, players, user.uid);
 
+        if (!_oriented) {
+          _oriented = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) SongoOrient.apply();
+          });
+        }
         final g = SongoGame.fromDoc(d);
         if (g.moveN != _seenMove) {
           _seenMove = g.moveN;
@@ -2428,76 +2504,99 @@ class _SongoRoomState extends State<_SongoRoom> {
                 ],
               ],
             ),
-            child: Column(
+            child: Stack(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: _ScoreBar(
-                    names: names,
-                    scores: shownScores,
-                    cur: g.cur,
-                    over: overShown,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: SongoBoardView(
-                      board: g.board,
-                      viewer: viewer,
-                      legal: myTurn ? g.legal : const [],
-                      onPit: (p) => _play(seat, p, g.moveN),
-                      moveN: g.moveN,
-                      lastFrom: g.lastFrom,
-                      onSettled: _settledMove,
-                      over: over,
-                      names: names,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    status,
-                    style: TextStyle(
-                      color: myTurn ? _gold : _goldSoft,
-                      fontSize: 16,
-                      fontWeight: myTurn ? FontWeight.w900 : FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (lastInfo.isNotEmpty)
-                  Text(
-                    lastInfo,
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                if (overShown)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 230),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: _ResultPanel(
+                Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: _ScoreBar(
                         names: names,
-                        scores: g.scores,
-                        winners: g.winners,
-                        stake: stake,
-                        forfeit: forfeit,
-                        jackpot: _jackpotShown,
+                        scores: shownScores,
+                        cur: g.cur,
+                        over: overShown,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: SongoBoardView(
+                          board: g.board,
+                          viewer: viewer,
+                          legal: myTurn ? g.legal : const [],
+                          onPit: (p) => _play(seat, p, g.moveN),
+                          moveN: g.moveN,
+                          lastFrom: g.lastFrom,
+                          onSettled: _settledMove,
+                          over: over,
+                          names: names,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 2, 4, 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              lastInfo.isEmpty ? status : '$status  ·  $lastInfo',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: myTurn ? _gold : _goldSoft,
+                                fontSize: 15,
+                                fontWeight:
+                                    myTurn ? FontWeight.w900 : FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (!over && seat >= 0)
+                            TextButton(
+                              onPressed: () => _forfeit(seat),
+                              child: const Text(
+                                'Abandonner',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (overShown)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black54,
+                      alignment: Alignment.center,
+                      child: ConstrainedBox(
+                        constraints:
+                            const BoxConstraints(maxWidth: 440, maxHeight: 330),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(12),
+                          child: _ResultPanel(
+                            names: names,
+                            scores: g.scores,
+                            winners: g.winners,
+                            stake: stake,
+                            forfeit: forfeit,
+                            jackpot: _jackpotShown,
+                            extra: Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF22B14C),
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Terminer'),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                if (!over && seat >= 0)
-                  TextButton(
-                    onPressed: () => _forfeit(seat),
-                    child: const Text(
-                      'Abandonner',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  )
-                else
-                  const SizedBox(height: 8),
               ],
             ),
           ),
