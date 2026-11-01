@@ -23,6 +23,7 @@
 
 const WELCOME = 10000; // jetons offerts à chaque compte
 const MIN_STAKE = 100; // mise minimale
+const MAX_STAKE = 250000; // mise maximale
 const MIN_CAPTURE = 100; // capture payante : montant minimum par pion
 const MAX_CAPTURE = 5000; // et maximum
 const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
@@ -43,7 +44,7 @@ const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir l
 const REFERRAL_WITHDRAW_MIN = 100; // gains de parrainage minimum pour pouvoir les retirer vers le solde
 
 // Parties en ligne gérées : le Ludo (« games ») et Deux dés (« deuxdes »).
-const ONLINE_COLLECTIONS = ['games', 'deuxdes'];
+const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo'];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 class HttpError extends Error {
@@ -678,6 +679,19 @@ function deuxDesWinners(d, uids) {
   return uids.filter((_, i) => scores[i] === best);
 }
 
+/** Songô : abandon (forfeit = place du perdant) sinon le plus de graines. */
+function songoWinners(d, uids) {
+  const f = intOr(d.forfeit, -1);
+  if (f === 0 || f === 1) return uids[1 - f] ? [uids[1 - f]] : [];
+  return deuxDesWinners(d, uids);
+}
+
+function winnersFor(col, d, uids) {
+  if (col === 'deuxdes') return deuxDesWinners(d, uids);
+  if (col === 'songo') return songoWinners(d, uids);
+  return ludoWinners(d, uids);
+}
+
 // ======================================================================
 // Les fonctions (mêmes noms que les anciennes Cloud Functions)
 // ======================================================================
@@ -805,7 +819,7 @@ async function payStake({ uid, data, env }) {
     }
 
     const stake = Math.max(0, intOr(d.stake, 0));
-    if (stake > 0 && stake < MIN_STAKE) {
+    if (stake > 0 && (stake < MIN_STAKE || stake > MAX_STAKE)) {
       throw new HttpError('failed-precondition', 'Mise invalide.');
     }
     const me = await tx.get(`users/${uid}`);
@@ -1066,7 +1080,7 @@ async function adminBackfillStats({ uid, data, env }) {
         const paid = Array.isArray(g.paid) ? g.paid : [];
         const stake = Math.max(0, intOr(g.stake, 0));
         const pot = Math.max(0, intOr(g.pot, 0));
-        let winners = item.col === 'deuxdes' ? deuxDesWinners(g, uids) : ludoWinners(g, uids);
+        let winners = winnersFor(item.col, g, uids);
         if (stake > 0) winners = winners.filter((u) => paid.includes(u));
         if (winners.length > 0) {
           recordStats(tx, paid.length ? paid : uids, winners, stake, pot, COMMISSION_PERCENT, intOr(g.jackpot, 0));
@@ -1133,7 +1147,7 @@ async function settleGame({ uid, data, env }) {
     const pot = Math.max(0, intOr(d.pot, 0));
     const paid = Array.isArray(d.paid) ? d.paid : [];
 
-    let winners = g.col === 'deuxdes' ? deuxDesWinners(d, uids) : ludoWinners(d, uids);
+    let winners = winnersFor(g.col, d, uids);
     if (stake > 0) winners = winners.filter((u) => paid.includes(u));
 
     if (winners.length === 0) {
@@ -1182,11 +1196,12 @@ async function settleGame({ uid, data, env }) {
  *  c'est bien lui) et crée la partie. `game` = 'ludo' ou 'deuxdes'. */
 async function startLocalGame({ uid: hostUid, data, env }) {
   const stake = intOr(data.stake, -1);
-  if (stake < 0 || (stake > 0 && stake < MIN_STAKE)) {
+  if (stake < 0 || (stake > 0 && (stake < MIN_STAKE || stake > MAX_STAKE))) {
     throw new HttpError('invalid-argument', 'Mise invalide.');
   }
-  const game = data.game === 'deuxdes' || data.game === 'ludo' ? data.game : 'unknown';
-  const maxLocal = game === 'deuxdes' ? 8 : 4; // Deux dés : jusqu'à 8 joueurs
+  const game =
+    data.game === 'deuxdes' || data.game === 'ludo' || data.game === 'songo' ? data.game : 'unknown';
+  const maxLocal = game === 'deuxdes' ? 8 : game === 'songo' ? 2 : 4; // Deux dés : jusqu'à 8 joueurs
   const tokens = Array.isArray(data.tokens) ? data.tokens : [];
   if (tokens.length < 2 || tokens.length > maxLocal) {
     throw new HttpError('invalid-argument', 'Nombre de joueurs invalide.');
@@ -1324,7 +1339,7 @@ async function settleLocalGame({ uid, data, env }) {
 // ou versées par sideBetSync. Gain = 2 mises moins la commission (prizeOf).
 
 const BET_MIN = MIN_STAKE;
-const BET_MAX = 5000;
+const BET_MAX = MAX_STAKE;
 const BET_MAX_OPEN_PER_PLAYER = 3;
 const BET_MAX_PER_ROOM = 40; // jusqu'à 8 joueurs
 
@@ -2391,7 +2406,7 @@ async function adminReviveGames({ uid, env }) {
   await accessToken(env);
   const limitMs = Date.now() - REVIVE_AFTER_MIN * 60 * 1000;
   const targets = [];
-  for (const col of ['games', 'deuxdes', 'localGames']) {
+  for (const col of ['games', 'deuxdes', 'songo', 'localGames']) {
     for (const status of ['waiting', 'playing']) {
       const docs = await queryDocs(env, col, eqFilter('status', status), 200);
       for (const d of docs) {
