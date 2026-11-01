@@ -26,6 +26,8 @@ import 'promo_screen.dart';
 import 'password_screen.dart';
 import 'player_stats.dart';
 import 'update_check.dart';
+import 'stake_field.dart';
+import 'songo.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -613,6 +615,18 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  _ModeCard(
+                    color: const Color(0xFF8D5A2B),
+                    icon: Icons.workspaces,
+                    title: 'Songô',
+                    subtitle: 'Jeu de graines · présentiel ou en ligne',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => const SongoPage(),
+                      ),
+                    ),
+                  ),
                 ],
                 const Spacer(flex: 2),
               ],
@@ -905,31 +919,11 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            for (final v in Wallet.stakes)
-              ChoiceChip(
-                label: Text(Wallet.stakeLabel(v)),
-                selected: stake == v,
-                onSelected: (_) => setState(() => stake = v),
-              ),
-          ],
+        StakeField(
+          stake: stake,
+          players: seats.length,
+          onChanged: (v) => setState(() => stake = v),
         ),
-        const SizedBox(height: 6),
-        Text(
-          stake == 0
-              ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
-              : tr(
-                  'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * seats.length))} '
-                  '(cagnotte ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
-                  'Winner gets: ${Wallet.format(Wallet.prize(stake * seats.length))} '
-                  '(pot ${stake * seats.length}, commission ${Wallet.commissionPercent} %)',
-                ),
-          style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
-        ),
-        const SizedBox(height: 6),
         _switch(
           'Captures payantes',
           'Chaque pion capturé rapporte de l\'argent au joueur qui capture, '
@@ -977,7 +971,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   /// Débite les mises sur le serveur, puis lance la partie.
   Future<void> _startGame() async {
-    if (starting) return;
+    if (starting || stake < 0) return;
     String? localId;
     final uids = <String?>[null, null, null, null];
 
@@ -1578,7 +1572,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                       : (!optionsStep
                                           ? tr('Suivant', 'Next')
                                           : firebaseReady
-                                          ? (stake == 0 ? 'Lancer · partie gratuite' : tr('Lancer · mise ${Wallet.format(stake)}', 'Start · stake ${Wallet.format(stake)}'))
+                                          ? (stake <= 0 ? 'Lancer · partie gratuite' : tr('Lancer · mise ${Wallet.format(stake)}', 'Start · stake ${Wallet.format(stake)}'))
                                           : 'Lancer la partie'))),
                       style: const TextStyle(
                         fontSize: 17,
