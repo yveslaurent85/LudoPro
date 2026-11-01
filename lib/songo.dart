@@ -346,8 +346,8 @@ class SongoBoardView extends StatefulWidget {
 }
 
 class _SongoBoardViewState extends State<SongoBoardView> {
-  late List<int> _shown = List<int>.from(widget.board);
-  late int _doneMove = widget.moveN;
+  late List<int> _shown;
+  late int _doneMove;
   bool _running = false;
   bool _alive = true;
 
@@ -361,6 +361,15 @@ class _SongoBoardViewState extends State<SongoBoardView> {
   Set<int> _flash = {};
   final Map<int, Offset> _centers = {};
   final Sfx _sfx = Sfx();
+
+  @override
+  void initState() {
+    super.initState();
+    // Valeurs de départ fixées ici (et non « late ») : sinon elles seraient
+    // lues trop tard, après l'arrivée du premier coup.
+    _shown = List<int>.from(widget.board);
+    _doneMove = widget.moveN;
+  }
 
   @override
   void dispose() {
@@ -426,10 +435,10 @@ class _SongoBoardViewState extends State<SongoBoardView> {
       _glow = from;
       _stepKey++;
     });
-    await _wait(320);
+    await _wait(450);
     var i = from;
     var rem = seeds;
-    final ms = (5800 / seeds).clamp(170, 340).toInt();
+    final ms = (7000 / seeds).clamp(300, 520).toInt();
     var n = 0;
     while (rem > 0 && _alive) {
       i = (i + 1) % 14;
@@ -452,8 +461,9 @@ class _SongoBoardViewState extends State<SongoBoardView> {
         if (rem == 0) _flyOn = false;
       });
       SongoSound.drop(n);
+      await _wait(160);
     }
-    await _wait(260);
+    await _wait(300);
     if (!_alive) return;
     final diff = <int>{
       for (int k = 0; k < 14; k++)
@@ -495,7 +505,11 @@ class _SongoBoardViewState extends State<SongoBoardView> {
       height: h,
       child: GestureDetector(
         onTap: canTap ? () => widget.onPit(idx) : null,
-        child: AnimatedContainer(
+        child: AnimatedScale(
+          scale: glow && _running ? 1.1 : 1.0,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(m * 0.5),
@@ -544,6 +558,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -574,7 +589,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
           children.add(_pit(ti, Offset(x, topY), pw, ph));
           children.add(_pit(bi, Offset(x, botY), pw, ph));
         }
-        final chip = (min(pw, ph) * 0.4).clamp(30.0, 46.0);
+        final double chip = (min(pw, ph) * 0.4).clamp(30.0, 46.0).toDouble();
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
@@ -617,15 +632,17 @@ class _SongoBoardViewState extends State<SongoBoardView> {
               ),
               ...children,
               if (_flyOn)
-                TweenAnimationBuilder<Offset>(
+                TweenAnimationBuilder<double>(
                   key: ValueKey(_stepKey),
-                  tween: Tween<Offset>(begin: _from, end: _to),
+                  tween: Tween<double>(begin: 0, end: 1),
                   duration: Duration(milliseconds: _stepMs),
                   curve: Curves.easeInOut,
-                  builder: (context, o, _) {
+                  builder: (context, t, _) {
+                    final o = Offset.lerp(_from, _to, t)!;
+                    final lift = sin(pi * t) * chip * 0.9;
                     return Positioned(
                       left: o.dx - chip / 2,
-                      top: o.dy - chip / 2 - 6,
+                      top: o.dy - chip / 2 - 6 - lift,
                       width: chip,
                       height: chip,
                       child: IgnorePointer(
