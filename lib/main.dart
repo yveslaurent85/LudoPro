@@ -29,6 +29,7 @@ import 'update_check.dart';
 import 'stake_field.dart';
 import 'songo.dart';
 import 'rules.dart';
+import 'whatsapp_group.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -174,6 +175,7 @@ TextStyle _logoStyle(Color color, double size) {
 
 class _ModeCard extends StatelessWidget {
   final IconData icon;
+  final String? image;
   final String title;
   final String subtitle;
   final Color color;
@@ -181,6 +183,7 @@ class _ModeCard extends StatelessWidget {
 
   const _ModeCard({
     required this.icon,
+    this.image,
     required this.title,
     required this.subtitle,
     required this.color,
@@ -212,13 +215,23 @@ class _ModeCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 52,
-              height: 52,
+              width: 60,
+              height: 60,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.2),
               ),
-              child: Icon(icon, color: Colors.white, size: 30),
+              child: image == null
+                  ? Icon(icon, color: Colors.white, size: 30)
+                  : Padding(
+                      padding: const EdgeInsets.all(7),
+                      child: Image.asset(
+                        image!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stack) =>
+                            Icon(icon, color: Colors.white, size: 30),
+                      ),
+                    ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -467,6 +480,10 @@ class HomeScreen extends StatelessWidget {
                     ),
                   );
                 }),
+                item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
+                  Navigator.of(sheetCtx).pop();
+                  openWhatsAppGroup(context);
+                }),
                 item(Icons.card_giftcard, 'Code promo',
                     const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
                 if (user != null)
@@ -523,6 +540,7 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               children: [
                 const UpdateChecker(),
+                const WhatsAppInvite(),
                 if (!resumable)
                   Row(
                     children: [
@@ -594,6 +612,7 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFF22B14C),
                     icon: Icons.grid_view_rounded,
+                    image: 'assets/game_ludo.png',
                     title: 'Ludo',
                     subtitle: 'En présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
@@ -608,6 +627,7 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFFFFA000),
                     icon: Icons.casino,
+                    image: 'assets/game_deuxdes.png',
                     title: 'Deux dés',
                     subtitle: 'Lance deux dés',
                     onTap: () => Navigator.of(context).push(
@@ -620,6 +640,7 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFF8D5A2B),
                     icon: Icons.workspaces,
+                    image: 'assets/game_songo.png',
                     title: 'Songô',
                     subtitle: 'Jeu de graines · présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
@@ -629,6 +650,8 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ),
                 ],
+                const SizedBox(height: 16),
+                const WhatsAppGroupButton(),
                 const Spacer(flex: 2),
               ],
             ),
