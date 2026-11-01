@@ -17,6 +17,8 @@ import 'online_screen.dart';
 import 'painters.dart';
 import 'rejouer.dart';
 import 'side_bets.dart';
+import 'stake_field.dart';
+import 'rules.dart';
 
 // ----------------------------------------------------------------------
 // Deux dés : chaque joueur a son compte, en présentiel comme en ligne.
@@ -313,36 +315,11 @@ class DeuxDesPage extends StatelessWidget {
 /// [local] = true : présentiel, commission de 10 % (5 % en ligne).
 Widget _stakeBox(int stake, int players, void Function(int) onPick,
     {bool local = false}) {
-  final pct =
-      local ? Wallet.commissionLocalPercent : Wallet.commissionPercent;
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        children: [
-          for (final v in Wallet.stakes)
-            ChoiceChip(
-              label: Text(Wallet.stakeLabel(v)),
-              selected: stake == v,
-              onSelected: (_) => onPick(v),
-            ),
-        ],
-      ),
-      const SizedBox(height: 6),
-      Text(
-        stake == 0
-            ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
-            : tr(
-                'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * players, local: local))} '
-                '(cagnotte ${stake * players}, commission $pct %)',
-                'Winner gets: ${Wallet.format(Wallet.prize(stake * players, local: local))} '
-                '(pot ${stake * players}, commission $pct %)',
-              ),
-        style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
-      ),
-    ],
+  return StakeField(
+    stake: stake,
+    players: players,
+    onChanged: onPick,
+    local: local,
   );
 }
 
@@ -1134,7 +1111,7 @@ class _LocalSetupState extends State<_LocalSetup> {
 
   /// Débite les mises sur le serveur, puis lance la partie.
   Future<void> _start() async {
-    if (starting) return;
+    if (starting || stake < 0) return;
     final n = numPlayers;
     String? localId;
     var tokenList = <String>[];
@@ -1300,7 +1277,7 @@ class _LocalSetupState extends State<_LocalSetup> {
                             ? tr('Solde insuffisant : $broke',
                                 'Insufficient balance: $broke')
                             : (firebaseReady
-                                ? (stake == 0
+                                ? (stake <= 0
                                     ? 'Lancer · partie gratuite'
                                     : tr('Lancer · mise ${Wallet.format(stake)}',
                                         'Start · stake ${Wallet.format(stake)}'))
@@ -1464,6 +1441,12 @@ class _LocalGameState extends State<_LocalGame> {
       },
       child: _Shell(
         title: 'Deux dés',
+        trailing: IconButton(
+          tooltip: 'Règles',
+          onPressed: () =>
+              showRulesDialog(context, 'Règles de Deux dés', kDeuxDesRules),
+          icon: const Icon(Icons.help_outline, color: Colors.white),
+        ),
         child: Column(
           children: [
             if (widget.stake > 0 && widget.localId != null)
@@ -1586,7 +1569,7 @@ class _OnlineHubState extends State<_OnlineHub> {
 
   Future<void> _create() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || busy) return;
+    if (user == null || busy || stake < 0) return;
     setState(() {
       busy = true;
       error = null;
@@ -2376,6 +2359,12 @@ class _OnlineRoomState extends State<_OnlineRoom> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                IconButton(
+                  tooltip: 'Règles',
+                  onPressed: () => showRulesDialog(
+                      context, 'Règles de Deux dés', kDeuxDesRules),
+                  icon: const Icon(Icons.help_outline, color: Colors.white),
+                ),
                 // Salon d'attente : toutes les informations de la partie
                 RoomInfoButton(
                   collection: 'deuxdes',
