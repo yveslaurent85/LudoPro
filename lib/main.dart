@@ -28,6 +28,7 @@ import 'player_stats.dart';
 import 'update_check.dart';
 import 'stake_field.dart';
 import 'songo.dart';
+import 'rules.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -3561,6 +3562,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ],
             ),
           ),
+          IconButton(
+            tooltip: 'Règles',
+            padding: const EdgeInsets.all(6),
+            constraints: const BoxConstraints(),
+            onPressed: () =>
+                showRulesDialog(context, 'Règles du Ludo', kLudoRules),
+            icon: const Icon(Icons.help_outline, color: Colors.white),
+          ),
+          const SizedBox(width: 4),
           // Salon d'attente : toutes les informations de la partie
           if (isOnline) ...[
             RoomInfoButton(
