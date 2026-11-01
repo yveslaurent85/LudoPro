@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
-import 'lang.dart' show tr;
+import 'lang.dart';
 
 /// Mise maximale autorisée (doit être la même que MAX_STAKE dans worker.js).
 const int kMaxStake = 250000;
