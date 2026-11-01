@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart' hide Text;
@@ -242,6 +243,39 @@ class SongoGame {
 // Plateau
 // ======================================================================
 
+/// Sons du Songô (activables / coupables avec l'icône haut-parleur).
+class SongoSound {
+  static bool on = true;
+
+  static Future<void> play(String file,
+      {double volume = 1.0, double rate = 1.0}) async {
+    if (!on) return;
+    try {
+      final p = AudioPlayer();
+      var closed = false;
+      void close() {
+        if (closed) return;
+        closed = true;
+        try {
+          p.dispose();
+        } catch (_) {}
+      }
+
+      p.onPlayerComplete.first.then((_) => close(), onError: (_) => close());
+      Future<void>.delayed(const Duration(seconds: 6), close);
+      try {
+        await p.setPlaybackRate(rate);
+      } catch (_) {}
+      await p.play(AssetSource(file), volume: volume);
+    } catch (_) {}
+  }
+
+  static void drop(int i) =>
+      play('songo_drop.wav', volume: 0.9, rate: 0.9 + 0.07 * (i % 5));
+  static void pick() => play('songo_pick.wav', volume: 0.9);
+}
+
+/// Dessine les graines d'une case (dans une ellipse).
 class _SeedPainter extends CustomPainter {
   _SeedPainter(this.n, this.salt);
   final int n;
@@ -249,16 +283,24 @@ class _SeedPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (n <= 0) return;
     final c = size.center(Offset.zero);
-    final r = min(size.width, size.height) / 2 * 0.78;
-    final show = min(n, 22);
-    final p1 = Paint()..color = const Color(0xFFFFE9A8);
-    final p2 = Paint()..color = const Color(0xFFB8741A);
+    final rx = size.width * 0.40;
+    final ry = size.height * 0.36;
+    final r = min(size.width, size.height) * 0.16;
+    final show = min(n, 30);
+    final light = Paint()..color = const Color(0xFFFFE9A8);
+    final dark = Paint()..color = const Color(0xFFC9801F);
+    final edge = Paint()
+      ..color = Colors.black38
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
     for (int i = 0; i < show; i++) {
       final a = (i + salt) * 2.399963;
-      final d = r * sqrt((i + 0.5) / show) * 0.92;
-      final o = c + Offset(cos(a) * d, sin(a) * d);
-      canvas.drawCircle(o, size.width * 0.07, i.isEven ? p1 : p2);
+      final k = sqrt((i + 0.5) / show);
+      final o = c + Offset(cos(a) * rx * k, sin(a) * ry * k);
+      canvas.drawCircle(o, r, i.isEven ? light : dark);
+      canvas.drawCircle(o, r, edge);
     }
   }
 
@@ -266,77 +308,243 @@ class _SeedPainter extends CustomPainter {
   bool shouldRepaint(_SeedPainter old) => old.n != n;
 }
 
-class SongoBoardView extends StatelessWidget {
+/// Plateau en deux colonnes (ta colonne à droite, celle de l'adversaire à
+/// gauche) qui remplit tout l'écran. Les graines sont semées une à une, avec
+/// animation et sons.
+class SongoBoardView extends StatefulWidget {
   const SongoBoardView({
     super.key,
     required this.board,
     required this.viewer,
     required this.legal,
     required this.onPit,
-    this.lastPit = -1,
-    this.lastFrom = -1,
+    required this.moveN,
+    required this.lastFrom,
+    required this.onSettled,
+    this.over = false,
     this.names = const ['', ''],
   });
 
   final List<int> board;
 
-  /// Joueur dont la rangée est affichée en bas.
+  /// Joueur dont la colonne est à droite.
   final int viewer;
   final List<int> legal;
   final ValueChanged<int> onPit;
-  final int lastPit;
+
+  /// Numéro du coup et case jouée : l'animation se déclenche à chaque coup.
+  final int moveN;
   final int lastFrom;
+
+  /// Appelé quand l'animation du coup [moveN] est terminée.
+  final ValueChanged<int> onSettled;
+  final bool over;
   final List<String> names;
 
-  Widget _pit(int idx, double size) {
-    final mine = SongoEngine.owns(viewer, idx);
-    final owner = mine ? viewer : 1 - viewer;
-    final can = legal.contains(idx);
-    final isLast = idx == lastPit;
-    final isFrom = idx == lastFrom;
-    return GestureDetector(
-      onTap: can ? () => onPit(idx) : null,
-      child: Container(
-        width: size,
-        height: size * 1.15,
-        margin: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(size * 0.45),
-          gradient: RadialGradient(
-            colors: [
-              can ? const Color(0xFF8A5A2B) : const Color(0xFF6B4423),
-              const Color(0xFF3E2410),
+  @override
+  State<SongoBoardView> createState() => _SongoBoardViewState();
+}
+
+class _SongoBoardViewState extends State<SongoBoardView> {
+  late List<int> _shown = List<int>.from(widget.board);
+  late int _doneMove = widget.moveN;
+  bool _running = false;
+  bool _alive = true;
+
+  int _hand = 0;
+  bool _flyOn = false;
+  Offset _from = Offset.zero;
+  Offset _to = Offset.zero;
+  int _stepKey = 0;
+  int _stepMs = 250;
+  int _glow = -1;
+  Set<int> _flash = {};
+  final Map<int, Offset> _centers = {};
+  final Sfx _sfx = Sfx();
+
+  @override
+  void dispose() {
+    _alive = false;
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(SongoBoardView old) {
+    super.didUpdateWidget(old);
+    if (!_running && widget.moveN != _doneMove) _run();
+    if (!_running && widget.moveN == _doneMove) {
+      // Même coup : le plateau reste celui du serveur.
+      if (!_same(_shown, widget.board)) _shown = List<int>.from(widget.board);
+    }
+  }
+
+  bool _same(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  Future<void> _wait(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
+
+  Future<void> _run() async {
+    _running = true;
+    while (_alive && _doneMove != widget.moveN) {
+      final target = List<int>.from(widget.board);
+      final mv = widget.moveN;
+      final from = widget.lastFrom;
+      var animate = mv == _doneMove + 1 && from >= 0 && from < 14 && _shown[from] > 0;
+      if (animate) {
+        final p = SongoEngine.owns(0, from) ? 0 : 1;
+        final sim = SongoEngine.sow(_shown, p, from);
+        animate = _same(sim.board, target) || SongoEngine.total(target) == 0;
+      }
+      if (animate) {
+        await _play(from, target);
+      } else if (mounted) {
+        setState(() => _shown = target);
+      }
+      if (!_alive) return;
+      _doneMove = mv;
+      widget.onSettled(mv);
+    }
+    _running = false;
+    if (_alive && widget.over) _sfx.win();
+  }
+
+  Future<void> _play(int from, List<int> target) async {
+    final seeds = _shown[from];
+    final start = _centers[from] ?? Offset.zero;
+    SongoSound.pick();
+    setState(() {
+      _shown[from] = 0;
+      _hand = seeds;
+      _flyOn = true;
+      _from = start;
+      _to = start;
+      _glow = from;
+      _stepKey++;
+    });
+    await _wait(320);
+    var i = from;
+    var rem = seeds;
+    final ms = (5800 / seeds).clamp(170, 340).toInt();
+    var n = 0;
+    while (rem > 0 && _alive) {
+      i = (i + 1) % 14;
+      if (i == from) continue;
+      final dest = _centers[i] ?? start;
+      setState(() {
+        _from = _to;
+        _to = dest;
+        _stepMs = ms;
+        _stepKey++;
+      });
+      await _wait(ms);
+      if (!_alive) return;
+      rem--;
+      n++;
+      setState(() {
+        _shown[i]++;
+        _hand = rem;
+        _glow = i;
+        if (rem == 0) _flyOn = false;
+      });
+      SongoSound.drop(n);
+    }
+    await _wait(260);
+    if (!_alive) return;
+    final diff = <int>{
+      for (int k = 0; k < 14; k++)
+        if (_shown[k] != target[k]) k,
+    };
+    if (diff.isNotEmpty) {
+      setState(() => _flash = diff);
+      _sfx.capture();
+      await _wait(650);
+      if (!_alive) return;
+    }
+    setState(() {
+      _shown = target;
+      _flash = {};
+      _glow = -1;
+      _flyOn = false;
+      _hand = 0;
+    });
+  }
+
+  Widget _pit(int idx, Offset topLeft, double w, double h) {
+    final mine = SongoEngine.owns(widget.viewer, idx);
+    final owner = mine ? widget.viewer : 1 - widget.viewer;
+    final canTap = !_running && widget.legal.contains(idx);
+    final flash = _flash.contains(idx);
+    final glow = idx == _glow;
+    final border = flash
+        ? const Color(0xFFFF5252)
+        : canTap
+            ? _gold
+            : glow
+                ? Colors.white
+                : _seatColor[owner].withOpacity(0.5);
+    return Positioned(
+      left: topLeft.dx,
+      top: topLeft.dy,
+      width: w,
+      height: h,
+      child: GestureDetector(
+        onTap: canTap ? () => widget.onPit(idx) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(h * 0.5),
+            gradient: RadialGradient(
+              colors: [
+                flash
+                    ? const Color(0xFF9B2C2C)
+                    : canTap
+                        ? const Color(0xFF8A5A2B)
+                        : const Color(0xFF6B4423),
+                const Color(0xFF301A0B),
+              ],
+            ),
+            border: Border.all(
+              color: border,
+              width: canTap || glow || flash ? 3 : 1.5,
+            ),
+            boxShadow: [
+              if (canTap)
+                BoxShadow(
+                  color: _gold.withOpacity(0.45),
+                  blurRadius: 10,
+                ),
             ],
           ),
-          border: Border.all(
-            color: can
-                ? _gold
-                : isLast
-                    ? Colors.white
-                    : isFrom
-                        ? Colors.white54
-                        : _seatColor[owner].withOpacity(0.55),
-            width: can || isLast ? 3 : 1.5,
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CustomPaint(painter: _SeedPainter(board[idx], idx)),
-            ),
-            Positioned(
-              right: 3,
-              bottom: 1,
-              child: Text(
-                '${board[idx]}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(painter: _SeedPainter(_shown[idx], idx)),
+              ),
+              Positioned(
+                left: h * 0.28,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Text(
+                    '${_shown[idx]}',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: min(26.0, h * 0.5),
+                      fontWeight: FontWeight.w900,
+                      shadows: const [
+                        Shadow(color: Colors.black, blurRadius: 4),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -344,45 +552,107 @@ class SongoBoardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final opp = 1 - viewer;
-    final top = [for (int i = 0; i < 7; i++) SongoEngine.base(opp) + i];
-    final bottom = [for (int i = 6; i >= 0; i--) SongoEngine.base(viewer) + i];
+    final v = widget.viewer;
+    final opp = 1 - v;
     return LayoutBuilder(
       builder: (context, c) {
-        final size = (c.maxWidth - 24) / 7 - 4;
+        const pad = 10.0;
+        const labelH = 26.0;
+        final W = c.maxWidth;
+        final H = c.maxHeight;
+        final cw = (W - pad * 3) / 2;
+        final rh = (H - pad * 2 - labelH) / 7;
+        final ph = rh - 6;
+        final children = <Widget>[];
+        // Colonne de gauche : l'adversaire (de 6 vers 0, de haut en bas).
+        // Colonne de droite : toi (de 0 vers 6, de haut en bas).
+        for (int r = 0; r < 7; r++) {
+          final top = pad + labelH + r * rh + 3;
+          final li = SongoEngine.base(opp) + (6 - r);
+          final ri = SongoEngine.base(v) + r;
+          _centers[li] = Offset(pad + cw / 2, top + ph / 2);
+          _centers[ri] = Offset(pad * 2 + cw + cw / 2, top + ph / 2);
+          children.add(_pit(li, Offset(pad, top), cw, ph));
+          children.add(_pit(ri, Offset(pad * 2 + cw, top), cw, ph));
+        }
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
             color: const Color(0xFF2A1708),
             border: Border.all(color: const Color(0xFFB8741A), width: 3),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Stack(
             children: [
-              Text(
-                names[opp],
-                style: TextStyle(
-                  color: _seatColor[opp],
-                  fontWeight: FontWeight.w800,
+              Positioned(
+                left: pad,
+                top: 4,
+                width: cw,
+                child: Text(
+                  widget.names[opp],
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _seatColor[opp],
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
                 ),
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [for (final i in top) _pit(i, size)],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [for (final i in bottom) _pit(i, size)],
-              ),
-              Text(
-                names[viewer],
-                style: TextStyle(
-                  color: _seatColor[viewer],
-                  fontWeight: FontWeight.w800,
+              Positioned(
+                left: pad * 2 + cw,
+                top: 4,
+                width: cw,
+                child: Text(
+                  widget.names[v],
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _seatColor[v],
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
                 ),
               ),
+              ...children,
+              if (_flyOn)
+                TweenAnimationBuilder<Offset>(
+                  key: ValueKey(_stepKey),
+                  tween: Tween<Offset>(begin: _from, end: _to),
+                  duration: Duration(milliseconds: _stepMs),
+                  curve: Curves.easeInOut,
+                  builder: (context, o, _) {
+                    const s = 34.0;
+                    return Positioned(
+                      left: o.dx - s / 2,
+                      top: o.dy - s / 2 - 8,
+                      width: s,
+                      height: s,
+                      child: IgnorePointer(
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _gold,
+                            border: Border.all(color: Colors.white, width: 2),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black54, blurRadius: 8),
+                            ],
+                          ),
+                          child: Text(
+                            '$_hand',
+                            style: const TextStyle(
+                              color: Color(0xFF3E2410),
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
             ],
           ),
         );
@@ -390,6 +660,40 @@ class SongoBoardView extends StatelessWidget {
     );
   }
 }
+
+class _SoundToggle extends StatefulWidget {
+  const _SoundToggle();
+
+  @override
+  State<_SoundToggle> createState() => _SoundToggleState();
+}
+
+class _SoundToggleState extends State<_SoundToggle> {
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Son',
+      onPressed: () => setState(() => SongoSound.on = !SongoSound.on),
+      icon: Icon(
+        SongoSound.on ? Icons.volume_up : Icons.volume_off,
+        color: Colors.white,
+      ),
+    );
+  }
+}
+
+/// Boutons du haut de l'écran : son + règles.
+Widget _gameActions(BuildContext context) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const _SoundToggle(),
+        IconButton(
+          tooltip: 'Règles',
+          onPressed: () => _showRules(context),
+          icon: const Icon(Icons.help_outline, color: Colors.white),
+        ),
+      ],
+    );
 
 /// Scores : graines capturées par chaque joueur, et à qui c'est de jouer.
 class _ScoreBar extends StatelessWidget {
@@ -1073,10 +1377,23 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
   int _tries = 0;
   int jackpot = 0;
 
+  /// Dernier coup dont l'animation est terminée, et scores à ce moment-là.
+  int _doneMove = 0;
+  final Map<int, List<int>> _scoresAt = {0: [0, 0]};
+
+  bool get _busy => g.moveN != _doneMove;
+  bool get _overShown => g.over && !_busy;
+
   void _tap(int pit) {
-    if (!g.play(pit)) return;
+    if (_busy || !g.play(pit)) return;
+    _scoresAt[g.moveN] = List<int>.from(g.scores);
     setState(() {});
-    if (g.over) _settle();
+  }
+
+  void _settledMove(int m) {
+    if (!mounted) return;
+    setState(() => _doneMove = m);
+    if (g.over && g.moveN == m) _settle();
   }
 
   Future<void> _settle() async {
@@ -1116,6 +1433,7 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
 
   @override
   Widget build(BuildContext context) {
+    final shownScores = _scoresAt[_doneMove] ?? g.scores;
     return PopScope(
       canPop: widget.stake == 0 || g.over,
       onPopInvokedWithResult: (didPop, _) {
@@ -1129,52 +1447,64 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
       },
       child: _SShell(
         title: 'Songô',
-        trailing: IconButton(
-          onPressed: () => _showRules(context),
-          icon: const Icon(Icons.help_outline, color: Colors.white),
-        ),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        trailing: _gameActions(context),
+        child: Column(
           children: [
-            _ScoreBar(
-              names: widget.names,
-              scores: g.scores,
-              cur: g.cur,
-              over: g.over,
-            ),
-            const SizedBox(height: 12),
-            SongoBoardView(
-              board: g.board,
-              viewer: 0,
-              legal: g.legal,
-              onPit: _tap,
-              lastPit: g.lastPit,
-              lastFrom: g.lastFrom,
-              names: widget.names,
-            ),
-            const SizedBox(height: 10),
-            Center(
-              child: Text(
-                g.over ? '' : _lastText,
-                style: const TextStyle(color: _goldSoft, fontSize: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: _ScoreBar(
+                names: widget.names,
+                scores: shownScores,
+                cur: g.cur,
+                over: _overShown,
               ),
             ),
-            if (g.over)
-              _ResultPanel(
-                names: widget.names,
-                scores: g.scores,
-                winners: g.winners,
-                stake: widget.stake,
-                jackpot: jackpot,
-                extra: Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF22B14C),
-                      foregroundColor: Colors.white,
+            const SizedBox(height: 8),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: SongoBoardView(
+                  board: g.board,
+                  viewer: 0,
+                  legal: (_busy || g.over) ? const [] : g.legal,
+                  onPit: _tap,
+                  moveN: g.moveN,
+                  lastFrom: g.lastFrom,
+                  onSettled: _settledMove,
+                  over: g.over,
+                  names: widget.names,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                _overShown || _busy ? ' ' : _lastText,
+                style: const TextStyle(color: _goldSoft, fontSize: 15),
+              ),
+            ),
+            if (_overShown)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 230),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: _ResultPanel(
+                    names: widget.names,
+                    scores: g.scores,
+                    winners: g.winners,
+                    stake: widget.stake,
+                    jackpot: jackpot,
+                    extra: Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF22B14C),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Terminer'),
+                      ),
                     ),
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Terminer'),
                   ),
                 ),
               ),
@@ -1694,6 +2024,13 @@ class _SongoRoomState extends State<_SongoRoom> {
   bool _autoBusy = false;
   Map<String, dynamic>? _last;
   int _jackpotShown = 0;
+  int _doneMove = -1;
+  final Map<int, List<int>> _scoresAt = {};
+
+  void _settledMove(int m) {
+    if (!mounted) return;
+    setState(() => _doneMove = m);
+  }
 
   DocumentReference<Map<String, dynamic>> get _ref =>
       _rooms.doc(widget.roomId);
@@ -2022,29 +2359,37 @@ class _SongoRoomState extends State<_SongoRoom> {
           _stamp = DateTime.now();
           _left = kSongoTurnSecs;
         }
+        // Coup dont l'animation est terminée (au premier affichage : le coup
+        // en cours, sans animation).
+        if (_doneMove < 0) _doneMove = g.moveN;
+        _scoresAt[g.moveN] = List<int>.from(g.scores);
+        final busy = g.moveN != _doneMove;
+        final shownScores = _scoresAt[_doneMove] ?? g.scores;
+
         final over = d['over'] == true;
-        if (over && seat >= 0) _settle();
+        final overShown = over && !busy;
+        if (overShown && seat >= 0) _settle();
         final stake = (d['stake'] as num?)?.toInt() ?? 0;
         final names = [
           for (int i = 0; i < 2; i++)
             i < players.length ? '${players[i]['name']}' : '?',
         ];
         final viewer = seat < 0 ? 0 : seat;
-        final myTurn = seat >= 0 && g.cur == seat && !over;
+        final myTurn = seat >= 0 && g.cur == seat && !over && !busy;
         final forfeit = (d['forfeit'] as num?)?.toInt() ?? -1;
         final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
         if (jp > 0) _jackpotShown = jp;
 
         String status;
-        if (over) {
-          status = '';
+        if (over || busy) {
+          status = ' ';
         } else if (myTurn) {
           status = tr('À toi de jouer · $_left s', 'Your move · $_left s');
         } else {
           status = tr('${names[g.cur]} réfléchit · $_left s',
               '${names[g.cur]} is thinking · $_left s');
         }
-        final lastInfo = g.moveN == 0 || over
+        final lastInfo = g.moveN == 0 || over || busy
             ? ''
             : g.lastCap > 0
                 ? tr('${names[1 - g.cur]} a pris ${g.lastCap} graines.',
@@ -2067,14 +2412,11 @@ class _SongoRoomState extends State<_SongoRoom> {
             }
           },
           child: _SShell(
-            title: 'Songô · en ligne',
+            title: 'Songô',
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  onPressed: () => _showRules(context),
-                  icon: const Icon(Icons.help_outline, color: Colors.white),
-                ),
+                _gameActions(context),
                 RoomInfoButton(collection: 'songo', gameId: widget.roomId),
                 if (seat >= 0) ...[
                   const SizedBox(width: 6),
@@ -2086,65 +2428,76 @@ class _SongoRoomState extends State<_SongoRoom> {
                 ],
               ],
             ),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+            child: Column(
               children: [
-                _ScoreBar(
-                  names: names,
-                  scores: g.scores,
-                  cur: g.cur,
-                  over: over,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: _ScoreBar(
+                    names: names,
+                    scores: shownScores,
+                    cur: g.cur,
+                    over: overShown,
+                  ),
                 ),
-                const SizedBox(height: 12),
-                SongoBoardView(
-                  board: g.board,
-                  viewer: viewer,
-                  legal: myTurn ? g.legal : const [],
-                  onPit: (p) => _play(seat, p, g.moveN),
-                  lastPit: g.lastPit,
-                  lastFrom: g.lastFrom,
-                  names: names,
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: SongoBoardView(
+                      board: g.board,
+                      viewer: viewer,
+                      legal: myTurn ? g.legal : const [],
+                      onPit: (p) => _play(seat, p, g.moveN),
+                      moveN: g.moveN,
+                      lastFrom: g.lastFrom,
+                      onSettled: _settledMove,
+                      over: over,
+                      names: names,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                Center(
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     status,
                     style: TextStyle(
                       color: myTurn ? _gold : _goldSoft,
-                      fontSize: 15,
+                      fontSize: 16,
                       fontWeight: myTurn ? FontWeight.w900 : FontWeight.w600,
                     ),
                   ),
                 ),
                 if (lastInfo.isNotEmpty)
-                  Center(
-                    child: Text(
-                      lastInfo,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
-                    ),
+                  Text(
+                    lastInfo,
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
-                if (over)
-                  _ResultPanel(
-                    names: names,
-                    scores: g.scores,
-                    winners: g.winners,
-                    stake: stake,
-                    forfeit: forfeit,
-                    jackpot: _jackpotShown,
+                if (overShown)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 230),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: _ResultPanel(
+                        names: names,
+                        scores: g.scores,
+                        winners: g.winners,
+                        stake: stake,
+                        forfeit: forfeit,
+                        jackpot: _jackpotShown,
+                      ),
+                    ),
                   ),
                 if (!over && seat >= 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
-                      ),
-                      onPressed: () => _forfeit(seat),
-                      child: const Text('Abandonner'),
+                  TextButton(
+                    onPressed: () => _forfeit(seat),
+                    child: const Text(
+                      'Abandonner',
+                      style: TextStyle(color: Colors.white70),
                     ),
-                  ),
+                  )
+                else
+                  const SizedBox(height: 8),
               ],
             ),
           ),
