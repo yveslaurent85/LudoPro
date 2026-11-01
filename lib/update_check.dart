@@ -36,20 +36,25 @@ class _UpdateCheckerState extends State<UpdateChecker> {
     _updateChecked = true;
 
     try {
-      // Version actuellement installée.
+      // Numéro de compilation installé.
       final info = await PackageInfo.fromPlatform();
       final currentBuild = int.tryParse(info.buildNumber) ?? 0;
 
-      // Récupération de la configuration publiée sur GitHub.
+      // Évite de récupérer une ancienne configuration en cache.
+      final configUri = Uri.parse(
+        '$kUpdateConfigUrl?cache=${DateTime.now().millisecondsSinceEpoch}',
+      );
+
       final response = await http
           .get(
-            Uri.parse(kUpdateConfigUrl),
+            configUri,
             headers: const {
               'Accept': 'application/json',
-              'Cache-Control': 'no-cache',
+              'Cache-Control': 'no-cache, no-store',
+              'Pragma': 'no-cache',
             },
           )
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode != 200) return;
 
@@ -59,10 +64,12 @@ class _UpdateCheckerState extends State<UpdateChecker> {
           int.tryParse('${data['latestBuild'] ?? 0}') ?? 0;
 
       final version = '${data['version'] ?? ''}';
-      final message =
-          '${data['message'] ?? 'Une nouvelle version de Katika est disponible.'}';
 
-      final required = data['required'] == true;
+      final message = '${data['message'] ??
+          'Une nouvelle version de Katika est disponible.'}';
+
+      // true = obligatoire ; false = facultative.
+      final isRequired = data['required'] == true;
 
       final apkUrl = '${data['apkUrl'] ?? ''}';
 
@@ -84,11 +91,12 @@ class _UpdateCheckerState extends State<UpdateChecker> {
         latestBuild: latestBuild,
         version: version,
         message: message,
-        required: required,
+        isRequired: isRequired,
         apkUri: apkUri,
       );
     } catch (e) {
-      // En cas de problème réseau, Katika continue de fonctionner.
+      // Si Internet ou GitHub est inaccessible,
+      // Katika continue de fonctionner normalement.
     }
   }
 
@@ -96,19 +104,19 @@ class _UpdateCheckerState extends State<UpdateChecker> {
     required int latestBuild,
     required String version,
     required String message,
-    required bool required,
+    required bool isRequired,
     required Uri apkUri,
   }) {
     return showDialog<void>(
       context: context,
-      barrierDismissible: !required,
+      barrierDismissible: !isRequired,
       builder: (BuildContext ctx) {
         return PopScope(
-          canPop: !required,
+          canPop: !isRequired,
           child: AlertDialog(
             backgroundColor: const Color(0xFF14267A),
             title: Text(
-              required
+              isRequired
                   ? 'Mise à jour obligatoire'
                   : 'Nouvelle version disponible',
               style: const TextStyle(
@@ -120,20 +128,21 @@ class _UpdateCheckerState extends State<UpdateChecker> {
               '$message\n\n'
               'Version : ${version.isEmpty ? latestBuild : version}\n'
               'Compilation : $latestBuild\n\n'
-              '${required ? 'Tu dois installer cette mise à jour pour continuer à utiliser Katika.' : 'Tu peux installer cette mise à jour maintenant ou choisir de le faire plus tard.'}',
+              '${isRequired ? 'Tu dois installer cette mise à jour pour continuer à utiliser Katika.' : 'Tu peux installer cette mise à jour maintenant ou choisir de le faire plus tard.'}',
               style: const TextStyle(
                 color: Colors.white70,
                 height: 1.5,
               ),
             ),
             actions: [
-              if (!required)
+              if (!isRequired)
                 TextButton(
                   onPressed: () {
                     Navigator.of(ctx).pop();
                   },
                   child: const Text('Plus tard'),
                 ),
+
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF22B14C),
