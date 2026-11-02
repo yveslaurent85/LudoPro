@@ -1,10 +1,11 @@
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'lang.dart';
 
 /// Dépôt par Mobile Money (MTN / Orange) via Campay : le joueur saisit un
 /// montant et son numéro, reçoit une demande de paiement sur son téléphone et
@@ -51,12 +52,14 @@ class _DepositScreenState extends State<DepositScreen> {
     final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
     if (amount < _min || amount > _max) {
       setState(() => error =
-          'Montant entre ${_fmt(_min)} et ${_fmt(_max)} FCFA.');
+          tr('Montant entre ${_fmt(_min)} et ${_fmt(_max)} FCFA.',
+              'Amount between ${_fmt(_min)} and ${_fmt(_max)} FCFA.'));
       return;
     }
     final okPhone = RegExp(r'^(237)?6\d{8}$').hasMatch(phone);
     if (!okPhone) {
-      setState(() => error = 'Numéro MTN ou Orange invalide (ex : 670000000).');
+      setState(() => error = tr('Numéro MTN ou Orange invalide (ex : 670000000).',
+          'Invalid MTN or Orange number (e.g. 670000000).'));
       return;
     }
     setState(() {
@@ -225,7 +228,7 @@ class _DepositScreenState extends State<DepositScreen> {
           fontSize: 22,
           fontWeight: FontWeight.w900,
         ),
-        decoration: _dec('Écris ton montant', Icons.payments).copyWith(
+        decoration: _dec(tr('Écris ton montant', 'Enter your amount'), Icons.payments).copyWith(
           suffixText: 'FCFA',
           suffixStyle: const TextStyle(
             color: _gold,
@@ -235,7 +238,8 @@ class _DepositScreenState extends State<DepositScreen> {
       ),
       const SizedBox(height: 6),
       Text(
-        'Minimum : ${_fmt(_min)} FCFA   ·   Maximum : ${_fmt(_max)} FCFA',
+        tr('Minimum : ${_fmt(_min)} FCFA   ·   Maximum : ${_fmt(_max)} FCFA',
+            'Minimum: ${_fmt(_min)} FCFA   ·   Maximum: ${_fmt(_max)} FCFA'),
         style: const TextStyle(
           color: _gold,
           fontSize: 13,
@@ -270,7 +274,7 @@ class _DepositScreenState extends State<DepositScreen> {
         enabled: !sending,
         keyboardType: TextInputType.phone,
         style: const TextStyle(color: Colors.white),
-        decoration: _dec('Numéro (ex : 670000000)', Icons.phone_android),
+        decoration: _dec(tr('Numéro (ex : 670000000)', 'Number (e.g. 670000000)'), Icons.phone_android),
       ),
       if (error != null)
         Padding(
@@ -318,7 +322,8 @@ class _DepositScreenState extends State<DepositScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            '${Wallet.format(depositAmount)} ajoutés à ton solde.',
+            tr('${Wallet.format(depositAmount)} ajoutés à ton solde.',
+                '${Wallet.format(depositAmount)} added to your balance.'),
             style: const TextStyle(color: Colors.white70, fontSize: 14),
           ),
         ],
@@ -369,10 +374,14 @@ class _DepositScreenState extends State<DepositScreen> {
           const SizedBox(height: 8),
           Text(
             timedOut
-                ? 'Toujours en attente. Si tu as validé, ton solde sera mis à '
-                    'jour automatiquement.'
-                : 'Tape ton code PIN Mobile Money pour valider '
+                ? tr('Toujours en attente. Si tu as validé, ton solde sera mis à '
+                    'jour automatiquement.',
+                    'Still pending. If you have confirmed, your balance will '
+                    'update automatically.')
+                : tr('Tape ton code PIN Mobile Money pour valider '
                     '${Wallet.format(depositAmount)}.',
+                    'Enter your Mobile Money PIN to confirm '
+                    '${Wallet.format(depositAmount)}.'),
             style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
         ],
