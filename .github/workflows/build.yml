@@ -16,6 +16,8 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
+      - name: Préparer le dossier web (créé seulement dans la machine de compilation)
+        run: flutter create . --platforms web --project-name katika
       - run: flutter build web --release --base-href /jouer/
       - uses: actions/upload-artifact@v4
         with:
