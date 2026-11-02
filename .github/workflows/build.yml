@@ -1,115 +1,39 @@
-name: Deploy Katika
+# À placer dans le dépôt de l'APPLI : .github/workflows/build_web.yml
+# Compile la version web de Katika et la publie dans le dossier /jouer du site.
+name: Build web (site)
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
 jobs:
-  build:
+  web:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Recuperer le projet
-        uses: actions/checkout@v6
-
-      - name: Installer Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
-
-      - name: Creer la structure Android et Web
-        run: flutter create --org com.yveslaurent85 --project-name ludopro --platforms=android,web .
-
-      - name: Configurer Firebase
-        run: cp google-services.json android/app/google-services.json
-
-      - name: Activer le plugin Google Services
-        run: |
-          if [ -f android/settings.gradle.kts ]; then
-            grep -q 'com.google.gms.google-services' android/settings.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
-            grep -q 'com.google.gms.google-services' android/app/build.gradle.kts || sed -i '/^plugins {/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
-          else
-            echo "Fichiers Gradle Kotlin non trouves"
-            exit 1
-          fi
-
-      # Cle de signature FIXE : sans elle, chaque compilation est signee avec
-      # une cle differente et Android refuse la mise a jour par-dessus
-      # l'ancienne version. La cle est stockee dans le secret KATIKA_KEYSTORE_B64.
-      - name: Installer la cle de signature
-        env:
-          KEYSTORE_B64: ${{ secrets.KATIKA_KEYSTORE_B64 }}
-        run: |
-          if [ -z "$KEYSTORE_B64" ]; then
-            echo "Secret KATIKA_KEYSTORE_B64 manquant (Settings > Secrets and variables > Actions)."
-            exit 1
-          fi
-          mkdir -p "$HOME/.android"
-          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-
-      - name: Installer les dependances
-        run: flutter pub get
-
-      - name: Generate app icons
-        run: dart run flutter_launcher_icons
-
-      # Le numero de version monte tout seul a chaque compilation (1000 + numero
-      # d'execution) : Android accepte alors la mise a jour.
-      - name: Construire l APK
-        run: flutter build apk --release --build-number $((1000 + ${{ github.run_number }}))
-
-      - name: Construire la version web
-        run: flutter build web --release --base-href "/LudoPro/"
-
-      - name: Ajouter l APK et la version au site
-        run: |
-          cp build/app/outputs/flutter-apk/app-release.apk build/web/katika.apk
-          echo "{\"build\": $((1000 + ${{ github.run_number }})), \"date\": \"$(date -u +%Y-%m-%d)\"}" > build/web/version.json
-
-      # APK publie dans les Releases du depot du site (github.com, accessible
-      # partout). Le bouton du site pointe vers :
-      # https://github.com/yveslaurent85/katikagames-web/releases/latest/download/Katika.apk
-      # Secret requis : WEB_RELEASE_TOKEN (jeton avec droit d'ecriture sur
-      # le depot katikagames-web).
-      - name: Publier l APK dans les Releases du site
-        env:
-          GH_TOKEN: ${{ secrets.WEB_RELEASE_TOKEN }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "Secret WEB_RELEASE_TOKEN manquant."
-            exit 1
-          fi
-          BUILD=$((1000 + ${{ github.run_number }}))
-          cp build/app/outputs/flutter-apk/app-release.apk Katika.apk
-          gh release delete latest --repo yveslaurent85/katikagames-web --yes --cleanup-tag || true
-          gh release create latest Katika.apk --repo yveslaurent85/katikagames-web \
-            --title "Katika build $BUILD" \
-            --notes "Build $BUILD du $(date -u +%d/%m/%Y)"
-
-      - name: Garder aussi l APK en artefact
-        uses: actions/upload-artifact@v4
+      - run: flutter pub get
+      - run: flutter build web --release --base-href /jouer/
+      - uses: actions/upload-artifact@v4
         with:
-          name: LudoPro-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Preparer le site
-        uses: actions/upload-pages-artifact@v3
-        with:
+          name: katika-web
           path: build/web
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: github-pages
-    steps:
-      - name: Publier sur GitHub Pages
-        uses: actions/deploy-pages@v4
+      # Publication automatique sur le site (secret SITE_TOKEN = jeton GitHub
+      # avec droit d'écriture sur yveslaurent85/katikagames-web).
+      - name: Publier sur le site
+        if: ${{ env.SITE_TOKEN != '' }}
+        env:
+          SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
+        run: |
+          git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web site
+          rm -rf site/jouer
+          cp -r build/web site/jouer
+          cd site
+          git config user.name "katika-bot"
+          git config user.email "bot@katika.local"
+          git add -A
+          git commit -m "Mise à jour de la version web" || echo "Rien à publier"
+          git push
