@@ -708,7 +708,7 @@ class _RotateToggleState extends State<_RotateToggle> {
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      tooltip: 'Pivoter l\'écran',
+      tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
       onPressed: () {
         setState(() => SongoOrient.landscape = !SongoOrient.landscape);
         SongoOrient.apply();
@@ -734,7 +734,7 @@ class _SoundToggleState extends State<_SoundToggle> {
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      tooltip: 'Son',
+      tooltip: tr('Son', 'Sound'),
       onPressed: () => setState(() => SongoSound.on = !SongoSound.on),
       icon: Icon(
         SongoSound.on ? Icons.volume_up : Icons.volume_off,
@@ -751,7 +751,7 @@ Widget _gameActions(BuildContext context) => Row(
         const _RotateToggle(),
         const _SoundToggle(),
         IconButton(
-          tooltip: 'Règles',
+          tooltip: tr('Règles', 'Rules'),
           onPressed: () => _showRules(context),
           icon: const Icon(Icons.help_outline, color: Colors.white),
         ),
@@ -1094,7 +1094,7 @@ class SongoPage extends StatelessWidget {
     return _SShell(
       title: 'Songô',
       trailing: IconButton(
-        tooltip: 'Règles',
+        tooltip: tr('Règles', 'Rules'),
         onPressed: () => _showRules(context),
         icon: const Icon(Icons.help_outline, color: Colors.white),
       ),
@@ -2087,6 +2087,16 @@ class _SongoHubState extends State<_SongoHub> {
 // ======================================================================
 // En ligne : salle d'attente puis partie
 // ======================================================================
+
+/// Revoir une partie de Songô en ligne (lecture seule) : tableau de bord admin.
+class SongoSpectator extends StatelessWidget {
+  const SongoSpectator({super.key, required this.roomId});
+  final String roomId;
+
+  @override
+  Widget build(BuildContext context) =>
+      _SongoRoom(roomId: roomId, spectate: true);
+}
 
 class _SongoRoom extends StatefulWidget {
   const _SongoRoom({required this.roomId, this.spectate = false});
