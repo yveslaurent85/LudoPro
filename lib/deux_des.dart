@@ -1442,7 +1442,7 @@ class _LocalGameState extends State<_LocalGame> {
       child: _Shell(
         title: 'Deux dés',
         trailing: IconButton(
-          tooltip: 'Règles',
+          tooltip: tr('Règles', 'Rules'),
           onPressed: () =>
               showRulesDialog(context, 'Règles de Deux dés', kDeuxDesRules),
           icon: const Icon(Icons.help_outline, color: Colors.white),
@@ -2360,7 +2360,7 @@ class _OnlineRoomState extends State<_OnlineRoom> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: 'Règles',
+                  tooltip: tr('Règles', 'Rules'),
                   onPressed: () => showRulesDialog(
                       context, 'Règles de Deux dés', kDeuxDesRules),
                   icon: const Icon(Icons.help_outline, color: Colors.white),
