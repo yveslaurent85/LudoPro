@@ -175,7 +175,6 @@ TextStyle _logoStyle(Color color, double size) {
 
 class _ModeCard extends StatelessWidget {
   final IconData icon;
-  final String? image;
   final String title;
   final String subtitle;
   final Color color;
@@ -183,7 +182,6 @@ class _ModeCard extends StatelessWidget {
 
   const _ModeCard({
     required this.icon,
-    this.image,
     required this.title,
     required this.subtitle,
     required this.color,
@@ -215,23 +213,13 @@ class _ModeCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 60,
-              height: 60,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.2),
               ),
-              child: image == null
-                  ? Icon(icon, color: Colors.white, size: 30)
-                  : Padding(
-                      padding: const EdgeInsets.all(7),
-                      child: Image.asset(
-                        image!,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stack) =>
-                            Icon(icon, color: Colors.white, size: 30),
-                      ),
-                    ),
+              child: Icon(icon, color: Colors.white, size: 30),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -612,7 +600,6 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFF22B14C),
                     icon: Icons.grid_view_rounded,
-                    image: 'assets/game_ludo.png',
                     title: 'Ludo',
                     subtitle: 'En présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
@@ -627,7 +614,6 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFFFFA000),
                     icon: Icons.casino,
-                    image: 'assets/game_deuxdes.png',
                     title: 'Deux dés',
                     subtitle: 'Lance deux dés',
                     onTap: () => Navigator.of(context).push(
@@ -640,7 +626,6 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFF8D5A2B),
                     icon: Icons.workspaces,
-                    image: 'assets/game_songo.png',
                     title: 'Songô',
                     subtitle: 'Jeu de graines · présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
@@ -3586,7 +3571,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             ),
           ),
           IconButton(
-            tooltip: 'Règles',
+            tooltip: tr('Règles', 'Rules'),
             padding: const EdgeInsets.all(6),
             constraints: const BoxConstraints(),
             onPressed: () =>
