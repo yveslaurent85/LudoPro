@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:url_launcher/url_launcher.dart';
+import 'lang.dart';
 
 /// Lien d'invitation du groupe WhatsApp des joueurs.
 const String kWhatsAppGroupUrl =
