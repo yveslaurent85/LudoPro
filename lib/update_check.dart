@@ -1,18 +1,23 @@
-
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'lang.dart';
 
-/// Configuration publique des mises à jour Katika.
-const String kUpdateConfigUrl =
-    'https://raw.githubusercontent.com/yveslaurent85/katikagames-web/main/update.json';
+/// Dernière version publiée (GitHub Releases du site) et lien de l'APK.
+const String kReleaseApi =
+    'https://api.github.com/repos/yveslaurent85/katikagames-web/releases/latest';
+const String kApkUrl =
+    'https://github.com/yveslaurent85/katikagames-web/releases/latest/download/Katika.apk';
 
-bool _updateChecked = false;
+bool _updateChecked = false; // une seule vérification par lancement
 
+/// Widget invisible à placer sur l'accueil : au premier affichage, il compare
+/// la version installée à la dernière version publiée et propose la mise à
+/// jour si une version plus récente existe.
 class UpdateChecker extends StatefulWidget {
   const UpdateChecker({super.key});
 
@@ -24,169 +29,78 @@ class _UpdateCheckerState extends State<UpdateChecker> {
   @override
   void initState() {
     super.initState();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _check();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _check());
   }
 
   Future<void> _check() async {
     if (kIsWeb || _updateChecked) return;
-
     _updateChecked = true;
-
     try {
-      // Numéro de compilation installé.
       final info = await PackageInfo.fromPlatform();
-      final currentBuild = int.tryParse(info.buildNumber) ?? 0;
-
-      // Évite de récupérer une ancienne configuration en cache.
-      final configUri = Uri.parse(
-        '$kUpdateConfigUrl?cache=${DateTime.now().millisecondsSinceEpoch}',
-      );
-
-      final response = await http
+      final current = int.tryParse(info.buildNumber) ?? 0;
+      final res = await http
           .get(
-            configUri,
-            headers: const {
-              'Accept': 'application/json',
-              'Cache-Control': 'no-cache, no-store',
-              'Pragma': 'no-cache',
-            },
+            Uri.parse(kReleaseApi),
+            headers: const {'Accept': 'application/vnd.github+json'},
           )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode != 200) return;
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-      final latestBuild =
-          int.tryParse('${data['latestBuild'] ?? 0}') ?? 0;
-
-      final version = '${data['version'] ?? ''}';
-
-      final message = '${data['message'] ??
-          'Une nouvelle version de Katika est disponible.'}';
-
-      // true = obligatoire ; false = facultative.
-      final isRequired = data['required'] == true;
-
-      final apkUrl = '${data['apkUrl'] ?? ''}';
-
-      if (latestBuild <= 0 || currentBuild <= 0) return;
-      if (latestBuild <= currentBuild) return;
-      if (apkUrl.isEmpty) return;
-
-      final apkUri = Uri.tryParse(apkUrl);
-
-      if (apkUri == null ||
-          !apkUri.hasAuthority ||
-          !['https', 'http'].contains(apkUri.scheme)) {
-        return;
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return;
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
+      final m = RegExp(r'(\d+)').firstMatch('${j['name'] ?? ''}');
+      final latest = m == null ? 0 : int.parse(m.group(1)!);
+      if (current > 0 && latest > current && mounted) {
+        await _showDialog(latest);
       }
-
-      if (!mounted) return;
-
-      await _showUpdateDialog(
-        latestBuild: latestBuild,
-        version: version,
-        message: message,
-        isRequired: isRequired,
-        apkUri: apkUri,
-      );
-    } catch (e) {
-      // Si Internet ou GitHub est inaccessible,
-      // Katika continue de fonctionner normalement.
+    } catch (_) {
+      // Pas de connexion ou GitHub injoignable : on ne dit rien.
     }
   }
 
-  Future<void> _showUpdateDialog({
-    required int latestBuild,
-    required String version,
-    required String message,
-    required bool isRequired,
-    required Uri apkUri,
-  }) {
+  Future<void> _showDialog(int latest) {
     return showDialog<void>(
       context: context,
-      barrierDismissible: !isRequired,
-      builder: (BuildContext ctx) {
-        return PopScope(
-          canPop: !isRequired,
-          child: AlertDialog(
-            backgroundColor: const Color(0xFF14267A),
-            title: Text(
-              isRequired
-                  ? 'Mise à jour obligatoire'
-                  : 'Nouvelle version disponible',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            content: Text(
-              '$message\n\n'
-              'Version : ${version.isEmpty ? latestBuild : version}\n'
-              'Compilation : $latestBuild\n\n'
-              '${isRequired ? 'Tu dois installer cette mise à jour pour continuer à utiliser Katika.' : 'Tu peux installer cette mise à jour maintenant ou choisir de le faire plus tard.'}',
-              style: const TextStyle(
-                color: Colors.white70,
-                height: 1.5,
-              ),
-            ),
-            actions: [
-              if (!isRequired)
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                  },
-                  child: const Text('Plus tard'),
-                ),
-
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF22B14C),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () async {
-                  try {
-                    final opened = await launchUrl(
-                      apkUri,
-                      mode: LaunchMode.externalApplication,
-                    );
-
-                    if (!opened && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Impossible d’ouvrir le téléchargement. Réessaie.',
-                          ),
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Erreur lors de l’ouverture du téléchargement.',
-                          ),
-                        ),
-                      );
-                    }
-                  }
-                },
-                child: const Text('Télécharger la mise à jour'),
-              ),
-            ],
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Nouvelle version disponible',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          tr(
+              'Une version plus récente de Katika (n° $latest) est disponible. '
+              'Télécharge-la et installe-la par-dessus : tes données sont '
+              'conservées.',
+              'A newer version of Katika (no. $latest) is available. '
+              'Download it and install it over the current one: your data '
+              'is kept.'),
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Plus tard'),
           ),
-        );
-      },
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF22B14C),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              try {
+                await launchUrl(
+                  Uri.parse(kApkUrl),
+                  mode: LaunchMode.externalApplication,
+                );
+              } catch (_) {}
+            },
+            child: const Text('Télécharger'),
+          ),
+        ],
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    return const SizedBox.shrink();
-  }
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
