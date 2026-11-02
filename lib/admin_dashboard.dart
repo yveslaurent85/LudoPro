@@ -5,8 +5,9 @@ import 'deux_des.dart';
 import 'hostess_screen.dart';
 import 'online.dart';
 import 'player_stats.dart';
+import 'songo.dart';
 
-/// Tableau de bord administrateur : toutes les parties (Ludo et Deux dés,
+/// Tableau de bord administrateur : toutes les parties (Ludo, Deux dés et Songô,
 /// en ligne et en présentiel), les commissions, les jackpots.
 /// Données fournies par la fonction « adminStats » du Worker.
 class AdminDashboard extends StatefulWidget {
@@ -49,7 +50,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool pBusy = false;
 
   // Filtres
-  String kind = 'all'; // all | ludo | deuxdes
+  String kind = 'all'; // all | ludo | deuxdes | songo
   String mode = 'all'; // all | online | local
   int days = 0; // 0 = tout, 1 = aujourd'hui, 7, 30
 
@@ -299,7 +300,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   String _kindLabel(String k) =>
-      k == 'ludo' ? 'Ludo' : (k == 'deuxdes' ? 'Deux dés' : 'Autre');
+      k == 'ludo'
+          ? 'Ludo'
+          : (k == 'deuxdes' ? 'Deux dés' : (k == 'songo' ? 'Songô' : 'Autre'));
 
   String _modeLabel(String m) => m == 'online' ? 'En ligne' : 'Présentiel';
 
@@ -791,7 +794,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
     final Widget page = r['kind'] == 'deuxdes'
         ? DeuxDesSpectator(roomId: id)
-        : OnlineGameRoom(gameId: id, spectate: true, adminView: true);
+        : r['kind'] == 'songo'
+            ? SongoSpectator(roomId: id)
+            : OnlineGameRoom(gameId: id, spectate: true, adminView: true);
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
@@ -801,6 +806,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final names = ((r['names'] as List?) ?? const []).map((e) => '$e').toList();
     final commission = _i(r['commission']) + _i(r['betCommission']);
     final isDice = r['kind'] == 'deuxdes';
+    final isSongo = r['kind'] == 'songo';
 
     return GestureDetector(
       onTap: () => _review(r),
@@ -818,7 +824,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Row(
             children: [
               Icon(
-                isDice ? Icons.casino : Icons.grid_view,
+                isDice
+                    ? Icons.casino
+                    : (isSongo ? Icons.workspaces : Icons.grid_view),
                 color: _gold,
                 size: 20,
               ),
@@ -1000,6 +1008,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             _chip('Ludo', kind == 'ludo', () => setState(() => kind = 'ludo')),
             _chip('Deux dés', kind == 'deuxdes',
                 () => setState(() => kind = 'deuxdes')),
+            _chip('Songô', kind == 'songo',
+                () => setState(() => kind = 'songo')),
           ]),
           _filterRow('Mode', [
             _chip('Tous', mode == 'all', () => setState(() => mode = 'all')),
@@ -1096,6 +1106,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (limit < 500 &&
               (_i(fetched['ludo']) >= limit ||
                   _i(fetched['deuxdes']) >= limit ||
+                  _i(fetched['songo']) >= limit ||
                   _i(fetched['local']) >= limit))
             Padding(
               padding: const EdgeInsets.only(top: 10),
