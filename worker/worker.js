@@ -27,7 +27,7 @@ const MAX_STAKE = 250000; // mise maximale
 const MIN_CAPTURE = 100; // capture payante : montant minimum par pion
 const MAX_CAPTURE = 5000; // et maximum
 const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
-const COMMISSION_LOCAL_PERCENT = 7.5; // présentiel (Ludo et Deux dés)
+const COMMISSION_LOCAL_PERCENT = 5; // présentiel (Ludo, Deux dés et Songô)
 const TRANSFER_MIN = 25; // transfert de compte à compte
 const TRANSFER_MAX = 250000;
 const JACKPOT_ENABLED = false; // jackpot désactivé : toute la commission reste à Katika
@@ -388,7 +388,7 @@ function newId() {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
 
-/** Gain du gagnant : la cagnotte moins la commission (5 % en ligne, 10 % en présentiel). */
+/** Gain du gagnant : la cagnotte moins la commission (5 % en ligne et en présentiel). */
 function prizeOf(pot, percent = COMMISSION_PERCENT) {
   // percent peut avoir une décimale (ex. 7,5 %) : on calcule en dixièmes.
   return Math.floor((pot * (1000 - Math.round(percent * 10))) / 1000);
@@ -1250,7 +1250,7 @@ async function startLocalGame({ uid: hostUid, data, env }) {
 }
 
 /** Fin d'une partie en présentiel : verse la cagnotte aux gagnants désignés
- *  (commission de 10 %), règle les paris (Duel / Défi 7) avec les scores
+ *  (commission de 5 %), règle les paris (Duel / Défi 7) avec les scores
  *  envoyés par l'appli et renvoie le jackpot éventuel + le résumé des paris.
  *  Les commissions (partie + paris) et la part des parrains sont enregistrées
  *  pour le tableau de bord. */
@@ -1607,7 +1607,7 @@ async function sideBetSync({ uid, data, env }) {
 }
 
 // ======================================================================
-// Paris en présentiel (Deux dés, un seul téléphone) — commission 10 %
+// Paris en présentiel (Deux dés, un seul téléphone) — commission 5 %
 // ======================================================================
 // localGames/{id}/bets/{betId}      le pari
 // localGames/{id}/betMeta/index     { ids: [...] }
@@ -1754,7 +1754,7 @@ function settleLocalBets(tx, bets, players, scores, names) {
 // ======================================================================
 // Réservé aux comptes dont l'identifiant figure dans la variable ADMIN_UIDS.
 // Lit les parties récentes (Ludo en ligne, Deux dés en ligne, présentiel) et
-// renvoie une ligne par partie : l'appli calcule les totaux.
+// (et Songô) renvoie une ligne par partie : l'appli calcule les totaux.
 
 function adminIds(env) {
   return String(env.ADMIN_UIDS || '')
@@ -1837,19 +1837,25 @@ async function adminStats({ uid, data, env }) {
     );
   }
   const limit = Math.min(500, Math.max(20, intOr(data.limit, 150)));
-  await accessToken(env); // un seul jeton pour les 3 requêtes parallèles
+  await accessToken(env); // un seul jeton pour les 4 requêtes parallèles
 
-  const [ludo, deux, local] = await Promise.all([
+  const [ludo, deux, songo, local] = await Promise.all([
     recentDocs(env, 'games', limit),
     recentDocs(env, 'deuxdes', limit),
+    recentDocs(env, 'songo', limit),
     recentDocs(env, 'localGames', limit),
   ]);
 
   const rows = [
     ...ludo.map((d) => adminRow('ludo', 'online', d)),
     ...deux.map((d) => adminRow('deuxdes', 'online', d)),
+    ...songo.map((d) => adminRow('songo', 'online', d)),
     ...local.map((d) =>
-      adminRow(d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : 'unknown', 'local', d),
+      adminRow(
+        d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : d.game === 'songo' ? 'songo' : 'unknown',
+        'local',
+        d,
+      ),
     ),
   ].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
@@ -1900,7 +1906,7 @@ async function adminStats({ uid, data, env }) {
     pool,
     users,
     limit,
-    fetched: { ludo: ludo.length, deuxdes: deux.length, local: local.length },
+    fetched: { ludo: ludo.length, deuxdes: deux.length, songo: songo.length, local: local.length },
     jackpotPercent: JACKPOT_PERCENT,
     referralPercent: REFERRAL_PERCENT,
     house: {
