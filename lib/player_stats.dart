@@ -1,8 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
+import 'lang.dart';
 
 /// Statistiques d'un joueur : solde, inscription, parties, montants.
 /// Les compteurs viennent du serveur (users/{uid}) et sont mis à jour à la
@@ -65,7 +66,7 @@ class PlayerStats {
     final m = d ?? const <String, dynamic>{};
     final pseudo = '${m['pseudo'] ?? u?.displayName ?? ''}'.trim();
     return PlayerStats(
-      name: pseudo.isNotEmpty ? pseudo : (u?.email ?? 'Joueur'),
+      name: pseudo.isNotEmpty ? pseudo : (u?.email ?? tr('Joueur')),
       balance: _i(m['balance']),
       createdAt: _date(m['createdAt']) ?? u?.metadata.creationTime,
       played: _i(m['statPlayed']),
@@ -81,10 +82,10 @@ class PlayerStats {
 String _two(int n) => n < 10 ? '0$n' : '$n';
 
 String statDate(DateTime? d) =>
-    d == null ? 'inconnue' : '${_two(d.day)}/${_two(d.month)}/${d.year}';
+    d == null ? tr('inconnue', 'unknown') : '${_two(d.day)}/${_two(d.month)}/${d.year}';
 
 String statDateTime(DateTime? d) => d == null
-    ? 'inconnue'
+    ? tr('inconnue', 'unknown')
     : '${_two(d.day)}/${_two(d.month)}/${d.year} ${_two(d.hour)}:${_two(d.minute)}';
 
 /// Cartes de détails d'un joueur (utilisées dans le menu et par l'admin).
@@ -174,7 +175,8 @@ class PlayerStatsView extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Inscrit le ${statDate(s.createdAt)}',
+                tr('Inscrit le ${statDate(s.createdAt)}',
+                    'Joined on ${statDate(s.createdAt)}'),
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
@@ -459,8 +461,10 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                     ),
                   ),
                   Text(
-                    'Inscrit le ${statDate(p.createdAt)} · '
-                    '${p.played} partie${p.played > 1 ? 's' : ''}',
+                    tr('Inscrit le ${statDate(p.createdAt)} · '
+                        '${p.played} partie${p.played > 1 ? 's' : ''}',
+                        'Joined on ${statDate(p.createdAt)} · '
+                        '${p.played} game${p.played > 1 ? 's' : ''}'),
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ],
@@ -539,7 +543,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                   style: const TextStyle(color: Colors.white),
                                   decoration: InputDecoration(
                                     isDense: true,
-                                    hintText: 'Rechercher un pseudo',
+                                    hintText: tr('Rechercher un pseudo', 'Search a nickname'),
                                     hintStyle:
                                         const TextStyle(color: Colors.white54),
                                     prefixIcon: const Icon(Icons.search,
@@ -564,8 +568,10 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  '${shown.length} joueur'
-                                  '${shown.length > 1 ? 's' : ''}',
+                                  tr('${shown.length} joueur'
+                                      '${shown.length > 1 ? 's' : ''}',
+                                      '${shown.length} player'
+                                      '${shown.length > 1 ? 's' : ''}'),
                                   style: const TextStyle(
                                     color: Colors.white70,
                                     fontSize: 12,
