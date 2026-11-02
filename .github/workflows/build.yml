@@ -10,6 +10,8 @@ on:
 jobs:
   web:
     runs-on: ubuntu-latest
+    env:
+      SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -26,9 +28,7 @@ jobs:
       # Publication automatique sur le site (secret SITE_TOKEN = jeton GitHub
       # avec droit d'écriture sur yveslaurent85/katikagames-web).
       - name: Publier sur le site
-        if: ${{ env.SITE_TOKEN != '' }}
-        env:
-          SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
+        if: env.SITE_TOKEN != ''
         run: |
           git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web site
           rm -rf site/jouer
