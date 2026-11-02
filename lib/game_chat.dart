@@ -391,18 +391,20 @@ class _ChatSheetState extends State<_ChatSheet> {
                   stream: _stream,
                   builder: (context, snap) {
                     if (snap.hasError) {
-                      return const Center(
+                      return Center(
                         child: Text(
-                          'Chat indisponible pour le moment.',
+                          tr('Chat indisponible pour le moment.',
+                              'Chat unavailable right now.'),
                           style: TextStyle(color: Colors.black54),
                         ),
                       );
                     }
                     final docs = snap.data?.docs ?? const [];
                     if (docs.isEmpty) {
-                      return const Center(
+                      return Center(
                         child: Text(
-                          'Aucun message. Dis bonjour 👋',
+                          tr('Aucun message. Dis bonjour 👋',
+                              'No messages. Say hello 👋'),
                           style: TextStyle(color: Colors.black54),
                         ),
                       );
@@ -473,7 +475,7 @@ class _ChatSheetState extends State<_ChatSheet> {
                         ),
                         decoration: InputDecoration(
                           counterText: '',
-                          hintText: 'Tapez un message...',
+                          hintText: tr('Tapez un message...', 'Type a message...'),
                           hintStyle: const TextStyle(color: Colors.black38),
                           filled: true,
                           fillColor: Colors.white,
