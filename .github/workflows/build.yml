@@ -25,12 +25,22 @@ jobs:
       - name: Activer le support Web
         run: flutter config --enable-web
 
+      - name: Vérifier la racine du projet
+        run: |
+          echo "Dossier actuel :"
+          pwd
+          echo "Contenu du dépôt :"
+          ls -la
+          test -f pubspec.yaml
+
       - name: Installer les dépendances
         run: flutter pub get
 
       - name: Générer les fichiers Web manquants
         run: |
-          flutter create . --platforms=web --org=com.yveslaurent85 --project-name=ludopro
+          flutter create --platforms web --org com.yveslaurent85 --project-name ludopro .
+          echo "Vérification du dossier Web :"
+          ls -la web
           test -f web/index.html
 
       - name: Compiler Katika pour le Web
