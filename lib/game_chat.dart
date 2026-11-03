@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -557,6 +558,10 @@ class EmojiReactions extends ChangeNotifier {
 
   final Map<String, String> _shown = {};
   final Map<String, int> _stamp = {};
+  // Emplacement de chaque joueur à l'écran (pour l'emoji qui vole de l'un
+  // à l'autre) : rempli par les EmojiBubble.
+  final Map<String, BuildContext> _anchors = {};
+  final Map<String, double> _anchorSize = {};
   final Map<String, Timer> _timers = {};
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
   int _counter = 0;
@@ -568,6 +573,58 @@ class EmojiReactions extends ChangeNotifier {
       .collection(collection)
       .doc(gameId)
       .collection('messages');
+
+  void _attach(String uid, BuildContext c, double size) {
+    _anchors[uid] = c;
+    _anchorSize[uid] = size;
+  }
+
+  void _detach(String uid, BuildContext c) {
+    if (identical(_anchors[uid], c)) _anchors.remove(uid);
+  }
+
+  /// Centre (écran) de la case du joueur, ou null si elle n'est pas visible.
+  Offset? _centerOf(String uid) {
+    final c = _anchors[uid];
+    if (c == null || !c.mounted) return null;
+    final ro = c.findRenderObject();
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize) return null;
+    final o = ro.localToGlobal(Offset.zero);
+    final s = _anchorSize[uid] ?? 36.0;
+    final w = ro.size.width > 1 ? ro.size.width : s;
+    final h = ro.size.height > 1 ? ro.size.height : s;
+    return o + Offset(w / 2, h / 2);
+  }
+
+  /// L'emoji part de la case de l'expéditeur et vole jusqu'à celle du
+  /// destinataire, puis s'y affiche. Sans emplacement connu : affichage direct.
+  void _flyThenShow(String? from, String to, String emoji) {
+    final a = (from == null || from.isEmpty) ? null : _centerOf(from);
+    final b = _centerOf(to);
+    final ctx = _anchors[to];
+    if (a == null || b == null || ctx == null || !ctx.mounted || from == to) {
+      _show(to, emoji);
+      return;
+    }
+    final overlay = Overlay.maybeOf(ctx, rootOverlay: true);
+    if (overlay == null) {
+      _show(to, emoji);
+      return;
+    }
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _FlyingEmoji(
+        emoji: emoji,
+        from: a,
+        to: b,
+        onDone: () {
+          entry.remove();
+          _show(to, emoji);
+        },
+      ),
+    );
+    overlay.insert(entry);
+  }
 
   /// Emoji actuellement affiché devant ce joueur (null = aucun).
   String? emojiOf(String uid) => _shown[uid];
@@ -589,7 +646,8 @@ class EmojiReactions extends ChangeNotifier {
           DateTime.now().difference(t.toDate()) > const Duration(seconds: 20)) {
         continue;
       }
-      _show(to, e);
+      final from = d['uid'];
+      _flyThenShow(from is String ? from : null, to, e);
     }
   }
 
@@ -657,7 +715,11 @@ class EmojiBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+    return _BubbleAnchor(
+      reactions: reactions,
+      uid: uid,
+      size: size,
+      child: AnimatedBuilder(
       animation: reactions,
       builder: (context, _) {
         final e = reactions.emojiOf(uid);
@@ -710,6 +772,148 @@ class EmojiBubble extends StatelessWidget {
           ),
         );
       },
+    ),
+    );
+  }
+}
+
+/// Enregistre l'emplacement d'un joueur (pour l'emoji qui vole vers lui).
+class _BubbleAnchor extends StatefulWidget {
+  const _BubbleAnchor({
+    required this.reactions,
+    required this.uid,
+    required this.size,
+    required this.child,
+  });
+
+  final EmojiReactions reactions;
+  final String uid;
+  final double size;
+  final Widget child;
+
+  @override
+  State<_BubbleAnchor> createState() => _BubbleAnchorState();
+}
+
+class _BubbleAnchorState extends State<_BubbleAnchor> {
+  @override
+  void initState() {
+    super.initState();
+    widget.reactions._attach(widget.uid, context, widget.size);
+  }
+
+  @override
+  void didUpdateWidget(covariant _BubbleAnchor old) {
+    super.didUpdateWidget(old);
+    if (old.uid != widget.uid) old.reactions._detach(old.uid, context);
+    widget.reactions._attach(widget.uid, context, widget.size);
+  }
+
+  @override
+  void dispose() {
+    widget.reactions._detach(widget.uid, context);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// L'emoji qui traverse l'écran : arc, petite rotation, traînée.
+class _FlyingEmoji extends StatefulWidget {
+  const _FlyingEmoji({
+    required this.emoji,
+    required this.from,
+    required this.to,
+    required this.onDone,
+  });
+
+  final String emoji;
+  final Offset from;
+  final Offset to;
+  final VoidCallback onDone;
+
+  @override
+  State<_FlyingEmoji> createState() => _FlyingEmojiState();
+}
+
+class _FlyingEmojiState extends State<_FlyingEmoji>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 950),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addStatusListener((s) {
+      if (s == AnimationStatus.completed) widget.onDone();
+    });
+    _c.forward();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  Offset _pos(double t) {
+    final k = Curves.easeInOutCubic.transform(t.clamp(0.0, 1.0));
+    final p = Offset.lerp(widget.from, widget.to, k)!;
+    final dist = (widget.to - widget.from).distance;
+    final lift = math.sin(math.pi * k) * math.min(120.0, dist * 0.3 + 30);
+    return p + Offset(0, -lift);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Material(
+        type: MaterialType.transparency,
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) {
+            final t = _c.value;
+            final children = <Widget>[];
+            for (var i = 3; i >= 1; i--) {
+              final tt = t - 0.05 * i;
+              if (tt <= 0) continue;
+              final p = _pos(tt);
+              children.add(Positioned(
+                left: p.dx - 20,
+                top: p.dy - 20,
+                child: Opacity(
+                  opacity: 0.22 * (4 - i) / 3,
+                  child: Text(widget.emoji, style: const TextStyle(fontSize: 30)),
+                ),
+              ));
+            }
+            final p = _pos(t);
+            final k = Curves.easeInOutCubic.transform(t);
+            final scale = 0.8 + 0.9 * math.sin(math.pi * k);
+            children.add(Positioned(
+              left: p.dx - 24,
+              top: p.dy - 24,
+              child: Transform.rotate(
+                angle: math.sin(t * math.pi * 2) * 0.35,
+                child: Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    alignment: Alignment.center,
+                    child: Text(widget.emoji,
+                        style: const TextStyle(fontSize: 34)),
+                  ),
+                ),
+              ),
+            ));
+            return Stack(clipBehavior: Clip.none, children: children);
+          },
+        ),
+      ),
     );
   }
 }
