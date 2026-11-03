@@ -761,6 +761,7 @@ class _SoundToggleState extends State<_SoundToggle> {
   }
 }
 
+
 /// Boutons du haut de l'écran : rotation + son + règles.
 Widget _gameActions(BuildContext context) => Row(
       mainAxisSize: MainAxisSize.min,
@@ -775,6 +776,14 @@ Widget _gameActions(BuildContext context) => Row(
       ],
     );
 
+/// Affichage des scores et du joueur dont c'est le tour.
+class _ScoreBar extends StatelessWidget {
+  const _ScoreBar({
+    required this.names,
+    required this.scores,
+    required this.cur,
+    required this.over,
+  });
 
   final List<String> names;
   final List<int> scores;
@@ -826,6 +835,9 @@ Widget _gameActions(BuildContext context) => Row(
   Widget build(BuildContext context) =>
       Row(children: [_chip(0), _chip(1)]);
 }
+
+class _SShell extends StatelessWidget {
+
 
 class _SShell extends StatelessWidget {
   const _SShell({required this.title, required this.child, this.trailing});
