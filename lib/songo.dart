@@ -339,15 +339,6 @@ class SongoBoardView extends StatefulWidget {
   /// Appelé quand l'animation du coup [moveN] est terminée.
   final ValueChanged<int> onSettled;
   final bool over;
-  /// Scores : graines capturées par chaque joueur,
-/// et indication du joueur dont c'est le tour.
-class _ScoreBar extends StatelessWidget {
-  const _ScoreBar({
-    required this.names,
-    required this.scores,
-    required this.cur,
-    required this.over,
-  });
   final List<String> names;
 
   @override
