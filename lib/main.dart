@@ -38,7 +38,6 @@ bool firebaseReady = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initAppLanguage();
   try {
     await Firebase.initializeApp(
       options: kIsWeb ? kWebFirebaseOptions : null,
@@ -749,6 +748,7 @@ class _SetupScreenState extends State<SetupScreen> {
   bool starSafe = true; // protection des étoiles
   bool startOut = false; // pions déjà dehors au départ (pas besoin de 6)
   bool startDoor = false; // pions sur leur case de départ (pas besoin de 6)
+  int autoSecs = 10; // délai du pilotage automatique (5, 10 ou 15 s)
   int stake = Wallet.minStake; // mise de chaque joueur (jetons)
   bool capturePay = false; // captures payantes
   int captureAmount = Wallet.minCapture; // montant par capture
@@ -1047,6 +1047,7 @@ class _SetupScreenState extends State<SetupScreen> {
           starSafe: starSafe,
           startOut: startOut,
           startDoor: startDoor,
+          autoSecs: autoSecs,
           partners: teamMode ? List<int>.from(partners) : null,
           localGameId: localId,
           accountUids: uids,
@@ -1570,6 +1571,22 @@ class _SetupScreenState extends State<SetupScreen> {
                     if (v) startOut = false;
                   }),
                 ),
+                const SizedBox(height: 18),
+                _picker(
+                  tr('Temps par tour (secondes) avant le pilotage automatique',
+                      'Time per turn (seconds) before auto-pilot'),
+                  const [5, 10, 15],
+                  autoSecs,
+                  (v) => setState(() => autoSecs = v),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  tr('Si le joueur ne joue pas à temps, le jeu lance le dé et '
+                      'déplace un pion au hasard à sa place.',
+                      'If a player does not play in time, the game rolls the '
+                      'dice and moves a random pawn for them.'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
                 ],
                 const SizedBox(height: 16),
                 SizedBox(
@@ -1632,6 +1649,7 @@ class LudoGame extends StatefulWidget {
     this.starSafe = true,
     this.startOut = false,
     this.startDoor = false,
+    this.autoSecs = 10,
     this.online,
     this.names,
     this.avatars,
@@ -1654,6 +1672,9 @@ class LudoGame extends StatefulWidget {
   /// Vrai : les pions démarrent déjà sur leur case de départ (position 0).
   /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
   final bool startDoor;
+
+  /// Délai (5, 10 ou 15 s) avant le pilotage automatique.
+  final int autoSecs;
   final OnlineSession? online; // null = jeu en présentiel
 
   /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
@@ -1923,6 +1944,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   void _tickAutopilot() {
     if (!mounted) return;
     _watchDisconnected();
+    // Horloge du tour, visible devant la case de chaque joueur.
+    final clockBusy = isRolling || isMoving || flightPhase != 0 || diceDragging;
+    final csig = '$currentPlayer|$hasRolled|'
+        '${players.map((p) => p.pawns.join(',')).join(';')}';
+    if (gameOver || clockBusy || csig != _clockSig) {
+      _clockSig = csig;
+      _turnElapsed = 0;
+    } else if (_turnElapsed < autoSeconds + 5) {
+      _turnElapsed++;
+    }
     if (away && !gameOver) {
       _bgPlay();
       return;
@@ -2641,14 +2672,20 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool forcedCapture = true; // capture obligatoire
   bool autoPlay = true; // coup unique joué automatiquement
   bool autoPilot = true; // pilotage automatique si le joueur tarde
-  final int autoSeconds = 10; // délai avant le pilotage automatique
+  late final int autoSeconds = (widget.autoSecs == 5 || widget.autoSecs == 15)
+      ? widget.autoSecs
+      : 10; // délai avant le pilotage automatique
+  int _turnElapsed = 0; // secondes écoulées dans le tour en cours (tous joueurs)
+  String _clockSig = '';
+  int get _turnLeft => max(0, autoSeconds - _turnElapsed);
+  bool get _turnUrgent => _turnElapsed >= (autoSeconds * 2 / 3).ceil();
   bool gameStarted = false; // devient vrai au premier lancer de dé
   final int maxFinishThrows = 5; // à l'arrivée : 5 lancers maximum
   final List<int> finishThrows = [0, 0, 0, 0];
   Timer? _autoTimer;
   String _lastSig = '';
   int _idle = 0;
-  int stepMs = 170; // vitesse des pions (ms par case)
+  int stepMs = 105; // vitesse des pions (ms par case)
   DateTime? _lastBack; // dernier appui sur « retour » (double retour pour aller à l'accueil)
 
   // Animation d'arrivée à la maison
@@ -3591,7 +3628,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             ),
           ),
           IconButton(
-            tooltip: 'Règles',
+            tooltip: tr('Règles', 'Rules'),
             padding: const EdgeInsets.all(6),
             constraints: const BoxConstraints(),
             onPressed: () =>
@@ -3869,10 +3906,42 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ],
     );
 
+    // Décompte devant la case du joueur : clignote en rouge à la fin.
+    Widget? buildTimer() {
+      if (!autoPilot || gameOver) return null;
+      final urgent = active && _turnUrgent;
+      final blinkOn = _pulse.value > 0.5;
+      return Container(
+        constraints: const BoxConstraints(minWidth: 40),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: urgent
+              ? (blinkOn ? const Color(0xFFE53935) : const Color(0xFF7F1411))
+              : Colors.black.withOpacity(active ? 0.45 : 0.25),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: urgent ? Colors.white : Colors.white54,
+            width: urgent ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          '⏱ ${active ? _turnLeft : autoSeconds}s',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white.withOpacity(active ? 1 : 0.6),
+            fontSize: 13,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+    }
+
     // Le badge du joueur actif pulse et brille.
     return AnimatedBuilder(
       animation: _pulse,
-      builder: (context, _) => Container(
+      builder: (context, _) {
+        final timer = buildTimer();
+        return Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
         decoration: BoxDecoration(
           color: player.color.withOpacity(active ? 0.6 : 0.3),
@@ -3897,6 +3966,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             mainAxisSize: MainAxisSize.min,
             children: avatarOnRight
                 ? [
+                    if (timer != null) ...[timer, const SizedBox(width: 6)],
                     if (emojiBtn != null) ...[emojiBtn, const SizedBox(width: 6)],
                     info,
                     const SizedBox(width: 6),
@@ -3907,10 +3977,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     const SizedBox(width: 6),
                     info,
                     if (emojiBtn != null) ...[const SizedBox(width: 6), emojiBtn],
+                    if (timer != null) ...[const SizedBox(width: 6), timer],
                   ],
           ),
         ),
-      ),
+      );
+      },
     );
   }
 
@@ -4033,7 +4105,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   void showSettings() {
-    const speeds = <String, int>{'Lente': 300, 'Normale': 170, 'Rapide': 90};
+    const speeds = <String, int>{'Lente': 200, 'Normale': 105, 'Rapide': 60};
 
     showModalBottomSheet<void>(
       context: context,
