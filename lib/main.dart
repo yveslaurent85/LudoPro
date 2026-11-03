@@ -387,7 +387,7 @@ class HomeScreen extends StatelessWidget {
                                               const SizedBox(height: 14),
                                               const Text(
                                                 'Créateur et concepteur :\n'
-                                                'Chachouang Kejouboui Yves',
+                                                'CHACHOUANG KEJOUBOUI YVES',
                                                 textAlign: TextAlign.center,
                                                 style: TextStyle(
                                                   color: Colors.white,
@@ -696,6 +696,7 @@ class _LudoModePage extends StatelessWidget {
     );
   }
 }
+
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
 
@@ -1524,6 +1525,7 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 }
+
 class LudoGame extends StatefulWidget {
   const LudoGame({
     super.key,
@@ -1726,7 +1728,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   List<int> get ranking {
-    final list = [...activeIdx];
+    final list = List<int>.from(activeIdx);
     list.sort((a, b) {
       final fa = players[a].finished;
       final fb = players[b].finished;
@@ -3342,7 +3344,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     final player = players[index];
     final active = index == currentPlayer && !gameOver;
-    final remaining = pawnCount - player.finished;
     final progress = progressOf(player);
     final percent = (progress * 100).round();
 
