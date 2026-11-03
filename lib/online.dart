@@ -9,6 +9,7 @@ import 'accounts.dart';
 import 'game_chat.dart';
 import 'lang.dart';
 import 'main.dart';
+import 'stake_field.dart';
 
 // ----------------------------------------------------------------------
 // Parties en ligne (Firestore, collection « games »)
@@ -346,6 +347,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   bool starSafe = true;
   bool startOut = false; // pions déjà dehors au départ (pas besoin de 6)
   bool startDoor = false; // pions sur la case de départ (pas besoin de 6)
+  int autoSecs = 10; // délai du pilotage automatique (5, 10 ou 15 s)
   bool privateRoom = false;
   bool teamMode = false; // 2 contre 2 (4 joueurs seulement)
   bool capturePay = false; // captures payantes
@@ -399,7 +401,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
 
   Future<void> _create() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || busy) return;
+    if (user == null || busy || stake < 0) return;
     setState(() {
       busy = true;
       error = null;
@@ -432,6 +434,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'starSafe': starSafe,
         'startOut': startOut,
         'startDoor': startDoor,
+        'autoSecs': autoSecs,
         'private': privateRoom,
         'teamMode': team,
         'capturePay': capturePay ? captureAmount : 0,
@@ -786,29 +789,10 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            for (final v in Wallet.stakes)
-              ChoiceChip(
-                label: Text(Wallet.stakeLabel(v)),
-                selected: stake == v,
-                onSelected: (_) => setState(() => stake = v),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          stake == 0
-              ? 'Partie gratuite : aucun jeton en jeu, pas de jackpot.'
-              : tr(
-                  'Gain du gagnant : ${Wallet.format(Wallet.prize(stake * numPlayers))} '
-                  '(cagnotte ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
-                  'Winner gets: ${Wallet.format(Wallet.prize(stake * numPlayers))} '
-                  '(pot ${stake * numPlayers}, commission ${Wallet.commissionPercent} %)',
-                ),
-          style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+        StakeField(
+          stake: stake,
+          players: numPlayers,
+          onChanged: (v) => setState(() => stake = v),
         ),
       ],
     );
@@ -977,6 +961,20 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   startDoor = v;
                   if (v) startOut = false;
                 }),
+              ),
+              const SizedBox(height: 12),
+              _sectionTitle(tr('Temps par tour avant le pilotage automatique',
+                  'Time per turn before auto-pilot')),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final v in const [5, 10, 15])
+                    ChoiceChip(
+                      label: Text('$v s'),
+                      selected: autoSecs == v,
+                      onSelected: (_) => setState(() => autoSecs = v),
+                    ),
+                ],
               ),
               const SizedBox(height: 8),
               SizedBox(
@@ -1622,6 +1620,7 @@ class OnlineGameRoom extends StatelessWidget {
             starSafe: d['starSafe'] != false,
             startOut: d['startOut'] == true,
             startDoor: d['startDoor'] == true,
+            autoSecs: (d['autoSecs'] as num?)?.toInt() ?? 10,
             stake: (d['stake'] as num?)?.toInt() ?? 0,
             partners: d['teamMode'] == true ? _partnersOf(d) : null,
             online: OnlineSession(
@@ -1651,6 +1650,7 @@ class OnlineGameRoom extends StatelessWidget {
           starSafe: d['starSafe'] != false,
           startOut: d['startOut'] == true,
             startDoor: d['startDoor'] == true,
+          autoSecs: (d['autoSecs'] as num?)?.toInt() ?? 10,
           stake: (d['stake'] as num?)?.toInt() ?? 0,
           partners: d['teamMode'] == true ? _partnersOf(d) : null,
           online: OnlineSession(
