@@ -43,8 +43,8 @@ const JACKPOT_MAX = 650;
 const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir les retirer (FCFA)
 const REFERRAL_WITHDRAW_MIN = 100; // gains de parrainage minimum pour pouvoir les retirer vers le solde
 
-// Parties en ligne gérées : le Ludo (« games ») et Deux dés (« deuxdes »).
-const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo'];
+// Parties en ligne gérées : le Ludo (« games »), Deux dés (« deuxdes »), Songô et Damier.
+const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo', 'damier'];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 class HttpError extends Error {
@@ -686,8 +686,21 @@ function songoWinners(d, uids) {
   return deuxDesWinners(d, uids);
 }
 
+/** Damier : abandon (forfeit = place du perdant) sinon les places listées dans
+ *  `winners` (une place, ou les deux en cas de partie nulle). */
+function damierWinners(d, uids) {
+  const f = intOr(d.forfeit, -1);
+  if (f === 0 || f === 1) return uids[1 - f] ? [uids[1 - f]] : [];
+  const seats = Array.isArray(d.winners) ? d.winners : [];
+  return seats
+    .filter((s) => s === 0 || s === 1)
+    .map((s) => uids[s])
+    .filter((u) => typeof u === 'string');
+}
+
 function winnersFor(col, d, uids) {
   if (col === 'deuxdes') return deuxDesWinners(d, uids);
+  if (col === 'damier') return damierWinners(d, uids);
   if (col === 'songo') return songoWinners(d, uids);
   return ludoWinners(d, uids);
 }
@@ -1200,8 +1213,10 @@ async function startLocalGame({ uid: hostUid, data, env }) {
     throw new HttpError('invalid-argument', 'Mise invalide.');
   }
   const game =
-    data.game === 'deuxdes' || data.game === 'ludo' || data.game === 'songo' ? data.game : 'unknown';
-  const maxLocal = game === 'deuxdes' ? 8 : game === 'songo' ? 2 : 4; // Deux dés : jusqu'à 8 joueurs
+    data.game === 'deuxdes' || data.game === 'ludo' || data.game === 'songo' || data.game === 'damier'
+      ? data.game
+      : 'unknown';
+  const maxLocal = game === 'deuxdes' ? 8 : game === 'songo' || game === 'damier' ? 2 : 4; // Deux dés : jusqu'à 8 joueurs
   const tokens = Array.isArray(data.tokens) ? data.tokens : [];
   if (tokens.length < 2 || tokens.length > maxLocal) {
     throw new HttpError('invalid-argument', 'Nombre de joueurs invalide.');
@@ -1839,10 +1854,11 @@ async function adminStats({ uid, data, env }) {
   const limit = Math.min(500, Math.max(20, intOr(data.limit, 150)));
   await accessToken(env); // un seul jeton pour les 4 requêtes parallèles
 
-  const [ludo, deux, songo, local] = await Promise.all([
+  const [ludo, deux, songo, damier, local] = await Promise.all([
     recentDocs(env, 'games', limit),
     recentDocs(env, 'deuxdes', limit),
     recentDocs(env, 'songo', limit),
+    recentDocs(env, 'damier', limit),
     recentDocs(env, 'localGames', limit),
   ]);
 
@@ -1850,9 +1866,10 @@ async function adminStats({ uid, data, env }) {
     ...ludo.map((d) => adminRow('ludo', 'online', d)),
     ...deux.map((d) => adminRow('deuxdes', 'online', d)),
     ...songo.map((d) => adminRow('songo', 'online', d)),
+    ...damier.map((d) => adminRow('damier', 'online', d)),
     ...local.map((d) =>
       adminRow(
-        d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : d.game === 'songo' ? 'songo' : 'unknown',
+        d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : d.game === 'songo' ? 'songo' : d.game === 'damier' ? 'damier' : 'unknown',
         'local',
         d,
       ),
@@ -1906,7 +1923,7 @@ async function adminStats({ uid, data, env }) {
     pool,
     users,
     limit,
-    fetched: { ludo: ludo.length, deuxdes: deux.length, songo: songo.length, local: local.length },
+    fetched: { ludo: ludo.length, deuxdes: deux.length, songo: songo.length, damier: damier.length, local: local.length },
     jackpotPercent: JACKPOT_PERCENT,
     referralPercent: REFERRAL_PERCENT,
     house: {
@@ -2412,7 +2429,7 @@ async function adminReviveGames({ uid, env }) {
   await accessToken(env);
   const limitMs = Date.now() - REVIVE_AFTER_MIN * 60 * 1000;
   const targets = [];
-  for (const col of ['games', 'deuxdes', 'songo', 'localGames']) {
+  for (const col of ['games', 'deuxdes', 'songo', 'damier', 'localGames']) {
     for (const status of ['waiting', 'playing']) {
       const docs = await queryDocs(env, col, eqFilter('status', status), 200);
       for (const d of docs) {
