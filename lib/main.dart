@@ -38,6 +38,7 @@ bool firebaseReady = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initAppLanguage();
   try {
     await Firebase.initializeApp(
       options: kIsWeb ? kWebFirebaseOptions : null,
