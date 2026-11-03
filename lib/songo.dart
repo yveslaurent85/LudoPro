@@ -677,15 +677,26 @@ class _SongoBoardViewState extends State<SongoBoardView> {
   }
 }
 
-/// Le Songô se joue en mode paysage (plateau plus grand) ; l'icône de
-/// rotation permet de revenir en portrait.
+
+/// Le Songô se joue en mode paysage ; sur le Web, le contenu
+/// du jeu peut aussi pivoter sans dépendre du navigateur.
 class SongoOrient {
   static bool landscape = true;
+  static final ValueNotifier<bool> mode = ValueNotifier<bool>(true);
+
+  static void setLandscape(bool value) {
+    landscape = value;
+    mode.value = value;
+    apply();
+  }
 
   static void apply() {
     try {
       SystemChrome.setPreferredOrientations(landscape
-          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+          ? [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]
           : [DeviceOrientation.portraitUp]);
     } catch (_) {}
   }
@@ -694,6 +705,8 @@ class SongoOrient {
     try {
       SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     } catch (_) {}
+    landscape = true;
+    mode.value = true;
   }
 }
 
@@ -707,18 +720,22 @@ class _RotateToggle extends StatefulWidget {
 class _RotateToggleState extends State<_RotateToggle> {
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
-      onPressed: () {
-        setState(() => SongoOrient.landscape = !SongoOrient.landscape);
-        SongoOrient.apply();
+    return ValueListenableBuilder<bool>(
+      valueListenable: SongoOrient.mode,
+      builder: (context, landscape, _) {
+        return IconButton(
+          tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
+          onPressed: () {
+            SongoOrient.setLandscape(!landscape);
+          },
+          icon: Icon(
+            landscape
+                ? Icons.stay_current_portrait
+                : Icons.stay_current_landscape,
+            color: Colors.white,
+          ),
+        );
       },
-      icon: Icon(
-        SongoOrient.landscape
-            ? Icons.stay_current_portrait
-            : Icons.stay_current_landscape,
-        color: Colors.white,
-      ),
     );
   }
 }
@@ -744,7 +761,7 @@ class _SoundToggleState extends State<_SoundToggle> {
   }
 }
 
-/// Boutons du haut de l'écran : son + règles.
+/// Boutons du haut de l'écran : rotation + son + règles.
 Widget _gameActions(BuildContext context) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -758,14 +775,6 @@ Widget _gameActions(BuildContext context) => Row(
       ],
     );
 
-/// Scores : graines capturées par chaque joueur, et à qui c'est de jouer.
-class _ScoreBar extends StatelessWidget {
-  const _ScoreBar({
-    required this.names,
-    required this.scores,
-    required this.cur,
-    required this.over,
-  });
 
   final List<String> names;
   final List<int> scores;
