@@ -6,7 +6,6 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
@@ -28,26 +27,25 @@ import 'password_screen.dart';
 import 'player_stats.dart';
 import 'update_check.dart';
 import 'stake_field.dart';
-import 'firebase_web.dart';
 import 'songo.dart';
 import 'rules.dart';
-import 'whatsapp_group.dart';
 
+/// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await Firebase.initializeApp(
-      options: kIsWeb ? kWebFirebaseOptions : null,
-    );
+    await Firebase.initializeApp();
     firebaseReady = true;
   } catch (_) {
+    // L'appli s'ouvre quand même : le mode présentiel reste jouable.
     firebaseReady = false;
   }
   runApp(const LudoProApp());
 }
 
+/// Éclaircit (amount > 0) ou assombrit (amount < 0) une couleur.
 Color shade(Color color, double amount) {
   final hsl = HSLColor.fromColor(color);
   final lightness = (hsl.lightness + amount).clamp(0.0, 1.0).toDouble();
@@ -72,6 +70,14 @@ class LudoProApp extends StatelessWidget {
   }
 }
 
+// ----------------------------------------------------------------------
+// Sons
+// ----------------------------------------------------------------------
+
+/// Effets sonores du jeu. Les fichiers .wav sont dans le dossier assets/.
+/// Chaque son est joué par un lecteur neuf, libéré dès que le son est fini :
+/// ainsi les sons continuent de marcher tout au long de la partie.
+/// Un son qui ne peut pas être joué est simplement ignoré (jamais d'erreur).
 class Sfx {
   bool enabled = true;
 
@@ -89,31 +95,38 @@ class Sfx {
       }
 
       player.onPlayerComplete.first.then((_) => close(), onError: (_) => close());
-      player.play(AssetSource(file), volume: volume).catchError((Object _) {
+      player
+          .play(AssetSource(file), volume: volume)
+          .catchError((Object _) {
         close();
       });
+      // Sécurité : on libère le lecteur même si la fin du son n'est pas signalée.
       Future<void>.delayed(const Duration(seconds: 8), close);
     } catch (_) {}
   }
 
-  void step() => _play('sfx_step.wav', 0.6);
-  void land() => _play('sfx_land.wav');
-  void deny() => _play('sfx_deny.wav', 0.8);
-  void capture() => _play('sfx_capture.wav');
-  void arrive() => _play('sfx_arrive.wav');
-  void win() => _play('sfx_win.wav');
-  void roll() => _play('sfx_roll.wav');
-  void six() => _play('sfx_six.wav');
+  void step() => _play('sfx_step.wav', 0.6); // pas d'un pion
+  void land() => _play('sfx_land.wav'); // dé posé
+  void deny() => _play('sfx_deny.wav', 0.8); // coup refusé
+  void capture() => _play('sfx_capture.wav'); // pion capturé
+  void arrive() => _play('sfx_arrive.wav'); // pion arrivé à la maison
+  void win() => _play('sfx_win.wav'); // victoire
+  void roll() => _play('sfx_roll.wav'); // dé qui roule
+  void six() => _play('sfx_six.wav'); // le dé tombe sur 6
 
   void dispose() {}
 }
 
+// ----------------------------------------------------------------------
+// Modèles
+// ----------------------------------------------------------------------
+
 class Player {
-  final String display;
+  final String display; // ex : Rouge
   final Color color;
   final Color lightColor;
   final int start;
-  IconData avatar;
+  IconData avatar; // modifiable : le joueur choisit son avatar
   List<int> pawns = [-1, -1, -1, -1];
 
   Player({
@@ -133,6 +146,10 @@ class _PawnEntry {
   final List<double> center;
   _PawnEntry(this.p, this.i, this.center);
 }
+
+// ----------------------------------------------------------------------
+// Écran d'accueil : choix du mode de jeu
+// ----------------------------------------------------------------------
 
 const BoxDecoration _appBackground = BoxDecoration(
   gradient: LinearGradient(
@@ -157,7 +174,6 @@ TextStyle _logoStyle(Color color, double size) {
 
 class _ModeCard extends StatelessWidget {
   final IconData icon;
-  final String? image;
   final String title;
   final String subtitle;
   final Color color;
@@ -165,7 +181,6 @@ class _ModeCard extends StatelessWidget {
 
   const _ModeCard({
     required this.icon,
-    this.image,
     required this.title,
     required this.subtitle,
     required this.color,
@@ -197,23 +212,13 @@ class _ModeCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 60,
-              height: 60,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.2),
               ),
-              child: image == null
-                  ? Icon(icon, color: Colors.white, size: 30)
-                  : Padding(
-                      padding: const EdgeInsets.all(7),
-                      child: Image.asset(
-                        image!,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stack) =>
-                            Icon(icon, color: Colors.white, size: 30),
-                      ),
-                    ),
+              child: Icon(icon, color: Colors.white, size: 30),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -247,8 +252,22 @@ class _ModeCard extends StatelessWidget {
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, this.resumable = false});
 
+  /// Vrai quand une partie est en cours : on propose de la reprendre.
   final bool resumable;
 
+  /// Code promo : il faut d'abord être connecté à son compte.
+  void _openPromo(BuildContext context) {
+    final loggedIn = FirebaseAuth.instance.currentUser != null;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => loggedIn
+            ? const PromoScreen()
+            : OnlineScreen(onSignedIn: (context) => const PromoScreen()),
+      ),
+    );
+  }
+
+  /// Ouvre une page qui demande un compte (connexion d'abord si besoin).
   void _requireLogin(BuildContext context, Widget Function(BuildContext) page) {
     final loggedIn = FirebaseAuth.instance.currentUser != null;
     Navigator.of(context).push(
@@ -258,6 +277,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  /// Menu : solde, code promo, recharge et retrait.
   void _openMenu(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     showModalBottomSheet<void>(
@@ -334,8 +354,8 @@ class HomeScreen extends StatelessWidget {
                               builder: (context, snap) {
                                 return GestureDetector(
                                   onLongPress: () {
-                                    final email = FirebaseAuth
-                                        .instance.currentUser?.email
+                                    final email = FirebaseAuth.instance.currentUser
+                                        ?.email
                                         ?.trim()
                                         .toLowerCase();
 
@@ -343,11 +363,9 @@ class HomeScreen extends StatelessWidget {
                                       showDialog<void>(
                                         context: context,
                                         builder: (dialogContext) => AlertDialog(
-                                          backgroundColor:
-                                              const Color(0xFF0B2FA6),
+                                          backgroundColor: const Color(0xFF0B2FA6),
                                           shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(18),
+                                            borderRadius: BorderRadius.circular(18),
                                           ),
                                           title: const Text(
                                             'Katika',
@@ -365,8 +383,7 @@ class HomeScreen extends StatelessWidget {
                                                 decoration: BoxDecoration(
                                                   shape: BoxShape.circle,
                                                   border: Border.all(
-                                                    color:
-                                                        const Color(0xFFFFE082),
+                                                    color: const Color(0xFFFFE082),
                                                     width: 3,
                                                   ),
                                                 ),
@@ -374,9 +391,7 @@ class HomeScreen extends StatelessWidget {
                                                   child: Image.asset(
                                                     'assets/createur.jpg',
                                                     fit: BoxFit.cover,
-                                                    errorBuilder:
-                                                        (_, __, ___) =>
-                                                            const Icon(
+                                                    errorBuilder: (_, __, ___) => const Icon(
                                                       Icons.person,
                                                       color: Colors.white,
                                                       size: 80,
@@ -387,7 +402,7 @@ class HomeScreen extends StatelessWidget {
                                               const SizedBox(height: 14),
                                               const Text(
                                                 'Créateur et concepteur :\n'
-                                                'CHACHOUANG KEJOUBOUI YVES',
+                                                'Chachouang Kejouboui Yves',
                                                 textAlign: TextAlign.center,
                                                 style: TextStyle(
                                                   color: Colors.white,
@@ -399,9 +414,8 @@ class HomeScreen extends StatelessWidget {
                                           ),
                                           actions: [
                                             TextButton(
-                                              onPressed: () => Navigator.of(
-                                                      dialogContext)
-                                                  .pop(),
+                                              onPressed: () =>
+                                                  Navigator.of(dialogContext).pop(),
                                               child: const Text(
                                                 'Fermer',
                                                 style: TextStyle(
@@ -430,13 +444,10 @@ class HomeScreen extends StatelessWidget {
                 ),
                 item(Icons.add_card, 'Recharge', const Color(0xFF22B14C),
                     () => go((_) => const DepositScreen())),
-                item(
-                    Icons.swap_horiz,
-                    'Transférer de l\'argent',
-                    const Color(0xFF00897B),
-                    () => go((_) => const TransferScreen())),
-                item(Icons.payments_outlined, 'Retrait', const Color(0xFF1E6BFF),
-                    () {
+                item(Icons.swap_horiz, 'Transférer de l\'argent',
+                    const Color(0xFF00897B), () => go((_) => const TransferScreen())),
+                item(Icons.payments_outlined, 'Retrait',
+                    const Color(0xFF1E6BFF), () {
                   Navigator.of(sheetCtx).pop();
                   showDialog<void>(
                     context: context,
@@ -455,10 +466,6 @@ class HomeScreen extends StatelessWidget {
                       ],
                     ),
                   );
-                }),
-                item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
-                  Navigator.of(sheetCtx).pop();
-                  openWhatsAppGroup(context);
                 }),
                 item(Icons.card_giftcard, 'Code promo',
                     const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
@@ -489,6 +496,8 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  /// Présentiel : il faut d'abord être connecté à son compte.
+  /// Si Firebase n'a pas démarré, on laisse jouer quand même.
   void _openLocal(BuildContext context) {
     final loggedIn =
         !firebaseReady || FirebaseAuth.instance.currentUser != null;
@@ -514,7 +523,6 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               children: [
                 const UpdateChecker(),
-                const WhatsAppInvite(),
                 if (!resumable)
                   Row(
                     children: [
@@ -539,6 +547,8 @@ class HomeScreen extends StatelessWidget {
                     ],
                   ),
                 const Spacer(flex: 2),
+                // Appui long sur la couronne : tableau de bord administrateur
+                // (le serveur refuse tout compte qui n'est pas administrateur).
                 GestureDetector(
                   onLongPress: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
@@ -584,7 +594,6 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFF22B14C),
                     icon: Icons.grid_view_rounded,
-                    image: 'assets/game_ludo.png',
                     title: 'Ludo',
                     subtitle: 'En présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
@@ -599,7 +608,6 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFFFFA000),
                     icon: Icons.casino,
-                    image: 'assets/game_deuxdes.png',
                     title: 'Deux dés',
                     subtitle: 'Lance deux dés',
                     onTap: () => Navigator.of(context).push(
@@ -612,7 +620,6 @@ class HomeScreen extends StatelessWidget {
                   _ModeCard(
                     color: const Color(0xFF8D5A2B),
                     icon: Icons.workspaces,
-                    image: 'assets/game_songo.png',
                     title: 'Songô',
                     subtitle: 'Jeu de graines · présentiel ou en ligne',
                     onTap: () => Navigator.of(context).push(
@@ -622,8 +629,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ),
                 ],
-                const SizedBox(height: 16),
-                const WhatsAppGroupButton(),
                 const Spacer(flex: 2),
               ],
             ),
@@ -634,6 +639,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
+/// Choix du mode de Ludo : en présentiel ou en ligne.
 class _LudoModePage extends StatelessWidget {
   const _LudoModePage({required this.onLocal});
 
@@ -697,6 +703,10 @@ class _LudoModePage extends StatelessWidget {
   }
 }
 
+// ----------------------------------------------------------------------
+// Préparation de la partie : joueurs (compte + avatar) et pions
+// ----------------------------------------------------------------------
+
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
 
@@ -707,18 +717,20 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   int numPlayers = 4;
   int pawnCount = 4;
-  bool doorSafe = true;
-  bool starSafe = true;
-  bool startOut = false;
-  bool startDoor = false;
-  int autoSecs = 10;
-  int stake = Wallet.minStake;
-  bool capturePay = false;
-  int captureAmount = Wallet.minCapture;
+  bool doorSafe = true; // protection des portes (cases de départ)
+  bool starSafe = true; // protection des étoiles
+  bool startOut = false; // pions déjà dehors au départ (pas besoin de 6)
+  bool startDoor = false; // pions sur leur case de départ (pas besoin de 6)
+  int stake = Wallet.minStake; // mise de chaque joueur (jetons)
+  bool capturePay = false; // captures payantes
+  int captureAmount = Wallet.minCapture; // montant par capture
   bool starting = false;
-  bool optionsStep = false;
+  bool optionsStep = false; // 2e page : options de jeu
 
+  // --- Mode équipe (2 contre 2) ---------------------------------------
   bool teamMode = false;
+
+  /// Binôme de chaque couleur (-1 = pas encore de binôme).
   final List<int> partners = [-1, -1, -1, -1];
 
   bool get teamsReady => !teamMode || partners.every((p) => p != -1);
@@ -737,6 +749,8 @@ class _SetupScreenState extends State<SetupScreen> {
         : tr('Joueur ${colorLabel(c)}', 'Player ${colorLabel(c)}');
   }
 
+  /// Le joueur [from] invite un autre joueur libre comme binôme.
+  /// L'invité peut accepter ou refuser.
   Future<void> _invite(int from) async {
     final free = [
       for (final s in seats)
@@ -749,7 +763,8 @@ class _SetupScreenState extends State<SetupScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF14267A),
         title: Text(
-          tr('${_label(from)} : inviter qui ?', '${_label(from)}: invite who?'),
+          tr('${_label(from)} : inviter qui ?',
+              '${_label(from)}: invite who?'),
           style: const TextStyle(color: Colors.white),
         ),
         content: Column(
@@ -757,7 +772,8 @@ class _SetupScreenState extends State<SetupScreen> {
           children: [
             for (final f in free)
               ListTile(
-                leading: CircleAvatar(backgroundColor: colorList[f], radius: 12),
+                leading:
+                    CircleAvatar(backgroundColor: colorList[f], radius: 12),
                 title: Text(
                   _label(f),
                   style: const TextStyle(color: Colors.white),
@@ -776,7 +792,8 @@ class _SetupScreenState extends State<SetupScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF14267A),
         title: Text(
-          tr('${_label(target)}, invitation !', "${_label(target)}, you're invited!"),
+          tr('${_label(target)}, invitation !',
+              "${_label(target)}, you're invited!"),
           style: const TextStyle(color: Colors.white),
         ),
         content: Text(
@@ -808,6 +825,17 @@ class _SetupScreenState extends State<SetupScreen> {
         partners[from] = target;
         partners[target] = from;
       });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tr(
+              '${_label(target)} a refusé le binôme avec ${_label(from)}.',
+              '${_label(target)} declined to partner with ${_label(from)}.',
+            ),
+          ),
+        ),
+      );
     }
   }
 
@@ -843,7 +871,8 @@ class _SetupScreenState extends State<SetupScreen> {
                 Expanded(
                   child: Text(
                     partners[c] == -1
-                        ? tr('${_label(c)} : sans binôme', '${_label(c)}: no partner')
+                        ? tr('${_label(c)} : sans binôme',
+                            '${_label(c)}: no partner')
                         : '${_label(c)} + ${_label(partners[c])}',
                     style: const TextStyle(color: Colors.white),
                   ),
@@ -864,6 +893,7 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
+  /// Nom du premier joueur dont le solde ne couvre pas la mise.
   String? get brokePlayer {
     if (!firebaseReady) return null;
     for (final s in seats) {
@@ -940,6 +970,7 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
+  /// Débite les mises sur le serveur, puis lance la partie.
   Future<void> _startGame() async {
     if (starting || stake < 0) return;
     String? localId;
@@ -982,12 +1013,12 @@ class _SetupScreenState extends State<SetupScreen> {
       MaterialPageRoute<List<int>>(
         builder: (context) => LudoGame(
           numPlayers: numPlayers,
+          // Position 54 : toujours 2 pions chacun.
           pawnCount: startOut ? 2 : pawnCount,
           doorSafe: doorSafe,
           starSafe: starSafe,
           startOut: startOut,
           startDoor: startDoor,
-          autoSecs: autoSecs,
           partners: teamMode ? List<int>.from(partners) : null,
           localGameId: localId,
           accountUids: uids,
@@ -1003,11 +1034,14 @@ class _SetupScreenState extends State<SetupScreen> {
     );
     if (!mounted) return;
 
+    // Des joueurs veulent rejouer : on relance avec ceux qui ont accepté.
     if (rematch != null && rematch.length >= 2) {
       await _rematch(rematch);
       return;
     }
 
+    // Soldes à jour : le joueur principal est rechargé, les invités se
+    // reconnectent pour la partie suivante.
     if (firebaseReady) {
       final u = FirebaseAuth.instance.currentUser;
       setState(() => accounts.removeWhere((k, _) => k != 0));
@@ -1015,6 +1049,8 @@ class _SetupScreenState extends State<SetupScreen> {
     }
   }
 
+  /// Rejouer avec les joueurs qui ont accepté (leurs couleurs dans la partie
+  /// finie). Ils reprennent les premières places, chacun repaie sa mise.
   Future<void> _rematch(List<int> accepted) async {
     final n = accepted.length;
     final newSeats = n == 2 ? [0, 2] : (n == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
@@ -1054,6 +1090,7 @@ class _SetupScreenState extends State<SetupScreen> {
     Icons.local_fire_department,
     Icons.music_note,
   ];
+  static const List<String> colorNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
   static const List<Color> colorList = [
     Color(0xFFE5262B),
     Color(0xFF22B14C),
@@ -1069,11 +1106,14 @@ class _SetupScreenState extends State<SetupScreen> {
     Icons.person_outline,
   ];
 
+  /// Comptes connectés, indexés par couleur (0 = Rouge = joueur principal).
   final Map<int, PlayerAccount> accounts = {};
 
+  /// Tous les joueurs de la partie sont connectés (ou Firebase absent).
   bool get allConnected =>
       !firebaseReady || seats.every((s) => accounts.containsKey(s));
 
+  /// Couleurs utilisées selon le nombre de joueurs (comme dans LudoGame).
   List<int> get seats =>
       numPlayers == 2 ? [0, 2] : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
 
@@ -1081,6 +1121,7 @@ class _SetupScreenState extends State<SetupScreen> {
   void initState() {
     super.initState();
     nameCtrls = List.generate(4, (_) => TextEditingController());
+    // Le premier joueur est le compte déjà connecté.
     if (firebaseReady) {
       final u = FirebaseAuth.instance.currentUser;
       if (u != null) _loadHost(u);
@@ -1303,6 +1344,8 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
+  /// Rangée de choix (2/3/4, 1/2/3/4...). Si [enabled] est faux, la rangée
+  /// est grisée et on ne peut plus changer la valeur.
   Widget _picker(
     String title,
     List<int> values,
@@ -1394,63 +1437,64 @@ class _SetupScreenState extends State<SetupScreen> {
                   ],
                 ),
                 if (!optionsStep) ...[
+                const SizedBox(height: 24),
+                _picker(
+                  'Nombre de joueurs',
+                  const [2, 3, 4],
+                  numPlayers,
+                  (v) => setState(() {
+                    numPlayers = v;
+                    if (v != 4) {
+                      teamMode = false;
+                      _resetTeams();
+                    }
+                  }),
+                ),
+                const SizedBox(height: 24),
+                _picker(
+                  'Nombre de pions par joueur',
+                  const [1, 2, 3, 4],
+                  pawnCount,
+                  (v) => setState(() => pawnCount = v),
+                  enabled: !startOut,
+                ),
+                if (startOut)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Position 54 : la partie se joue avec 2 pions chacun.',
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ),
+                if (firebaseReady) ...[
                   const SizedBox(height: 24),
-                  _picker(
-                    'Nombre de joueurs',
-                    const [2, 3, 4],
-                    numPlayers,
+                  _stakePicker(),
+                ],
+                const SizedBox(height: 24),
+                Text(
+                  firebaseReady
+                      ? 'Joueurs (chacun se connecte à son compte)'
+                      : 'Joueurs (touche le rond pour changer d\'avatar)',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                for (final s in seats) _playerRow(s),
+                if (numPlayers == 4)
+                  _switch(
+                    'Jouer en équipe (2 contre 2)',
+                    "Les binômes ne se capturent pas. L'équipe gagne quand "
+                        'les deux ont fini.',
+                    teamMode,
                     (v) => setState(() {
-                      numPlayers = v;
-                      if (v != 4) {
-                        teamMode = false;
-                        _resetTeams();
-                      }
+                      teamMode = v;
+                      _resetTeams();
                     }),
                   ),
-                  const SizedBox(height: 24),
-                  _picker(
-                    'Nombre de pions par joueur',
-                    const [1, 2, 3, 4],
-                    pawnCount,
-                    (v) => setState(() => pawnCount = v),
-                    enabled: !startOut,
-                  ),
-                  if (startOut)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 6),
-                      child: Text(
-                        'Position 54 : la partie se joue avec 2 pions chacun.',
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
-                      ),
-                    ),
-                  if (firebaseReady) ...[
-                    const SizedBox(height: 24),
-                    _stakePicker(),
-                  ],
-                  const SizedBox(height: 24),
-                  Text(
-                    firebaseReady
-                        ? 'Joueurs (chacun se connecte à son compte)'
-                        : 'Joueurs (touche le rond pour changer d\'avatar)',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  for (final s in seats) _playerRow(s),
-                  if (numPlayers == 4)
-                    _switch(
-                      'Jouer en équipe (2 contre 2)',
-                      "Les binômes ne se capturent pas.",
-                      teamMode,
-                      (v) => setState(() {
-                        teamMode = v;
-                        _resetTeams();
-                      }),
-                    ),
-                  if (teamMode) _teamSection(),
+                if (teamMode) _teamSection(),
                 ] else ...[
                   Text(
                     tr('Options de jeu', 'Game options'),
@@ -1460,19 +1504,44 @@ class _SetupScreenState extends State<SetupScreen> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  _switch(
-                    'Protection des portes',
-                    'Un pion sur une case de départ ne peut pas être capturé',
-                    doorSafe,
-                    (v) => setState(() => doorSafe = v),
-                  ),
-                  _switch(
-                    "Protection des étoiles",
-                    'Un pion sur une étoile ne peut pas être capturé',
-                    starSafe,
-                    (v) => setState(() => starSafe = v),
-                  ),
+                const SizedBox(height: 6),
+                _switch(
+                  'Protection des portes',
+                  'Un pion sur une case de départ ne peut pas être capturé',
+                  doorSafe,
+                  (v) => setState(() => doorSafe = v),
+                ),
+                _switch(
+                  "Protection des étoiles",
+                  'Un pion sur une étoile ne peut pas être capturé',
+                  starSafe,
+                  (v) => setState(() => starSafe = v),
+                ),
+                _switch(
+                  'Position 54',
+                  'Les pions démarrent déjà sur le plateau, près du centre : '
+                      "pas besoin de 6 au début. Un pion capturé a besoin d'un "
+                      '6 pour ressortir. Se joue avec 2 pions chacun.',
+                  startOut,
+                  (v) => setState(() {
+                    startOut = v;
+                    if (v) {
+                      pawnCount = 2;
+                      startDoor = false;
+                    }
+                  }),
+                ),
+                _switch(
+                  'Départ sur la case de départ',
+                  'Les pions démarrent déjà sur leur case de départ : pas '
+                      "besoin de 6 au début. Un pion capturé retourne à la "
+                      "base et a besoin d'un 6 pour ressortir.",
+                  startDoor,
+                  (v) => setState(() {
+                    startDoor = v;
+                    if (v) startOut = false;
+                  }),
+                ),
                 ],
                 const SizedBox(height: 16),
                 SizedBox(
@@ -1504,12 +1573,8 @@ class _SetupScreenState extends State<SetupScreen> {
                                       : (!optionsStep
                                           ? tr('Suivant', 'Next')
                                           : firebaseReady
-                                              ? (stake <= 0
-                                                  ? 'Lancer · partie gratuite'
-                                                  : tr(
-                                                      'Lancer · mise ${Wallet.format(stake)}',
-                                                      'Start · stake ${Wallet.format(stake)}'))
-                                              : 'Lancer la partie'))),
+                                          ? (stake <= 0 ? 'Lancer · partie gratuite' : tr('Lancer · mise ${Wallet.format(stake)}', 'Start · stake ${Wallet.format(stake)}'))
+                                          : 'Lancer la partie'))),
                       style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
@@ -1526,6 +1591,10 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 }
 
+// ----------------------------------------------------------------------
+// Le jeu (présentiel)
+// ----------------------------------------------------------------------
+
 class LudoGame extends StatefulWidget {
   const LudoGame({
     super.key,
@@ -1535,7 +1604,6 @@ class LudoGame extends StatefulWidget {
     this.starSafe = true,
     this.startOut = false,
     this.startDoor = false,
-    this.autoSecs = 10,
     this.online,
     this.names,
     this.avatars,
@@ -1548,18 +1616,38 @@ class LudoGame extends StatefulWidget {
 
   final int numPlayers;
   final int pawnCount;
-  final bool doorSafe;
-  final bool starSafe;
+  final bool doorSafe; // portes (cases de départ) protégées
+  final bool starSafe; // étoiles protégées
+
+  /// Vrai : les pions démarrent déjà dehors (positions 43 et 44 de leur chemin).
+  /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
   final bool startOut;
+
+  /// Vrai : les pions démarrent déjà sur leur case de départ (position 0).
+  /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
   final bool startDoor;
-  final int autoSecs;
-  final OnlineSession? online;
+  final OnlineSession? online; // null = jeu en présentiel
+
+  /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
+  /// Une chaîne vide = nom par défaut.
   final List<String>? names;
+
+  /// Avatars choisis, indexés par couleur.
   final List<IconData>? avatars;
+
+  /// Binôme de chaque couleur (-1 = aucun). null = pas de mode équipe.
   final List<int>? partners;
+
+  /// Présentiel avec mise : identifiant de la partie côté serveur.
   final String? localGameId;
+
+  /// uid du compte de chaque couleur (pour verser les gains en présentiel).
   final List<String?>? accountUids;
+
+  /// Mise de chaque joueur (0 = pas de mise).
   final int stake;
+
+  /// Présentiel : montant payé par capture (0 = captures gratuites).
   final int capturePayLocal;
 
   @override
@@ -1567,9 +1655,11 @@ class LudoGame extends StatefulWidget {
 }
 
 class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
+  // Cases étoiles (8 cases après chaque départ) et cases sûres (départs + étoiles)
   static const Set<int> safeStars = {8, 21, 34, 47};
   static const Set<int> doorCells = {0, 13, 26, 39};
 
+  /// Cases protégées, selon les options choisies avant la partie.
   Set<int> get safeCells => {
         if (widget.doorSafe) ...doorCells,
         if (widget.starSafe) ...safeStars,
@@ -1579,14 +1669,28 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   late int numPlayers = widget.numPlayers;
   late int pawnCount = widget.pawnCount;
 
+  /// Position de départ du pion [i] : avec l'option « pions dehors »,
+  /// les pions démarrent sur les positions 43 et 44 de leur chemin (les
+  /// cases marquées près du centre) ; sinon ils sont à la base (-1).
   int _startPosOf(int i) =>
       widget.startOut ? 43 + (i % 2) : (widget.startDoor ? 0 : -1);
 
+  // --- Abandon et retour à l'accueil ----------------------------------
+  /// Couleurs des joueurs qui ont abandonné (ils perdent la partie).
   final Set<int> forfeited = {};
+
+  /// Gagnant désigné par abandon (null = gagnant normal par les pions).
   int? winnerOverride;
+
+  /// Vrai quand le joueur est revenu à l'accueil : le jeu joue à sa place.
   bool away = false;
 
+  /// Un lancer, un déplacement ou un glisser de dé est en cours.
+  bool get _busy => isRolling || isMoving || flightPhase != 0 || diceDragging;
+
+  // --- Jeu en ligne ---------------------------------------------------
   bool get isOnline => widget.online != null;
+  /// Spectateur : il regarde la partie en ligne sans pouvoir jouer.
   bool get isSpectator => widget.online?.spectator ?? false;
   int get _myColor =>
       (isOnline && !isSpectator) ? baseIdx[widget.online!.mySeat] : -1;
@@ -1595,54 +1699,85 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _proxy ||
       (!isSpectator && currentPlayer == _myColor && _connected);
 
-  StreamSubscription<DocumentSnapshot>? _sub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
   bool _firstSnap = true;
+
+  /// Dernier état de la partie terminée (sert à proposer de rejouer).
   Map<String, dynamic>? _lastDoc;
 
+  // --- Dé 3D : lancer visible chez les adversaires -----------------------
+  /// Nombre de tours du dé sur chaque axe pendant le lancer.
   List<int> dieSpin = [2, 3, 1];
+
+  /// Mon propre lancer est en cours (j'ignore les mises à jour reçues).
   bool _localRoll = false;
+
+  /// Dernier lancer adverse déjà affiché.
   int _lastRollN = 0;
 
+  // --- Connexion perdue : pilotage automatique, puis forfait ------------
+  /// Coups joués à la place d'un joueur déconnecté avant son forfait.
   static const int maxAutoPlays = 15;
+
+  /// Silence (en secondes) avant de considérer un joueur comme déconnecté.
   static const int staleSeconds = 20;
 
-  final Map<String, int> autoCounts = {};
+  final Map<String, int> autoCounts = {}; // uid -> coups joués à sa place
   final Map<String, Object?> _presenceVal = {};
   final Map<String, DateTime> _presenceAt = {};
   final DateTime _presenceStart = DateTime.now();
-  DateTime _lastAck = DateTime.now();
+  DateTime _lastAck = DateTime.now(); // dernière écriture confirmée serveur
   Timer? _beat;
-  StreamSubscription<QuerySnapshot>? _presenceSub;
-  bool _proxy = false;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _presenceSub;
+  bool _proxy = false; // vrai pendant qu'on joue à la place d'un absent
 
+  /// Emojis envoyés aux joueurs (parties en ligne) : l'emoji s'affiche
+  /// devant le joueur touché, chez tout le monde.
   EmojiReactions? _reactions;
 
+  /// Ma connexion fonctionne (sinon je ne joue pas : mes écritures seraient
+  /// en attente et écraseraient la partie au retour).
   bool get _connected =>
       DateTime.now().difference(_lastAck) < const Duration(seconds: 15);
 
+  // --- Mode équipe (2 contre 2) ---------------------------------------
+  /// Binôme d'une couleur (-1 = aucun).
   int _mateOf(int c) => widget.partners == null ? -1 : widget.partners![c];
+
+  /// a et b sont-ils dans la même équipe ?
   bool _isMate(int a, int b) =>
       widget.partners != null && widget.partners![a] == b;
+
+  /// Deux pions (ou plus) du même joueur sur la même case forment un bloc :
+  /// ils sont protégés de la capture, comme les pions d'une même équipe.
   bool _isBlock(int p, int pos) =>
       players[p].pawns.where((x) => x == pos).length >= 2;
 
+  /// « Anna & Paul » en mode équipe, sinon juste le nom.
   String teamLabel(int c) {
     final m = _mateOf(c);
     return m == -1 ? nameOf(c) : '${nameOf(c)} & ${nameOf(m)}';
   }
 
+  /// Ce joueur a fini tous ses pions (utilisé en mode équipe seulement :
+  /// son binôme continue de jouer, on saute son tour).
   bool _finishedAll(int c) =>
       widget.partners != null && players[c].pawns.every((x) => x == 56);
 
+  /// Il ne reste qu'un camp en jeu (un joueur, ou deux binômes).
   bool get _oneSideLeft {
     final a = activeIdx;
     return a.length == 1 ||
         (widget.partners != null && a.length == 2 && _mateOf(a[0]) == a[1]);
   }
 
+  /// Captures payantes (montant par pion capturé, 0 = désactivé) : lu dans
+  /// la partie en ligne.
   late int capturePay = widget.capturePayLocal;
   int _captureSeq = 0;
 
+  /// Captures payantes : le serveur prend [capturePay] sur le solde de chaque
+  /// joueur capturé et le verse au joueur qui a capturé.
   void _chargeCaptures(int capturer, List<int> victims) {
     final o = widget.online;
     final localId = widget.localGameId;
@@ -1669,16 +1804,23 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             SnackBar(content: Text('+${Wallet.format(a.toInt())} (capture)')),
           );
         }
+        // Le capturé n'avait pas assez pour payer : il perd la partie.
         if (r['eliminated'] == true && !gameOver) {
-          _applyForfeit(v, reason: "n'a plus assez de solde pour payer la capture");
+          _applyForfeit(
+            v,
+            reason: 'n\'a plus assez de solde pour payer la capture '
+                'et perd la partie',
+          );
         }
       }).catchError((Object _) {});
     }
   }
 
+  /// uid du compte qui joue cette couleur (parties en ligne).
   String _uidOfColor(int color) {
     final o = widget.online;
     if (o == null) {
+      // Présentiel : compte connecté pour chaque couleur.
       final u = widget.accountUids;
       return (u != null && color >= 0 && color < u.length)
           ? (u[color] ?? '')
@@ -1688,6 +1830,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return (seat >= 0 && seat < o.uids.length) ? o.uids[seat] : '';
   }
 
+  /// On touche un joueur : la grille d'emojis s'ouvre à côté de lui, et
+  /// l'emoji choisi s'affiche devant lui chez tous les joueurs.
   void _tagPlayer(BuildContext anchor, int color) {
     final r = _reactions;
     if (r == null) return;
@@ -1700,6 +1844,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  /// Nom affiché pour une couleur (pseudo choisi, pseudo en ligne,
+  /// « Joueur Rouge » sinon).
   String nameOf(int colorIndex) {
     final custom = widget.names;
     if (widget.online == null &&
@@ -1717,6 +1863,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'Player ${tr(players[colorIndex].display)}');
   }
 
+  /// Couleur du gagnant (null tant que la partie n'est pas finie).
   int? get winnerColor {
     if (!gameOver) return null;
     if (winnerOverride != null) return winnerOverride;
@@ -1727,8 +1874,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return null;
   }
 
+  /// Classement en direct : pions arrivés, puis progression.
+  /// Le gagnant est toujours premier une fois la partie finie.
   List<int> get ranking {
-    final list = List<int>.from(activeIdx);
+    final list = [...activeIdx];
     list.sort((a, b) {
       final fa = players[a].finished;
       final fb = players[b].finished;
@@ -1740,18 +1889,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return list;
   }
 
+  /// Appelé chaque seconde : si le joueur ne fait rien pendant
+  /// [autoSeconds] secondes, le jeu joue à sa place.
+  /// Quand le joueur est à l'accueil, le jeu joue au hasard, sans attendre.
   void _tickAutopilot() {
     if (!mounted) return;
     _watchDisconnected();
-    final clockBusy = isRolling || isMoving || flightPhase != 0 || diceDragging;
-    final csig = '$currentPlayer|$hasRolled|'
-        '${players.map((p) => p.pawns.join(',')).join(';')}';
-    if (gameOver || clockBusy || csig != _clockSig) {
-      _clockSig = csig;
-      _turnElapsed = 0;
-    } else if (_turnElapsed < autoSeconds + 5) {
-      _turnElapsed++;
-    }
     if (away && !gameOver) {
       _bgPlay();
       return;
@@ -1775,8 +1918,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  /// Joue un coup au hasard, sans animation (joueur à l'accueil).
   void _bgPlay() {
-    if (!_isMyTurn || gameOver || isRolling || isMoving || flightPhase != 0 || diceDragging) return;
+    if (!_isMyTurn || gameOver || _busy) return;
 
     if (!hasRolled) {
       final v = _rollValue();
@@ -1818,20 +1962,22 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  /// Retour à l'accueil : la partie reste en mémoire, le jeu joue au hasard
+  /// à ta place jusqu'à ce que tu reviennes avec « Reprendre la partie ».
   Future<void> _goHome() async {
     if (isSpectator) {
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(); // le spectateur quitte simplement
       return;
     }
     if (gameOver) {
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(); // partie finie : on quitte vraiment
       return;
     }
-    if (isRolling || isMoving || flightPhase != 0 || diceDragging) {
+    if (_busy) {
       _snack('Attends la fin du coup en cours.');
       return;
     }
-    _token++;
+    _token++; // annule les suites d'animation en attente
     setState(() => away = true);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -1845,9 +1991,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     });
   }
 
+  /// Abandon : le joueur qui abandonne perd la partie.
+  /// À 2 joueurs, l'autre gagne. À 3 ou 4, il est éliminé et la partie continue.
+  /// En mode équipe, c'est toute l'équipe qui perd.
   Future<void> abandonGame() async {
     if (gameOver || isSpectator) return;
-    if (isRolling || isMoving || flightPhase != 0 || diceDragging) {
+    if (_busy) {
       _snack('Attends la fin du coup en cours.');
       return;
     }
@@ -1885,12 +2034,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         ],
       ),
     );
-    if (ok != true || !mounted || gameOver) return;
+    if (ok != true || !mounted || gameOver || _busy) return;
     if (forfeited.contains(who)) return;
 
     _applyForfeit(who);
   }
 
+  /// Applique l'abandon d'un joueur (et de son binôme en équipe) :
+  /// abandon volontaire, ou forfait après une longue déconnexion.
   void _applyForfeit(int who, {String? reason}) {
     if (forfeited.contains(who)) return;
     final verb = reason ?? 'a abandonné';
@@ -1906,6 +2057,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
       _token++;
 
+      // Prochain joueur encore en jeu, dans l'ordre des tours
       final order = baseIdx;
       for (int k = 1; k <= order.length; k++) {
         final c = order[(order.indexOf(who) + k) % order.length];
@@ -1932,7 +2084,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _pushState();
   }
 
+  /// Face aléatoire avec un 6 plus fréquent : 22,5 % de chances
+  /// (33 % si tous les pions du joueur sont encore à la base).
+  /// Pour régler la difficulté, change les deux valeurs ci-dessous
+  /// (exprimées en pour mille : 330 = 33 %, 225 = 22,5 %).
   int _randomFace() {
+    // Les captures sont un peu plus fréquentes : quand une face permet de
+    // capturer, elle a 12 % de chances de plus de sortir (120 pour mille).
     const captureBoost = 120;
     final capFaces = <int>[
       for (int f = 1; f <= 6; f++)
@@ -1947,6 +2105,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return random.nextInt(5) + 1;
   }
 
+  /// Un des pions du joueur courant capturerait-il avec la face [f] ?
   bool _faceCaptures(int f) {
     final n = players[currentPlayer].pawns.length;
     for (int i = 0; i < n; i++) {
@@ -1955,6 +2114,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return false;
   }
 
+  /// Valeur du prochain lancer. À l'arrivée, quand il ne reste qu'un pion
+  /// à finir et qu'un seul lancer suffit, le joueur gagne en 5 lancers
+  /// maximum : le 5e lancer donne exactement le nombre qu'il faut.
   int _rollValue() {
     final cp = currentPlayer;
     final left = players[cp].pawns.where((x) => x != 56).toList();
@@ -1977,6 +2139,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (!_isMyTurn || gameOver) return;
 
     if (canRollNow) {
+      // Le dé n'a pas été lancé : on le lance
       throwDice(_toRoot(diceKeys[currentPlayer]));
       return;
     }
@@ -1985,6 +2148,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final legal = legalMoves();
       if (legal.isEmpty) return;
 
+      // Priorité : capture > arrivée > sortir un pion > pion le plus avancé
       int score(int i) {
         final pos = players[currentPlayer].pawns[i];
         if (moveCaptures(i)) return 1000;
@@ -2014,12 +2178,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       if (d == null || !mounted) return;
       if (d['over'] == true) setState(() => _lastDoc = d);
       if (snap.metadata.hasPendingWrites) return;
-      if (_localRoll) return;
+      if (_localRoll) return; // mon propre lancer est en cours
       final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
       if (jp > 0 && jp != jackpotWon) setState(() => jackpotWon = jp);
       final first = _firstSnap;
       _firstSnap = false;
 
+      // Un adversaire lance le dé : on montre l'animation 3D.
       final roll = d['roll'];
       if (roll is Map) {
         final n = (roll['n'] as num?)?.toInt() ?? 0;
@@ -2032,11 +2197,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         }
       }
 
-      if (!first && d['writer'] == o.uid) return;
+      if (!first && d['writer'] == o.uid) return; // c'est mon propre coup
       _applyRemote(d);
     });
   }
 
+  /// Prévient les autres joueurs que je lance le dé.
   void _pushRoll() {
     final o = widget.online;
     if (o == null || o.spectator || !firebaseReady) return;
@@ -2045,6 +2211,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }).then((_) {}, onError: (_) {});
   }
 
+  /// Anime le dé d'un adversaire (vu sur mon écran).
   Future<void> _showRemoteRoll(int cur) async {
     if (!mounted || gameOver) return;
     final token = ++_token;
@@ -2061,8 +2228,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
         ];
         flightFrom = from;
-        flightTo = from;
-        message = tr('${nameOf(cur)} lance le dé...', '${nameOf(cur)} is rolling...');
+        flightTo = from; // le dé tourne sur place
+        message = tr('${nameOf(cur)} lance le dé...',
+            '${nameOf(cur)} is rolling...');
       });
       sfx.roll();
     } catch (_) {
@@ -2071,6 +2239,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _flight.duration = const Duration(milliseconds: 1000);
     await _flight.forward(from: 0);
     if (!mounted || token != _token) return;
+    // Le résultat n'est pas encore arrivé : on cache le dé volant.
     if (flightPhase == 1) {
       setState(() {
         isRolling = false;
@@ -2079,12 +2248,17 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  // --- Pions adverses : déplacement case par case -----------------------
   bool _remoteBusy = false;
-  final List> _remoteQueue = [];
+  final List<Map<String, dynamic>> _remoteQueue = [];
 
+  /// Reçoit l'état envoyé par un adversaire. Si un de ses pions a avancé,
+  /// on le fait avancer case par case (comme chez lui) avant d'afficher le
+  /// nouvel état. Les états reçus pendant l'animation sont mis en file.
   void _applyRemote(Map<String, dynamic> d) {
     if (_remoteBusy) {
       _remoteQueue.add(d);
+      // Trop de retard : on ne garde que le plus récent (les pions sautent).
       if (_remoteQueue.length > 4) {
         _remoteQueue.removeRange(0, _remoteQueue.length - 1);
       }
@@ -2094,7 +2268,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   Future<void> _processRemote(Map<String, dynamic> d) async {
-    final steps = <List<int>>[];
+    // Pions qui ont avancé de quelques cases (un lancer = 6 cases au plus).
+    // Le tout premier état reçu n'est jamais animé.
+    final steps = <List<int>>[]; // [couleur, pion, départ, arrivée]
     if (_remoteSeen) {
       for (int p = 0; p < 4; p++) {
         final l = d['p$p'];
@@ -2187,13 +2363,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       flightPhase = 0;
     });
     _soundsForRemote(before, wasOver);
+    // Un adversaire vient de faire un 6 : son du 6.
     if (seenBefore && hasRolled && !wasRolled && dice == 6) sfx.six();
     if (gameOver) _settle();
   }
 
   bool _remoteSeen = false;
 
+  /// Joue le son du coup d'un adversaire (pas, capture, arrivée, victoire).
   void _soundsForRemote(List<List<int>> before, bool wasOver) {
+    // Le tout premier état reçu est l'état de départ : pas de son.
     if (!_remoteSeen) {
       _remoteSeen = true;
       return;
@@ -2224,6 +2403,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  /// « Je suis là » toutes les 5 s, et écoute des autres joueurs.
   void _startPresence() {
     final o = widget.online;
     if (o == null || o.spectator || !firebaseReady) return;
@@ -2242,6 +2422,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     beat();
     _beat = Timer.periodic(const Duration(seconds: 5), (_) => beat());
 
+    // On note quand la présence de chacun a changé pour la dernière fois
+    // (horloge locale : pas de décalage entre téléphones).
     _presenceSub = col.snapshots().listen((snap) {
       for (final d in snap.docs) {
         final t = d.data()['t'];
@@ -2257,11 +2439,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final at = _presenceAt[uid] ?? _presenceStart;
     return DateTime.now().difference(at) > const Duration(seconds: staleSeconds);
   }
-
+  /// Si le joueur dont c'est le tour est déconnecté, le joueur connecté de
+  /// plus petite couleur joue à sa place (au hasard). Après 15 coups, il est
+  /// déclaré forfait et la partie continue sans lui. S'il revient avant,
+  /// sa présence redevient fraîche et il reprend son jeu.
   void _watchDisconnected() {
     final o = widget.online;
     if (o == null || o.spectator || gameOver || o.uids.isEmpty) return;
-    if (!_connected || isRolling || isMoving || flightPhase != 0 || diceDragging) return;
+    if (!_connected || _busy) return;
 
     final cur = currentPlayer;
     if (forfeited.contains(cur)) return;
@@ -2270,6 +2455,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final targetUid = o.uids[seat];
     if (targetUid == o.uid || !_isStale(targetUid)) return;
 
+    // Arbitre : le premier joueur connecté (hors absent) par ordre de couleur.
     int? arbiter;
     for (final c in activeIdx) {
       if (c == cur) continue;
@@ -2288,7 +2474,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _applyForfeit(cur, reason: 'est déclaré forfait (connexion perdue)');
       return;
     }
-    if (!hasRolled) autoCounts[targetUid] = count + 1;
+    if (!hasRolled) autoCounts[targetUid] = count + 1; // un lancer = un coup
 
     _proxy = true;
     try {
@@ -2299,8 +2485,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   bool _settled = false;
+  /// Jackpot gagné à la fin de cette partie (0 = pas de jackpot).
   int jackpotWon = 0;
 
+  /// Fin de partie avec mise : le serveur verse la cagnotte aux gagnants.
   Future<void> _settle() async {
     if (_settled || !gameOver || isSpectator || !firebaseReady) return;
     final o = widget.online;
@@ -2327,18 +2515,19 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         if (mounted && jp > 0) setState(() => jackpotWon = jp);
       }
     } catch (_) {
-      _settled = false;
+      _settled = false; // on réessaiera au prochain événement
     }
   }
 
+  /// Envoie l'état du plateau aux autres joueurs.
   Future<void> _pushState() async {
     final o = widget.online;
     if (o == null) {
-      if (gameOver) _settle();
+      if (gameOver) _settle(); // présentiel avec mise
       return;
     }
     if (o.spectator || !firebaseReady) return;
-    autoCounts[o.uid] = 0;
+    autoCounts[o.uid] = 0; // je suis là : mon compteur repart à zéro
     try {
       await FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
         for (int i = 0; i < 4; i++) 'p$i': players[i].pawns,
@@ -2357,13 +2546,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         if (gameOver) 'status': 'finished',
       });
       if (gameOver) _settle();
-    } catch (_) {}
+    } catch (_) {
+      // Connexion perdue : le prochain coup renverra l'état complet.
+    }
   }
 
+  /// Joueurs de la partie au départ : 2 = Rouge + Bleu (face à face),
+  /// 3 = Rouge + Vert + Bleu, 4 = tous.
   List<int> get baseIdx => numPlayers == 2
       ? [0, 2]
       : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
 
+  /// Joueurs encore en jeu (sans ceux qui ont abandonné).
   List<int> get activeIdx =>
       baseIdx.where((i) => !forfeited.contains(i)).toList();
 
@@ -2375,6 +2569,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   final GlobalKey boardKey = GlobalKey();
   final List<GlobalKey> diceKeys = List.generate(4, (_) => GlobalKey());
 
+  // Ordre des tours (sens horaire) : Rouge, Vert, Bleu, Jaune
   late final List<Player> players = [
     Player(
       display: 'Rouge',
@@ -2407,42 +2602,40 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   ];
 
   int currentPlayer = 0;
-  int dice = 1;
-  int pendingDice = 1;
-  final List<int> lastRoll = [1, 1, 1, 1];
+  int dice = 1; // valeur du dernier lancer validé
+  int pendingDice = 1; // valeur en cours de lancer
+  final List<int> lastRoll = [1, 1, 1, 1]; // face affichée sur le dé de chaque joueur
   bool hasRolled = false;
   bool isRolling = false;
   bool isMoving = false;
   bool gameOver = false;
-  bool forcedCapture = true;
-  bool autoPlay = true;
-  bool autoPilot = true;
-  late final int autoSeconds = (widget.autoSecs == 5 || widget.autoSecs == 15)
-      ? widget.autoSecs
-      : 10;
-  int _turnElapsed = 0;
-  String _clockSig = '';
-  int get _turnLeft => max(0, autoSeconds - _turnElapsed);
-  bool get _turnUrgent => _turnElapsed >= (autoSeconds * 2 / 3).ceil();
-  bool gameStarted = false;
-  final int maxFinishThrows = 5;
+  bool soundOn = true;
+  bool forcedCapture = true; // capture obligatoire
+  bool autoPlay = true; // coup unique joué automatiquement
+  bool autoPilot = true; // pilotage automatique si le joueur tarde
+  final int autoSeconds = 10; // délai avant le pilotage automatique
+  bool gameStarted = false; // devient vrai au premier lancer de dé
+  final int maxFinishThrows = 5; // à l'arrivée : 5 lancers maximum
   final List<int> finishThrows = [0, 0, 0, 0];
   Timer? _autoTimer;
   String _lastSig = '';
   int _idle = 0;
-  int stepMs = 105;
-  DateTime? _lastBack;
+  int stepMs = 170; // vitesse des pions (ms par case)
+  DateTime? _lastBack; // dernier appui sur « retour » (double retour pour aller à l'accueil)
 
-  int? arrivalColor;
-  int arrivalKey = 0;
+  // Animation d'arrivée à la maison
+  int? arrivalColor; // couleur du joueur dont un pion vient d'arriver
+  int arrivalKey = 0; // change à chaque arrivée pour relancer l'animation
 
+  // Dé : glissement et lancer
   bool diceDragging = false;
   Offset dragPos = Offset.zero;
-  int flightPhase = 0;
+  int flightPhase = 0; // 0 = au repos, 1 = lancer, 2 = posé / retour
   Offset flightFrom = Offset.zero;
   Offset flightTo = Offset.zero;
+  List<int> faceSeq = [1, 2, 3, 4, 5, 6];
 
-  int _token = 0;
+  int _token = 0; // sert à annuler les animations en attente
   String message = 'Touche ton dé ou glisse-le pour le lancer !';
 
   final List<List<int>> track = const [
@@ -2463,13 +2656,21 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   List<List<int>> homeLane(int player) {
     switch (player) {
       case 0:
-        return const [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5]];
+        return const [
+          [7, 1], [7, 2], [7, 3], [7, 4], [7, 5],
+        ];
       case 1:
-        return const [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7]];
+        return const [
+          [1, 7], [2, 7], [3, 7], [4, 7], [5, 7],
+        ];
       case 2:
-        return const [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9]];
+        return const [
+          [7, 13], [7, 12], [7, 11], [7, 10], [7, 9],
+        ];
       default:
-        return const [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]];
+        return const [
+          [13, 7], [12, 7], [11, 7], [10, 7], [9, 7],
+        ];
     }
   }
 
@@ -2479,6 +2680,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     for (final p in players) {
       p.pawns = List<int>.generate(pawnCount, _startPosOf);
     }
+    // Avatars choisis avant la partie
     final av = widget.avatars;
     if (av != null) {
       for (int i = 0; i < 4 && i < av.length; i++) {
@@ -2521,6 +2723,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  // ---------------------------------------------------------------------
+  // Règles du jeu
+  // ---------------------------------------------------------------------
+
+  /// Progression d'un joueur : somme des cases parcourues par ses pions,
+  /// sur un total de (nombre de pions) x 56 cases.
   double progressOf(Player player) {
     int total = 0;
     for (final pos in player.pawns) {
@@ -2544,8 +2752,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return position + d <= 56;
   }
 
+  /// Ce coup capture-t-il un pion adverse ? (jamais un pion du binôme)
   bool moveCaptures(int pawnIndex) => _captureWith(pawnIndex, dice);
 
+  /// Le pion [pawnIndex] du joueur courant capturerait-il avec la face [d] ?
   bool _captureWith(int pawnIndex, int d) {
     final player = players[currentPlayer];
     final from = player.pawns[pawnIndex];
@@ -2571,6 +2781,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return false;
   }
 
+  /// Coups autorisés. Si une capture est possible, elle est obligatoire.
   List<int> legalMoves() {
     final player = players[currentPlayer];
     final all = <int>[
@@ -2581,6 +2792,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return (forcedCapture && captures.isNotEmpty) ? captures : all;
   }
 
+  /// Retire les coups équivalents (pions au même endroit).
   List<int> distinctMoves(List<int> legal) {
     final player = players[currentPlayer];
     final seen = <int>{};
@@ -2596,6 +2808,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final box = key.currentContext!.findRenderObject() as RenderBox;
     return root.globalToLocal(box.localToGlobal(local));
   }
+
+  // --- Dé : glisser puis lâcher, ou simplement toucher -------------------
 
   void onDicePanStart(int p) {
     if (p != currentPlayer || !canRollNow) return;
@@ -2640,11 +2854,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _localRoll = true;
       flightPhase = 1;
       flightFrom = from;
-      flightTo = from;
+      flightTo = from; // le dé tourne sur place
       message = 'Le dé roule...';
     });
     sfx.roll();
-    _pushRoll();
+    _pushRoll(); // les adversaires voient mon dé rouler
 
     _flight.duration = const Duration(milliseconds: 1000);
     await _flight.forward(from: 0);
@@ -2688,6 +2902,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 650));
     if (!mounted || rollToken != _token) return;
 
+    // Le dé retourne devant son joueur
     setState(() {
       flightFrom = _toRoot(diceKeys[currentPlayer]);
     });
@@ -2703,6 +2918,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted || rollToken != _token || gameOver) return;
       if (dice == 6) {
+        // Un 6 donne toujours un nouveau lancer, même pendant la finition.
         setState(() {
           hasRolled = false;
           message = 'Un 6 ! Tu rejoues.';
@@ -2712,12 +2928,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         nextTurn();
       }
     } else if (autoPlay && distinct.length == 1) {
+      // Un seul choix possible : le jeu joue à ta place
       await Future.delayed(const Duration(milliseconds: 250));
       if (!mounted || rollToken != _token) return;
       movePawn(currentPlayer, distinct.first);
     }
   }
 
+  /// Passe au joueur suivant, en sautant ceux qui ont déjà fini
+  /// tous leurs pions (mode équipe : leur binôme continue).
   void _advanceTurn() {
     final act = activeIdx;
     var next = currentPlayer;
@@ -2783,6 +3002,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       await Future.delayed(Duration(milliseconds: stepMs + 90));
       if (!mounted || token != _token) return;
     } else {
+      // Le pion avance case par case
       for (int s = 1; s <= dice; s++) {
         sfx.step();
         setState(() {
@@ -2795,8 +3015,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     final newPosition = player.pawns[pawnIndex];
     bool captured = false;
-    final victims = <int>[];
+    final victims = <int>[]; // couleur de chaque pion capturé
 
+    // Capture possible uniquement sur le circuit commun (0..50), hors cases sûres
+    // et jamais contre le binôme.
     if (newPosition < 51) {
       final absolutePosition = (player.start + newPosition) % 52;
 
@@ -2821,6 +3043,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     }
 
+    // Victoire : dès qu'un joueur a tous ses pions arrivés, la partie
+    // s'arrête ; en équipe, son équipe (lui et son binôme) gagne.
     final selfDone = player.pawns.every((p) => p == 56);
     final won = selfDone;
 
@@ -2835,6 +3059,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     setState(() {
       isMoving = false;
 
+      // Animation d'arrivée à la maison
       if (newPosition == 56) {
         arrivalColor = playerIndex;
         arrivalKey++;
@@ -2844,12 +3069,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         gameOver = true;
         message = '🏆 ${teamLabel(playerIndex)} remporte la partie !';
       } else if (selfDone) {
+        // Il a fini, son binôme continue : on passe la main.
         _advanceTurn();
       } else if (dice == 6 || captured || newPosition == 56) {
         hasRolled = false;
         message = captured
             ? ((isOnline || widget.localGameId != null) && capturePay > 0
-                ? 'Capture ! +${Wallet.format(capturePay * victims.length)}. Tu rejoues.'
+                ? 'Capture ! +${Wallet.format(capturePay * victims.length)}. '
+                    'Tu rejoues.'
                 : 'Capture ! Tu rejoues.')
             : newPosition == 56
                 ? 'Un pion est arrivé ! Tu rejoues.'
@@ -2869,12 +3096,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
+  /// Remet la partie à zéro (utilisé quand on change le nombre de joueurs
+  /// ou de pions dans les paramètres, ou avec « Rejouer » en fin de partie).
   void restartGame() {
     if (isOnline) {
       setState(() => message = 'Pas de nouvelle partie en ligne.');
       return;
     }
-    _token++;
+    _token++; // annule les animations en attente
     _flight.stop();
     _flight.value = 0;
     setState(() {
@@ -2901,6 +3130,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     });
   }
 
+  // ---------------------------------------------------------------------
+  // Positions des pions (en unités de cases)
+  // ---------------------------------------------------------------------
+
+  /// Pions à la base : aux 4 coins, pour laisser la place au logo central.
   List<double> homeCenter(int p, int i) {
     final rowStart = p < 2 ? 0 : 9;
     final colStart = (p == 0 || p == 3) ? 0 : 9;
@@ -2920,6 +3154,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return [cell[0] + 0.5, cell[1] + 0.5];
   }
 
+  // Zone de toucher élargie : on joue le pion le plus proche du doigt
   void onBoardTap(Offset pos, double c) {
     if (!hasRolled ||
         isRolling ||
@@ -2935,7 +3170,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final legal = legalMoves();
 
     int? best;
-    double bestDist = 1.8;
+    double bestDist = 1.8; // rayon en nombre de cases
     int? nearest;
     double nearestDist = 1.2;
 
@@ -2943,7 +3178,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final center = pawnCenter(currentPlayer, i);
       if (center == null) continue;
 
-      final dr = center[0] - 0.2 - tapRow;
+      final dr = center[0] - 0.2 - tapRow; // le pion est dessiné un peu plus haut
       final dc = center[1] - tapCol;
       final dist = sqrt(dr * dr + dc * dc);
 
@@ -2960,9 +3195,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (best != null) {
       movePawn(currentPlayer, best);
     } else if (nearest != null) {
-      movePawn(currentPlayer, nearest);
+      movePawn(currentPlayer, nearest); // affiche le message d'explication
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Interface
+  // ---------------------------------------------------------------------
 
   List<Widget> buildPawns(double c) {
     final legal = (_isMyTurn &&
@@ -2977,6 +3216,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final entries = <_PawnEntry>[];
     for (final p in activeIdx) {
       for (int i = 0; i < players[p].pawns.length; i++) {
+        // Un pion arrivé (56) reste visible dans sa base.
         final center = pawnCenter(p, i) ?? homeCenter(p, i);
         entries.add(_PawnEntry(p, i, center));
       }
@@ -2989,6 +3229,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           .add(e);
     }
 
+    // Les pions du bas sont dessinés par-dessus ceux du haut
     entries.sort((a, b) => a.center[0].compareTo(b.center[0]));
 
     return entries.map((e) {
@@ -3035,10 +3276,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }).toList();
   }
 
+  /// Explosion d'étincelles au centre du plateau quand un pion arrive à la maison.
   List<Widget> buildArrival(double c) {
     final a = arrivalColor;
     if (a == null || gameOver) return const <Widget>[];
 
+    // Centre du triangle d'arrivée de chaque couleur (en cases)
     const xs = [6.75, 7.5, 8.25, 7.5];
     const ys = [7.5, 6.75, 7.5, 8.25];
     final size = c * 5.0;
@@ -3063,6 +3306,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     ];
   }
 
+  /// Couronne dans la base du gagnant + « Victoire » au centre du plateau.
   List<Widget> buildVictory(double c) {
     final w = winnerColor;
     if (w == null) return const <Widget>[];
@@ -3073,6 +3317,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final crownBox = c * 3.2;
 
     return [
+      // Couronne dans la case (base) du gagnant
       Positioned(
         left: (colStart + 3) * c - crownBox / 2,
         top: (rowStart + 3) * c - crownBox / 2,
@@ -3091,6 +3336,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           ),
         ),
       ),
+      // Bandeau « Victoire » au milieu du plateau
       Positioned(
         left: 7.5 * c - c * 4.0,
         top: 7.5 * c - c * 1.6,
@@ -3134,6 +3380,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           fontSize: c * 1.15,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 2,
+                          shadows: const [
+                            Shadow(color: Colors.black54, blurRadius: 4),
+                          ],
                         ),
                       ),
                       Text(
@@ -3142,6 +3391,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           color: Colors.white,
                           fontSize: c * 0.8,
                           fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Katika décharge les caisses',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 0.6,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -3156,6 +3415,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   Widget buildBoard(double size) {
+    // Le cadre du plateau prend la couleur du joueur dont c'est le tour.
     final turnColor = players[currentPlayer].color;
     return Container(
       key: boardKey,
@@ -3214,6 +3474,19 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  TextStyle logoStyle(Color color) {
+    return TextStyle(
+      color: color,
+      fontSize: 28,
+      fontWeight: FontWeight.w900,
+      fontStyle: FontStyle.italic,
+      height: 1.0,
+      shadows: const [
+        Shadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 3)),
+      ],
+    );
+  }
+
   Widget buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
@@ -3269,36 +3542,105 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 RichText(
                   text: TextSpan(
                     children: [
-                      TextSpan(text: 'Kati', style: _logoStyle(Colors.white, 28)),
+                      TextSpan(text: 'Kati', style: logoStyle(Colors.white)),
                       TextSpan(
                         text: 'ka',
-                        style: _logoStyle(const Color(0xFFFFC21A), 28),
+                        style: logoStyle(const Color(0xFFFFC21A)),
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Dés et Ludo by CKY',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 9,
+                    letterSpacing: 1.0,
                   ),
                 ),
               ],
             ),
           ),
           IconButton(
-            tooltip: tr('Règles', 'Rules'),
+            tooltip: 'Règles',
             padding: const EdgeInsets.all(6),
             constraints: const BoxConstraints(),
             onPressed: () =>
                 showRulesDialog(context, 'Règles du Ludo', kLudoRules),
             icon: const Icon(Icons.help_outline, color: Colors.white),
           ),
+          const SizedBox(width: 4),
+          // Salon d'attente : toutes les informations de la partie
           if (isOnline) ...[
             RoomInfoButton(
               collection: 'games',
               gameId: widget.online!.gameId,
             ),
+            const SizedBox(width: 4),
           ],
+          // Chat de la partie en ligne (messages et emojis, sans quitter le jeu)
+          if (isOnline && !isSpectator) ...[
+            GameChat(
+              collection: 'games',
+              gameId: widget.online!.gameId,
+              myName: nameOf(_myColor),
+            ),
+            const SizedBox(width: 4),
+          ],
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: Colors.black26,
+              border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.emoji_events,
+                  color: Color(0xFFFFC21A),
+                  size: 22,
+                ),
+                const SizedBox(width: 4),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isSpectator
+                          ? 'Mode : Spectateur'
+                          : isOnline
+                          ? 'Mode : En ligne'
+                          : (widget.partners != null
+                              ? 'Mode : Équipes 2v2'
+                              : 'Mode : Présentiel'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      tr('$numPlayers Joueurs', '$numPlayers Players'),
+                      style: const TextStyle(
+                        color: Color(0xFFFFC21A),
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
+  /// Classement en direct, affiché sous l'en-tête pendant toute la partie.
   Widget buildRanking() {
     final order = ranking;
     const medals = ['🥇', '🥈', '🥉', '4️⃣'];
@@ -3344,6 +3686,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     final player = players[index];
     final active = index == currentPlayer && !gameOver;
+    final remaining = pawnCount - player.finished;
     final progress = progressOf(player);
     final percent = (progress * 100).round();
 
@@ -3358,10 +3701,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           colors: [shade(player.color, 0.15), shade(player.color, -0.12)],
         ),
         border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: player.color.withOpacity(active ? 0.9 : 0.4),
+            blurRadius: active ? 12 : 4,
+            spreadRadius: active ? 2 : 0,
+          ),
+        ],
       ),
       child: Icon(player.avatar, color: Colors.white, size: 26),
     );
 
+    // Anneau de progression autour de l'avatar
     final ringCore = SizedBox(
       width: 52,
       height: 52,
@@ -3387,6 +3738,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ),
     );
 
+    // Emoji reçu : il s'affiche devant le joueur. On touche l'avatar d'un
+    // joueur pour lui envoyer un emoji (parties en ligne).
     final reactions = _reactions;
     final avatarWithRing = SizedBox(
       width: 52,
@@ -3402,9 +3755,42 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               child: ringCore,
             ),
           ),
+          if (reactions != null)
+            Positioned(
+              top: -18,
+              left: avatarOnRight ? -16 : null,
+              right: avatarOnRight ? null : -16,
+              child: EmojiBubble(
+                reactions: reactions,
+                uid: _uidOfColor(index),
+                size: 34,
+              ),
+            ),
         ],
       ),
     );
+
+    // Boîte d'emojis visible devant la case de chaque joueur : on la touche
+    // pour taguer le joueur (parties en ligne).
+    final Widget? emojiBtn = reactions == null
+        ? null
+        : Builder(
+            builder: (ctx) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _tagPlayer(ctx, index),
+              child: Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withOpacity(0.35),
+                  border: Border.all(color: Colors.white70, width: 1.5),
+                ),
+                child: const Text('😀', style: TextStyle(fontSize: 16)),
+              ),
+            ),
+          );
 
     final info = Column(
       mainAxisSize: MainAxisSize.min,
@@ -3419,8 +3805,33 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             fontWeight: FontWeight.w800,
           ),
         ),
+        const SizedBox(height: 2),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 12,
+              height: 15,
+              child: CustomPaint(
+                painter: PawnPainter(color: player.color, highlight: false),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              tr('$remaining pion${remaining > 1 ? 's' : ''}',
+                  '$remaining pawn${remaining > 1 ? 's' : ''}'),
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.9),
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
         Text(
-          '$percent %',
+          active
+              ? '${isSpectator ? tr('▶ SON TOUR', '▶ THEIR TURN') : tr('▶ À TOI', '▶ YOUR TURN')} · $percent %'
+              : '$percent %',
           style: const TextStyle(
             color: Color(0xFFFFE082),
             fontSize: 12,
@@ -3430,25 +3841,57 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ],
     );
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-      decoration: BoxDecoration(
-        color: player.color.withOpacity(active ? 0.6 : 0.3),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(
-          color: active ? Colors.white : player.color.withOpacity(0.8),
-          width: active ? 2.5 : 1.5,
+    // Le badge du joueur actif pulse et brille.
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, _) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        decoration: BoxDecoration(
+          color: player.color.withOpacity(active ? 0.6 : 0.3),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: active ? Colors.white : player.color.withOpacity(0.8),
+            width: active ? 2.5 : 1.5,
+          ),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: player.color.withOpacity(0.9),
+                    blurRadius: 8 + _pulse.value * 14,
+                    spreadRadius: 1 + _pulse.value * 3,
+                  ),
+                ]
+              : null,
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: avatarOnRight
-            ? [info, const SizedBox(width: 6), avatarWithRing]
-            : [avatarWithRing, const SizedBox(width: 6), info],
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: avatarOnRight
+                ? [
+                    if (emojiBtn != null) ...[emojiBtn, const SizedBox(width: 6)],
+                    info,
+                    const SizedBox(width: 6),
+                    avatarWithRing,
+                  ]
+                : [
+                    avatarWithRing,
+                    const SizedBox(width: 6),
+                    info,
+                    if (emojiBtn != null) ...[const SizedBox(width: 6), emojiBtn],
+                  ],
+          ),
+        ),
       ),
     );
   }
 
+  /// Dé 3D au repos (sur la face [value]).
+  Widget diceBox(int value, Color color, {bool glow = false}) {
+    return Die3D(value: value, color: color, glow: glow);
+  }
+
+  /// Le dé d'un joueur : on le touche pour lancer, ou on le glisse puis on le lâche.
   Widget diceSlot(int p) {
     if (!activeIdx.contains(p)) return const SizedBox(width: 52, height: 52);
 
@@ -3467,18 +3910,36 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       onPanStart: isActive ? (details) => onDicePanStart(p) : null,
       onPanUpdate: isActive ? onDicePanUpdate : null,
       onPanEnd: isActive ? (details) => onDicePanEnd() : null,
+      onPanCancel: isActive
+          ? () {
+              if (diceDragging) {
+                setState(() {
+                  diceDragging = false;
+                });
+              }
+            }
+          : null,
       child: SizedBox(
         key: diceKeys[p],
         width: 52,
         height: 52,
-        child: Opacity(
-          opacity: lifted ? 0.25 : (isActive ? 1.0 : 0.5),
-          child: Die3D(value: lastRoll[p], color: player.color, glow: canRoll),
+        child: AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, child) => Transform.scale(
+            scale: canRoll ? 1.0 + _pulse.value * 0.08 : 1.0,
+            child: child,
+          ),
+          child: Opacity(
+            opacity: lifted ? 0.25 : (isActive ? 1.0 : 0.5),
+            child: diceBox(lastRoll[p], player.color, glow: canRoll),
+          ),
         ),
       ),
     );
   }
 
+  /// Le dé qui suit le doigt, puis qui roule en 3D sur le plateau
+  /// (visible aussi chez les adversaires en ligne).
   Widget buildFlyingDie() {
     final color = players[currentPlayer].color;
 
@@ -3489,7 +3950,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         width: 58,
         height: 58,
         child: IgnorePointer(
-          child: Die3D(value: lastRoll[currentPlayer], color: color, glow: true),
+          child: diceBox(lastRoll[currentPlayer], color, glow: true),
         ),
       );
     }
@@ -3502,15 +3963,21 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         final t = _flight.value;
         final eased = Curves.easeOutCubic.transform(t);
         final pos = Offset.lerp(flightFrom, flightTo, eased)!;
+        final rolling = flightPhase == 1;
+        // Le dé tourne sur place : léger rebond et petit grossissement.
+        final bounce = rolling ? sin(t * pi * 3).abs() * (1 - t) * 14 : 0.0;
+        final size = 64.0 + (rolling ? 14.0 * sin(t * pi) : 0.0);
+        final grow = (size - 52.0) / 2;
+
         return Positioned(
-          left: pos.dx - 26,
-          top: pos.dy - 26,
-          width: 52,
-          height: 52,
+          left: pos.dx - grow,
+          top: pos.dy - bounce - grow,
+          width: size,
+          height: size,
           child: IgnorePointer(
             child: Die3D(
               value: pendingDice,
-              t: t,
+              t: rolling ? t : 1.0,
               spin: dieSpin,
               color: color,
               glow: true,
@@ -3537,6 +4004,245 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  void showSettings() {
+    const speeds = <String, int>{'Lente': 300, 'Normale': 170, 'Rapide': 90};
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF14267A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            void update(VoidCallback change) {
+              setState(change);
+              setSheetState(() {});
+            }
+
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Paramètres',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Capture obligatoire',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: const Text(
+                        "Tu dois prendre un pion adverse quand c'est possible",
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      value: forcedCapture,
+                      onChanged: (value) =>
+                          update(() => forcedCapture = value),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Coup unique automatique',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: const Text(
+                        "Le jeu joue à ta place quand il n'y a qu'un seul choix",
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      value: autoPlay,
+                      onChanged: (value) => update(() => autoPlay = value),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Pilotage automatique',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        tr(
+                          'Si tu ne joues pas pendant $autoSeconds secondes, '
+                          'le jeu joue à ta place',
+                          "If you don't play for $autoSeconds seconds, "
+                          'the game plays for you',
+                        ),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      value: autoPilot,
+                      onChanged: (value) => update(() => autoPilot = value),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Vitesse des pions',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final entry in speeds.entries)
+                          ChoiceChip(
+                            label: Text(entry.key),
+                            selected: stepMs == entry.value,
+                            onSelected: (_) =>
+                                update(() => stepMs = entry.value),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Nombre de pions par joueur',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final n in [1, 2, 3, 4])
+                          ChoiceChip(
+                            label: Text('$n'),
+                            selected: pawnCount == n,
+                            // Position 54 : toujours 2 pions, non modifiable.
+                            onSelected: (isOnline || widget.startOut)
+                                ? null
+                                : (_) {
+                                    update(() => pawnCount = n);
+                                    restartGame();
+                                  },
+                          ),
+                      ],
+                    ),
+                    if (widget.startOut)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Position 54 : la partie se joue avec 2 pions chacun.',
+                          style: TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                      ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Nombre de joueurs',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final n in [2, 3, 4])
+                          ChoiceChip(
+                            label: Text('$n'),
+                            selected: numPlayers == n,
+                            // En mode équipe : toujours 4 joueurs.
+                            onSelected: (isOnline || widget.partners != null)
+                                ? null
+                                : (_) {
+                                    update(() => numPlayers = n);
+                                    restartGame();
+                                  },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Changer ces deux réglages remet la partie à zéro.',
+                      style: TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      isOnline
+                          ? 'Mode : en ligne'
+                          : (widget.partners != null
+                              ? 'Mode : équipes 2 contre 2 (même plateau)'
+                              : 'Mode : en présentiel (tous les joueurs sur le même plateau)'),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              _goHome();
+                            },
+                            child: const Text('Accueil'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void showStats() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text('Classement', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final p in ranking.map((i) => players[i]))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    CircleAvatar(radius: 10, backgroundColor: p.color),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        nameOf(players.indexOf(p)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    Text(
+                      tr('${p.finished}/$pawnCount arrivés',
+                          '${p.finished}/$pawnCount finished'),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget buildStatusBar() {
     final player = players[currentPlayer];
 
@@ -3550,6 +4256,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               decoration: BoxDecoration(
                 color: const Color(0xFF0A1B66),
                 borderRadius: BorderRadius.circular(24),
+                // Bordure à la couleur du joueur dont c'est le tour
                 border: Border.all(
                   color: gameOver ? Colors.white24 : player.color,
                   width: 2.5,
@@ -3568,6 +4275,25 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        RichText(
+                          text: TextSpan(
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            children: [
+                              TextSpan(text: tr('Au tour de : ', 'Turn of: ')),
+                              TextSpan(
+                                text: nameOf(currentPlayer),
+                                style: TextStyle(
+                                  color: shade(player.color, 0.12),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         Text(
                           message,
                           maxLines: 2,
@@ -3584,41 +4310,46 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ),
             ),
           ),
+          if (!gameStarted && !isSpectator) ...[
+            const SizedBox(width: 8),
+            roundButton(Icons.settings, showSettings),
+          ],
           const SizedBox(width: 8),
-          roundButton(Icons.bar_chart, () {
-            showDialog<void>(
-              context: context,
-              builder: (context) => AlertDialog(
-                backgroundColor: const Color(0xFF14267A),
-                title: const Text('Classement',
-                    style: TextStyle(color: Colors.white)),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final p in ranking.map((i) => players[i]))
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          children: [
-                            CircleAvatar(radius: 10, backgroundColor: p.color),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                nameOf(players.indexOf(p)),
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          }),
+          roundButton(Icons.bar_chart, showStats),
         ],
       ),
     );
+  }
+
+  /// Panneau de fin de match : gagnant + boutons Rejouer / Accueil.
+  /// Gains affichés à la fin d'une partie avec mise : un seul gagnant, ou
+  /// chaque joueur de l'équipe gagnante (la cagnotte est partagée).
+  List<Widget> buildGains(int w) {
+    final winners = <int>[w, if (_mateOf(w) >= 0) _mateOf(w)];
+    final pot = widget.stake * widget.numPlayers;
+    final share = Wallet.prize(pot, local: !isOnline) ~/ winners.length;
+    TextStyle st(double size) => TextStyle(
+          color: const Color(0xFFFFE082),
+          fontSize: size,
+          fontWeight: FontWeight.w800,
+        );
+    return [
+      const SizedBox(height: 8),
+      if (winners.length == 1)
+        Text(
+          tr('Gain : ${Wallet.format(share)}',
+              'Prize: ${Wallet.format(share)}'),
+          textAlign: TextAlign.center,
+          style: st(16),
+        )
+      else
+        for (final c in winners)
+          Text(
+            '🏆 ${nameOf(c)} : +${Wallet.format(share)}',
+            textAlign: TextAlign.center,
+            style: st(15),
+          ),
+    ];
   }
 
   Widget buildEndPanel() {
@@ -3631,56 +4362,112 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       bottom: 10,
       child: SafeArea(
         top: false,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0A1B66),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: color, width: 2.5),
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0.0, end: 1.0),
+          duration: const Duration(milliseconds: 700),
+          curve: Curves.easeOutBack,
+          builder: (context, v, child) => Transform.translate(
+            offset: Offset(0, (1 - v) * 140),
+            child: Opacity(opacity: v.clamp(0.0, 1.0).toDouble(), child: child),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                w == null
-                    ? '🏁 Partie terminée'
-                    : '🏆 ${teamLabel(w)} remporte la partie !',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xFFFFC21A),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A1B66),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: color, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.7),
+                  blurRadius: 18,
+                  spreadRadius: 1,
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  if (!isOnline && widget.localGameId == null) ...[
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF22B14C),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: restartGame,
-                        child: const Text('Rejouer'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                  ],
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Accueil'),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  w == null
+                      ? '🏁 Partie terminée'
+                      : '🏆 ${teamLabel(w)} remporte la partie !',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFFFC21A),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (w != null && widget.stake > 0) ...buildGains(w),
+                if (jackpotWon > 0) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    tr('🎰 JACKPOT gagné : ${Wallet.format(jackpotWon)} !',
+                        '🎰 JACKPOT won: ${Wallet.format(jackpotWon)}!'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
                 ],
-              ),
-            ],
+                if (isOnline && !isSpectator && _lastDoc != null) ...[
+                  const SizedBox(height: 10),
+                  RematchPanel(
+                    collection: 'games',
+                    gameId: widget.online!.gameId,
+                    data: _lastDoc!,
+                    createRoom: createLudoRematchRoom,
+                    openRoom: (id) {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute<void>(
+                          builder: (_) => OnlineGameRoom(gameId: id),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+                if (!isOnline) ...[
+                  const SizedBox(height: 10),
+                  LocalRematchPanel(
+                    names: [for (final c in baseIdx) nameOf(c)],
+                    ids: baseIdx,
+                    stake: widget.stake,
+                    onRelaunch: (accepted) =>
+                        Navigator.of(context).pop(accepted),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    if (!isOnline && widget.localGameId == null) ...[
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF22B14C),
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: restartGame,
+                          child: const Text('Rejouer'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white54),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Accueil'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3720,6 +4507,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     );
   }
 
+  /// Double retour : un 1er appui affiche un message, un 2e appui
+  /// dans les 2 secondes ramène à l'accueil (la partie reste en mémoire).
   void _onBackPressed(bool didPop, Object? result) {
     if (didPop) return;
     final now = DateTime.now();
@@ -3773,6 +4562,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         children: [
                           buildHeader(),
                           buildRanking(),
+                          // Jackpot en direct pendant la partie
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [badgesRow(0, 1), diceRow(0, 1)],
@@ -3791,6 +4581,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               ),
             ),
             buildFlyingDie(),
+            // Fin de match : confettis + panneau de résultat
             if (gameOver)
               const Positioned.fill(
                 child: IgnorePointer(child: Confetti()),
