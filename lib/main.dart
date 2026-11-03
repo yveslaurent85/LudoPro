@@ -1604,7 +1604,8 @@ class LudoGame extends StatefulWidget {
     this.starSafe = true,
     this.startOut = false,
     this.startDoor = false,
-    this.online,
+this.autoSecs = 10,
+this.online,
     this.names,
     this.avatars,
     this.partners,
@@ -1626,6 +1627,7 @@ class LudoGame extends StatefulWidget {
   /// Vrai : les pions démarrent déjà sur leur case de départ (position 0).
   /// Un pion capturé retourne à la base et a besoin d'un 6 pour ressortir.
   final bool startDoor;
+  final int autoSecs;
   final OnlineSession? online; // null = jeu en présentiel
 
   /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
@@ -2613,7 +2615,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool forcedCapture = true; // capture obligatoire
   bool autoPlay = true; // coup unique joué automatiquement
   bool autoPilot = true; // pilotage automatique si le joueur tarde
-  final int autoSeconds = 10; // délai avant le pilotage automatique
+  late final int autoSeconds = widget.autoSecs; // délai avant le pilotage automatique
   bool gameStarted = false; // devient vrai au premier lancer de dé
   final int maxFinishThrows = 5; // à l'arrivée : 5 lancers maximum
   final List<int> finishThrows = [0, 0, 0, 0];
