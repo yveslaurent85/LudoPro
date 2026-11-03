@@ -734,7 +734,7 @@ class _SetupScreenState extends State<SetupScreen> {
     final t = nameCtrls[c].text.trim();
     return t.isNotEmpty
         ? t
-        : tr('Joueur ${colorLabel(c)}', 'Player${colorLabel(c)}');
+        : tr('Joueur ${colorLabel(c)}', 'Player ${colorLabel(c)}');
   }
 
   Future<void> _invite(int from) async {
@@ -844,7 +844,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   child: Text(
                     partners[c] == -1
                         ? tr('${_label(c)} : sans binôme', '${_label(c)}: no partner')
-                        : '${_label(c)} +${_label(partners[c])}',
+                        : '${_label(c)} + ${_label(partners[c])}',
                     style: const TextStyle(color: Colors.white),
                   ),
                 ),
@@ -881,3 +881,2924 @@ class _SetupScreenState extends State<SetupScreen> {
       children: [
         const JackpotBanner(),
         const SizedBox(height: 14),
+        const Text(
+          'Mise de chaque joueur (jetons)',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        StakeField(
+          stake: stake,
+          players: seats.length,
+          onChanged: (v) => setState(() => stake = v),
+        ),
+        _switch(
+          'Captures payantes',
+          'Chaque pion capturé rapporte de l\'argent au joueur qui capture, '
+              'pris sur le solde du joueur capturé.',
+          capturePay,
+          (v) => setState(() => capturePay = v),
+        ),
+        if (capturePay) ...[
+          Text(
+            tr('Montant par capture (minimum ${Wallet.format(Wallet.minCapture)})',
+                'Amount per capture (minimum ${Wallet.format(Wallet.minCapture)})'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final v in Wallet.captureAmounts)
+                ChoiceChip(
+                  label: Text('$v'),
+                  selected: captureAmount == v,
+                  onSelected: (_) => setState(() => captureAmount = v),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            tr(
+              'Chaque pion capturé : ${Wallet.format(captureAmount)} pris sur '
+              'le solde du joueur capturé (ce qu\'il a, s\'il en a moins).',
+              'Each captured pawn: ${Wallet.format(captureAmount)} taken from '
+              'the captured player\'s balance (whatever they have, if less).',
+            ),
+            style: const TextStyle(color: Color(0xFFFFE082), fontSize: 13),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _startGame() async {
+    if (starting || stake < 0) return;
+    String? localId;
+    final uids = <String?>[null, null, null, null];
+
+    if (firebaseReady) {
+      setState(() => starting = true);
+      try {
+        final tokens = <String>[];
+        for (final s in seats) {
+          final a = accounts[s]!;
+          uids[s] = a.uid;
+          if (a.uid == FirebaseAuth.instance.currentUser?.uid) {
+            final u = FirebaseAuth.instance.currentUser;
+            tokens.add((await u?.getIdToken(true)) ?? '');
+          } else {
+            tokens.add(a.idToken ?? '');
+          }
+        }
+        localId = await Wallet.startLocalGame(
+          stake: stake,
+          tokens: tokens,
+          names: [for (final s in seats) accounts[s]!.name],
+          game: 'ludo',
+          capturePay: capturePay ? captureAmount : 0,
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => starting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(Wallet.errorText(e))),
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() => starting = false);
+    }
+
+    final rematch = await Navigator.of(context).push<List<int>>(
+      MaterialPageRoute<List<int>>(
+        builder: (context) => LudoGame(
+          numPlayers: numPlayers,
+          pawnCount: startOut ? 2 : pawnCount,
+          doorSafe: doorSafe,
+          starSafe: starSafe,
+          startOut: startOut,
+          startDoor: startDoor,
+          autoSecs: autoSecs,
+          partners: teamMode ? List<int>.from(partners) : null,
+          localGameId: localId,
+          accountUids: uids,
+          stake: firebaseReady ? stake : 0,
+          capturePayLocal: (firebaseReady && capturePay) ? captureAmount : 0,
+          names: [
+            for (int i = 0; i < 4; i++)
+              accounts[i]?.name ?? nameCtrls[i].text.trim(),
+          ],
+          avatars: List<IconData>.from(avatars),
+        ),
+      ),
+    );
+    if (!mounted) return;
+
+    if (rematch != null && rematch.length >= 2) {
+      await _rematch(rematch);
+      return;
+    }
+
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      setState(() => accounts.removeWhere((k, _) => k != 0));
+      if (u != null) _loadHost(u);
+    }
+  }
+
+  Future<void> _rematch(List<int> accepted) async {
+    final n = accepted.length;
+    final newSeats = n == 2 ? [0, 2] : (n == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+    final oldAcc = Map<int, PlayerAccount>.from(accounts);
+    final oldAv = List<IconData>.from(avatars);
+    final oldTxt = [for (final c in nameCtrls) c.text];
+    setState(() {
+      numPlayers = n;
+      accounts.clear();
+      for (int i = 0; i < n; i++) {
+        final from = accepted[i];
+        final to = newSeats[i];
+        final a = oldAcc[from];
+        if (a != null) accounts[to] = a;
+        avatars[to] = oldAv[from];
+        nameCtrls[to].text = oldTxt[from];
+      }
+      if (n != 4) {
+        teamMode = false;
+        _resetTeams();
+      }
+    });
+    await _startGame();
+  }
+
+  static const List<IconData> avatarChoices = [
+    Icons.person,
+    Icons.face,
+    Icons.face_3,
+    Icons.person_outline,
+    Icons.sports_esports,
+    Icons.pets,
+    Icons.rocket_launch,
+    Icons.star,
+    Icons.emoji_emotions,
+    Icons.android,
+    Icons.local_fire_department,
+    Icons.music_note,
+  ];
+  static const List<Color> colorList = [
+    Color(0xFFE5262B),
+    Color(0xFF22B14C),
+    Color(0xFF1E6BFF),
+    Color(0xFFFFC21A),
+  ];
+
+  late final List<TextEditingController> nameCtrls;
+  final List<IconData> avatars = [
+    Icons.person,
+    Icons.face,
+    Icons.face_3,
+    Icons.person_outline,
+  ];
+
+  final Map<int, PlayerAccount> accounts = {};
+
+  bool get allConnected =>
+      !firebaseReady || seats.every((s) => accounts.containsKey(s));
+
+  List<int> get seats =>
+      numPlayers == 2 ? [0, 2] : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+
+  @override
+  void initState() {
+    super.initState();
+    nameCtrls = List.generate(4, (_) => TextEditingController());
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      if (u != null) _loadHost(u);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in nameCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadHost(User u) async {
+    int bal = 0;
+    String? token;
+    try {
+      bal = await Wallet.ensure(FirebaseFirestore.instance, u);
+      token = await u.getIdToken();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      accounts[0] = PlayerAccount(
+        idToken: token,
+        uid: u.uid,
+        name: (u.displayName != null && u.displayName!.isNotEmpty)
+            ? u.displayName!
+            : (u.email ?? 'Joueur'),
+        email: u.email ?? '',
+        balance: bal,
+      );
+    });
+  }
+
+  Future<void> _connect(int color) async {
+    final acc = await showPlayerLogin(
+      context,
+      colorName: colorLabel(color),
+      color: colorList[color],
+    );
+    if (acc == null || !mounted) return;
+    final already = accounts.entries
+        .any((e) => e.key != color && e.value.uid == acc.uid);
+    if (already) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ce compte joue déjà dans la partie.')),
+      );
+      return;
+    }
+    setState(() => accounts[color] = acc);
+  }
+
+  Future<void> _pickAvatar(int color) async {
+    final choice = await showDialog<IconData>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Choisis ton avatar',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: SizedBox(
+          width: 280,
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final a in avatarChoices)
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx, a),
+                  child: CircleAvatar(
+                    radius: 24,
+                    backgroundColor: colorList[color],
+                    child: Container(
+                      decoration: a == avatars[color]
+                          ? BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 3,
+                              ),
+                            )
+                          : null,
+                      alignment: Alignment.center,
+                      child: Icon(a, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice != null) setState(() => avatars[color] = choice);
+  }
+
+  Widget _playerRow(int color) {
+    final acc = accounts[color];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => _pickAvatar(color),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: colorList[color],
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(avatars[color], color: Colors.white),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: acc != null
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      color: Colors.white.withOpacity(0.12),
+                      border: Border.all(color: colorList[color], width: 1.5),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          acc.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          '💰 ${Wallet.format(acc.balance)}',
+                          style: const TextStyle(
+                            color: Color(0xFFFFE082),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : (firebaseReady
+                    ? OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(color: colorList[color], width: 2),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () => _connect(color),
+                        icon: const Icon(Icons.login),
+                        label: Text(tr(
+                          'Joueur ${colorLabel(color)} : se connecter',
+                          'Player ${colorLabel(color)}: sign in',
+                        )),
+                      )
+                    : TextField(
+                        controller: nameCtrls[color],
+                        maxLength: 12,
+                        onChanged: (_) => setState(() {}),
+                        style: const TextStyle(color: Colors.white),
+                        cursorColor: const Color(0xFFFFC21A),
+                        decoration: InputDecoration(
+                          counterText: '',
+                          isDense: true,
+                          hintText: tr('Joueur ${colorLabel(color)}',
+                              'Player ${colorLabel(color)}'),
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.12),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: const BorderSide(
+                                color: Color(0xFFFFC21A), width: 2),
+                          ),
+                        ),
+                      )),
+          ),
+          if (acc != null && color != 0)
+            IconButton(
+              tooltip: tr('Changer de compte', 'Switch account'),
+              onPressed: () => setState(() => accounts.remove(color)),
+              icon: const Icon(Icons.logout, color: Colors.white70),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _switch(String title, String subtitle, bool value,
+      void Function(bool) onChanged) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      activeColor: const Color(0xFFFFC21A),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
+      ),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _picker(
+    String title,
+    List<int> values,
+    int current,
+    void Function(int) onPick, {
+    bool enabled = true,
+  }) {
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.45,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final v in values)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: enabled ? () => onPick(v) : null,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: v == current
+                              ? const Color(0xFFFFC21A)
+                              : Colors.white.withOpacity(0.12),
+                        ),
+                        child: Text(
+                          '$v',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: v == current
+                                ? const Color(0xFF1A1F3A)
+                                : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => optionsStep
+                          ? setState(() => optionsStep = false)
+                          : Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    const Text(
+                      'Préparer la partie',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                if (!optionsStep) ...[
+                  const SizedBox(height: 24),
+                  _picker(
+                    'Nombre de joueurs',
+                    const [2, 3, 4],
+                    numPlayers,
+                    (v) => setState(() {
+                      numPlayers = v;
+                      if (v != 4) {
+                        teamMode = false;
+                        _resetTeams();
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 24),
+                  _picker(
+                    'Nombre de pions par joueur',
+                    const [1, 2, 3, 4],
+                    pawnCount,
+                    (v) => setState(() => pawnCount = v),
+                    enabled: !startOut,
+                  ),
+                  if (startOut)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Position 54 : la partie se joue avec 2 pions chacun.',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                    ),
+                  if (firebaseReady) ...[
+                    const SizedBox(height: 24),
+                    _stakePicker(),
+                  ],
+                  const SizedBox(height: 24),
+                  Text(
+                    firebaseReady
+                        ? 'Joueurs (chacun se connecte à son compte)'
+                        : 'Joueurs (touche le rond pour changer d\'avatar)',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  for (final s in seats) _playerRow(s),
+                  if (numPlayers == 4)
+                    _switch(
+                      'Jouer en équipe (2 contre 2)',
+                      "Les binômes ne se capturent pas.",
+                      teamMode,
+                      (v) => setState(() {
+                        teamMode = v;
+                        _resetTeams();
+                      }),
+                    ),
+                  if (teamMode) _teamSection(),
+                ] else ...[
+                  Text(
+                    tr('Options de jeu', 'Game options'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  _switch(
+                    'Protection des portes',
+                    'Un pion sur une case de départ ne peut pas être capturé',
+                    doorSafe,
+                    (v) => setState(() => doorSafe = v),
+                  ),
+                  _switch(
+                    "Protection des étoiles",
+                    'Un pion sur une étoile ne peut pas être capturé',
+                    starSafe,
+                    (v) => setState(() => starSafe = v),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF22B14C),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: (!allConnected ||
+                            !teamsReady ||
+                            brokePlayer != null ||
+                            starting)
+                        ? null
+                        : (optionsStep
+                            ? _startGame
+                            : () => setState(() => optionsStep = true)),
+                    child: Text(
+                      starting
+                          ? 'Mise en cours...'
+                          : !allConnected
+                              ? 'Tous les joueurs doivent se connecter'
+                              : (!teamsReady
+                                  ? 'Forme les binômes'
+                                  : (brokePlayer != null
+                                      ? tr('Solde insuffisant : $brokePlayer',
+                                          'Insufficient balance: $brokePlayer')
+                                      : (!optionsStep
+                                          ? tr('Suivant', 'Next')
+                                          : firebaseReady
+                                              ? (stake <= 0
+                                                  ? 'Lancer · partie gratuite'
+                                                  : tr(
+                                                      'Lancer · mise ${Wallet.format(stake)}',
+                                                      'Start · stake ${Wallet.format(stake)}'))
+                                              : 'Lancer la partie'))),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class LudoGame extends StatefulWidget {
+  const LudoGame({
+    super.key,
+    this.numPlayers = 4,
+    this.pawnCount = 4,
+    this.doorSafe = true,
+    this.starSafe = true,
+    this.startOut = false,
+    this.startDoor = false,
+    this.autoSecs = 10,
+    this.online,
+    this.names,
+    this.avatars,
+    this.partners,
+    this.localGameId,
+    this.accountUids,
+    this.stake = 0,
+    this.capturePayLocal = 0,
+  });
+
+  final int numPlayers;
+  final int pawnCount;
+  final bool doorSafe;
+  final bool starSafe;
+  final bool startOut;
+  final bool startDoor;
+  final int autoSecs;
+  final OnlineSession? online;
+  final List<String>? names;
+  final List<IconData>? avatars;
+  final List<int>? partners;
+  final String? localGameId;
+  final List<String?>? accountUids;
+  final int stake;
+  final int capturePayLocal;
+
+  @override
+  State<LudoGame> createState() => _LudoGameState();
+}
+
+class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
+  static const Set<int> safeStars = {8, 21, 34, 47};
+  static const Set<int> doorCells = {0, 13, 26, 39};
+
+  Set<int> get safeCells => {
+        if (widget.doorSafe) ...doorCells,
+        if (widget.starSafe) ...safeStars,
+      };
+
+  final Random random = Random();
+  late int numPlayers = widget.numPlayers;
+  late int pawnCount = widget.pawnCount;
+
+  int _startPosOf(int i) =>
+      widget.startOut ? 43 + (i % 2) : (widget.startDoor ? 0 : -1);
+
+  final Set<int> forfeited = {};
+  int? winnerOverride;
+  bool away = false;
+
+  bool get isOnline => widget.online != null;
+  bool get isSpectator => widget.online?.spectator ?? false;
+  int get _myColor =>
+      (isOnline && !isSpectator) ? baseIdx[widget.online!.mySeat] : -1;
+  bool get _isMyTurn =>
+      !isOnline ||
+      _proxy ||
+      (!isSpectator && currentPlayer == _myColor && _connected);
+
+  StreamSubscription<DocumentSnapshot>? _sub;
+  bool _firstSnap = true;
+  Map<String, dynamic>? _lastDoc;
+
+  List<int> dieSpin = [2, 3, 1];
+  bool _localRoll = false;
+  int _lastRollN = 0;
+
+  static const int maxAutoPlays = 15;
+  static const int staleSeconds = 20;
+
+  final Map<String, int> autoCounts = {};
+  final Map<String, Object?> _presenceVal = {};
+  final Map<String, DateTime> _presenceAt = {};
+  final DateTime _presenceStart = DateTime.now();
+  DateTime _lastAck = DateTime.now();
+  Timer? _beat;
+  StreamSubscription<QuerySnapshot>? _presenceSub;
+  bool _proxy = false;
+
+  EmojiReactions? _reactions;
+
+  bool get _connected =>
+      DateTime.now().difference(_lastAck) < const Duration(seconds: 15);
+
+  int _mateOf(int c) => widget.partners == null ? -1 : widget.partners![c];
+  bool _isMate(int a, int b) =>
+      widget.partners != null && widget.partners![a] == b;
+  bool _isBlock(int p, int pos) =>
+      players[p].pawns.where((x) => x == pos).length >= 2;
+
+  String teamLabel(int c) {
+    final m = _mateOf(c);
+    return m == -1 ? nameOf(c) : '${nameOf(c)} & ${nameOf(m)}';
+  }
+
+  bool _finishedAll(int c) =>
+      widget.partners != null && players[c].pawns.every((x) => x == 56);
+
+  bool get _oneSideLeft {
+    final a = activeIdx;
+    return a.length == 1 ||
+        (widget.partners != null && a.length == 2 && _mateOf(a[0]) == a[1]);
+  }
+
+  late int capturePay = widget.capturePayLocal;
+  int _captureSeq = 0;
+
+  void _chargeCaptures(int capturer, List<int> victims) {
+    final o = widget.online;
+    final localId = widget.localGameId;
+    if (capturePay <= 0 || victims.isEmpty) return;
+    if (o != null ? o.spectator : localId == null) return;
+    final gameId = o?.gameId ?? localId!;
+    final capturerUid = _uidOfColor(capturer);
+    if (capturerUid.isEmpty) return;
+    for (final v in victims) {
+      final victimUid = _uidOfColor(v);
+      if (victimUid.isEmpty || victimUid == capturerUid) continue;
+      _captureSeq++;
+      final id = 'c${DateTime.now().microsecondsSinceEpoch}x$_captureSeq';
+      Wallet.captureFee(
+        gameId: gameId,
+        capturerUid: capturerUid,
+        victimUid: victimUid,
+        eventId: id,
+      ).then((r) {
+        if (!mounted) return;
+        final a = r['amount'];
+        if (a is num && a > 0 && (o == null || capturerUid == o.uid)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('+${Wallet.format(a.toInt())} (capture)')),
+          );
+        }
+        if (r['eliminated'] == true && !gameOver) {
+          _applyForfeit(v, reason: "n'a plus assez de solde pour payer la capture");
+        }
+      }).catchError((Object _) {});
+    }
+  }
+
+  String _uidOfColor(int color) {
+    final o = widget.online;
+    if (o == null) {
+      final u = widget.accountUids;
+      return (u != null && color >= 0 && color < u.length)
+          ? (u[color] ?? '')
+          : '';
+    }
+    final seat = baseIdx.indexOf(color);
+    return (seat >= 0 && seat < o.uids.length) ? o.uids[seat] : '';
+  }
+
+  void _tagPlayer(BuildContext anchor, int color) {
+    final r = _reactions;
+    if (r == null) return;
+    final target = _uidOfColor(color);
+    if (target.isEmpty) return;
+    showEmojiPicker(
+      anchor,
+      title: tr('Emoji pour ${nameOf(color)}', 'Emoji for ${nameOf(color)}'),
+      onPick: (e) => r.send(target, e),
+    );
+  }
+
+  String nameOf(int colorIndex) {
+    final custom = widget.names;
+    if (widget.online == null &&
+        custom != null &&
+        colorIndex < custom.length &&
+        custom[colorIndex].isNotEmpty) {
+      return custom[colorIndex];
+    }
+    final o = widget.online;
+    if (o != null) {
+      final seat = baseIdx.indexOf(colorIndex);
+      if (seat >= 0 && seat < o.names.length) return o.names[seat];
+    }
+    return tr('Joueur ${players[colorIndex].display}',
+        'Player ${tr(players[colorIndex].display)}');
+  }
+
+  int? get winnerColor {
+    if (!gameOver) return null;
+    if (winnerOverride != null) return winnerOverride;
+    for (final i in activeIdx) {
+      final pw = players[i].pawns;
+      if (pw.isNotEmpty && pw.every((p) => p == 56)) return i;
+    }
+    return null;
+  }
+
+  List<int> get ranking {
+    final list = List<int>.from(activeIdx);
+    list.sort((a, b) {
+      final fa = players[a].finished;
+      final fb = players[b].finished;
+      if (fa != fb) return fb.compareTo(fa);
+      return progressOf(players[b]).compareTo(progressOf(players[a]));
+    });
+    final w = winnerColor;
+    if (w != null && list.remove(w)) list.insert(0, w);
+    return list;
+  }
+
+  void _tickAutopilot() {
+    if (!mounted) return;
+    _watchDisconnected();
+    final clockBusy = isRolling || isMoving || flightPhase != 0 || diceDragging;
+    final csig = '$currentPlayer|$hasRolled|'
+        '${players.map((p) => p.pawns.join(',')).join(';')}';
+    if (gameOver || clockBusy || csig != _clockSig) {
+      _clockSig = csig;
+      _turnElapsed = 0;
+    } else if (_turnElapsed < autoSeconds + 5) {
+      _turnElapsed++;
+    }
+    if (away && !gameOver) {
+      _bgPlay();
+      return;
+    }
+    if (!autoPilot || gameOver) {
+      _idle = 0;
+      return;
+    }
+    final busyNow = isRolling || isMoving || flightPhase != 0 || diceDragging;
+    final sig = '$currentPlayer|$hasRolled|'
+        '${players.map((p) => p.pawns.join(',')).join(';')}';
+    if (busyNow || sig != _lastSig || !_isMyTurn) {
+      _lastSig = sig;
+      _idle = 0;
+      return;
+    }
+    _idle++;
+    if (_idle >= autoSeconds) {
+      _idle = 0;
+      _autoPlay();
+    }
+  }
+
+  void _bgPlay() {
+    if (!_isMyTurn || gameOver || isRolling || isMoving || flightPhase != 0 || diceDragging) return;
+
+    if (!hasRolled) {
+      final v = _rollValue();
+      setState(() {
+        dice = v;
+        pendingDice = v;
+        lastRoll[currentPlayer] = v;
+        hasRolled = true;
+        gameStarted = true;
+        message = 'Pilotage automatique : $v.';
+      });
+      if (legalMoves().isEmpty) {
+        if (v == 6) {
+          setState(() {
+            hasRolled = false;
+            message = 'Un 6 ! Tu rejoues.';
+          });
+          _pushState();
+        } else {
+          nextTurn();
+        }
+      } else {
+        _pushState();
+      }
+      return;
+    }
+
+    final legal = legalMoves();
+    if (legal.isEmpty) {
+      nextTurn();
+      return;
+    }
+    movePawn(currentPlayer, legal[random.nextInt(legal.length)]);
+  }
+
+  void _snack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  Future<void> _goHome() async {
+    if (isSpectator) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (gameOver) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (isRolling || isMoving || flightPhase != 0 || diceDragging) {
+      _snack('Attends la fin du coup en cours.');
+      return;
+    }
+    _token++;
+    setState(() => away = true);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const HomeScreen(resumable: true),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      away = false;
+      _idle = 0;
+    });
+  }
+
+  Future<void> abandonGame() async {
+    if (gameOver || isSpectator) return;
+    if (isRolling || isMoving || flightPhase != 0 || diceDragging) {
+      _snack('Attends la fin du coup en cours.');
+      return;
+    }
+    final who = isOnline ? _myColor : currentPlayer;
+    if (forfeited.contains(who)) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF14267A),
+        title: const Text(
+          'Abandonner la partie ?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          widget.partners != null
+              ? tr('${teamLabel(who)} perdront la partie.',
+                  '${teamLabel(who)} will lose the game.')
+              : tr('${nameOf(who)} perdra la partie.',
+                  '${nameOf(who)} will lose the game.'),
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Abandonner',
+              style: TextStyle(color: Color(0xFFFF8A80)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted || gameOver) return;
+    if (forfeited.contains(who)) return;
+
+    _applyForfeit(who);
+  }
+
+  void _applyForfeit(int who, {String? reason}) {
+    if (forfeited.contains(who)) return;
+    final verb = reason ?? 'a abandonné';
+    final mate = _mateOf(who);
+    int next = who;
+
+    setState(() {
+      forfeited.add(who);
+      players[who].pawns = List<int>.filled(pawnCount, -1);
+      if (mate != -1) {
+        forfeited.add(mate);
+        players[mate].pawns = List<int>.filled(pawnCount, -1);
+      }
+      _token++;
+
+      final order = baseIdx;
+      for (int k = 1; k <= order.length; k++) {
+        final c = order[(order.indexOf(who) + k) % order.length];
+        if (!forfeited.contains(c)) {
+          next = c;
+          break;
+        }
+      }
+
+      if (_oneSideLeft) {
+        winnerOverride = activeIdx.first;
+        gameOver = true;
+        message = '🏆 ${teamLabel(winnerOverride!)} gagne : '
+            '${teamLabel(who)} $verb.';
+      } else if (forfeited.contains(currentPlayer)) {
+        currentPlayer = next;
+        hasRolled = false;
+        message = '${nameOf(who)} $verb. Au tour de ${nameOf(next)}.';
+      } else {
+        message = '${nameOf(who)} $verb.';
+        if (hasRolled && legalMoves().isEmpty) _advanceTurn();
+      }
+    });
+    _pushState();
+  }
+
+  int _randomFace() {
+    const captureBoost = 120;
+    final capFaces = <int>[
+      for (int f = 1; f <= 6; f++)
+        if (_faceCaptures(f)) f,
+    ];
+    if (capFaces.isNotEmpty && random.nextInt(1000) < captureBoost) {
+      return capFaces[random.nextInt(capFaces.length)];
+    }
+    final allHome = players[currentPlayer].pawns.every((x) => x == -1);
+    final sixChance = allHome ? 330 : 225;
+    if (random.nextInt(1000) < sixChance) return 6;
+    return random.nextInt(5) + 1;
+  }
+
+  bool _faceCaptures(int f) {
+    final n = players[currentPlayer].pawns.length;
+    for (int i = 0; i < n; i++) {
+      if (_captureWith(i, f)) return true;
+    }
+    return false;
+  }
+
+  int _rollValue() {
+    final cp = currentPlayer;
+    final left = players[cp].pawns.where((x) => x != 56).toList();
+    if (left.length == 1 && left.first >= 0) {
+      final remaining = 56 - left.first;
+      if (remaining >= 1 && remaining <= 6) {
+        if (finishThrows[cp] >= maxFinishThrows - 1) {
+          finishThrows[cp] = 0;
+          return remaining;
+        }
+        finishThrows[cp]++;
+        return _randomFace();
+      }
+    }
+    finishThrows[cp] = 0;
+    return _randomFace();
+  }
+
+  void _autoPlay() {
+    if (!_isMyTurn || gameOver) return;
+
+    if (canRollNow) {
+      throwDice(_toRoot(diceKeys[currentPlayer]));
+      return;
+    }
+
+    if (hasRolled && !isRolling && !isMoving && flightPhase == 0) {
+      final legal = legalMoves();
+      if (legal.isEmpty) return;
+
+      int score(int i) {
+        final pos = players[currentPlayer].pawns[i];
+        if (moveCaptures(i)) return 1000;
+        if (pos != -1 && pos + dice == 56) return 500;
+        if (pos == -1) return 300;
+        return pos;
+      }
+
+      var best = legal.first;
+      for (final i in legal) {
+        if (score(i) > score(best)) best = i;
+      }
+      setState(() => message = 'Pilotage automatique : coup joué pour toi.');
+      movePawn(currentPlayer, best);
+    }
+  }
+
+  void _listenOnline() {
+    final o = widget.online;
+    if (o == null || !firebaseReady) return;
+    _sub = FirebaseFirestore.instance
+        .collection('games')
+        .doc(o.gameId)
+        .snapshots()
+        .listen((snap) {
+      final d = snap.data();
+      if (d == null || !mounted) return;
+      if (d['over'] == true) setState(() => _lastDoc = d);
+      if (snap.metadata.hasPendingWrites) return;
+      if (_localRoll) return;
+      final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
+      if (jp > 0 && jp != jackpotWon) setState(() => jackpotWon = jp);
+      final first = _firstSnap;
+      _firstSnap = false;
+
+      final roll = d['roll'];
+      if (roll is Map) {
+        final n = (roll['n'] as num?)?.toInt() ?? 0;
+        if (first) {
+          _lastRollN = n;
+        } else if (n != _lastRollN && roll['by'] != o.uid) {
+          _lastRollN = n;
+          _showRemoteRoll((d['cur'] as num?)?.toInt() ?? currentPlayer);
+          return;
+        }
+      }
+
+      if (!first && d['writer'] == o.uid) return;
+      _applyRemote(d);
+    });
+  }
+
+  void _pushRoll() {
+    final o = widget.online;
+    if (o == null || o.spectator || !firebaseReady) return;
+    FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
+      'roll': {'by': o.uid, 'n': DateTime.now().millisecondsSinceEpoch},
+    }).then((_) {}, onError: (_) {});
+  }
+
+  Future<void> _showRemoteRoll(int cur) async {
+    if (!mounted || gameOver) return;
+    final token = ++_token;
+    try {
+      final from = _toRoot(diceKeys[cur]);
+      setState(() {
+        currentPlayer = cur;
+        isRolling = true;
+        flightPhase = 1;
+        pendingDice = random.nextInt(6) + 1;
+        dieSpin = [
+          (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+          (random.nextBool() ? 1 : -1) * (2 + random.nextInt(2)),
+          (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+        ];
+        flightFrom = from;
+        flightTo = from;
+        message = tr('${nameOf(cur)} lance le dé...', '${nameOf(cur)} is rolling...');
+      });
+      sfx.roll();
+    } catch (_) {
+      return;
+    }
+    _flight.duration = const Duration(milliseconds: 1000);
+    await _flight.forward(from: 0);
+    if (!mounted || token != _token) return;
+    if (flightPhase == 1) {
+      setState(() {
+        isRolling = false;
+        flightPhase = 0;
+      });
+    }
+  }
+
+  bool _remoteBusy = false;
+  final List> _remoteQueue = [];
+
+  void _applyRemote(Map<String, dynamic> d) {
+    if (_remoteBusy) {
+      _remoteQueue.add(d);
+      if (_remoteQueue.length > 4) {
+        _remoteQueue.removeRange(0, _remoteQueue.length - 1);
+      }
+      return;
+    }
+    _processRemote(d);
+  }
+
+  Future<void> _processRemote(Map<String, dynamic> d) async {
+    final steps = <List<int>>[];
+    if (_remoteSeen) {
+      for (int p = 0; p < 4; p++) {
+        final l = d['p$p'];
+        if (l is! List) continue;
+        final target = l.map((e) => (e as num).toInt()).toList();
+        final cur = players[p].pawns;
+        for (int i = 0; i < target.length && i < cur.length; i++) {
+          final from = cur[i];
+          final to = target[i];
+          if (from >= 0 && to > from && to - from <= 6) {
+            steps.add([p, i, from, to]);
+          }
+        }
+      }
+    }
+
+    if (steps.isEmpty) {
+      _applyRemoteNow(d);
+      _nextRemote();
+      return;
+    }
+
+    _remoteBusy = true;
+    if (mounted) setState(() => isMoving = true);
+    for (final s in steps) {
+      for (int pos = s[2] + 1; pos <= s[3]; pos++) {
+        if (!mounted) return;
+        if (pos == 56) {
+          sfx.arrive();
+        } else {
+          sfx.step();
+        }
+        setState(() => players[s[0]].pawns[s[1]] = pos);
+        await Future<void>.delayed(Duration(milliseconds: stepMs));
+      }
+    }
+    if (!mounted) return;
+    _applyRemoteNow(d);
+    _remoteBusy = false;
+    _nextRemote();
+  }
+
+  void _nextRemote() {
+    if (_remoteBusy || _remoteQueue.isEmpty) return;
+    _processRemote(_remoteQueue.removeAt(0));
+  }
+
+  void _applyRemoteNow(Map<String, dynamic> d) {
+    final before = [for (final p in players) List<int>.from(p.pawns)];
+    final wasOver = gameOver;
+    final wasRolled = hasRolled;
+    final seenBefore = _remoteSeen;
+    capturePay = (d['capturePay'] as num?)?.toInt() ?? capturePay;
+    setState(() {
+      for (int i = 0; i < 4; i++) {
+        final l = d['p$i'];
+        if (l is List) {
+          players[i].pawns = l.map((e) => (e as num).toInt()).toList();
+        }
+      }
+      currentPlayer = (d['cur'] as num?)?.toInt() ?? currentPlayer;
+      hasRolled = d['hasRolled'] == true;
+      dice = (d['dice'] as num?)?.toInt() ?? dice;
+      final lr = d['lastRoll'];
+      if (lr is List && lr.length == 4) {
+        for (int i = 0; i < 4; i++) {
+          lastRoll[i] = (lr[i] as num).toInt();
+        }
+      }
+      final f = d['forfeited'];
+      if (f is List) {
+        forfeited
+          ..clear()
+          ..addAll(f.map((e) => (e as num).toInt()));
+      }
+      final au = d['auto'];
+      if (au is Map) {
+        autoCounts
+          ..clear()
+          ..addAll(au.map((k, v) => MapEntry('$k', (v as num).toInt())));
+      }
+      final w = (d['winner'] as num?)?.toInt() ?? -1;
+      winnerOverride = w >= 0 ? w : null;
+      message = (d['msg'] as String?) ?? message;
+      gameOver = d['over'] == true;
+      if (((d['rev'] as num?) ?? 0) > 0) gameStarted = true;
+      isRolling = false;
+      isMoving = false;
+      diceDragging = false;
+      flightPhase = 0;
+    });
+    _soundsForRemote(before, wasOver);
+    if (seenBefore && hasRolled && !wasRolled && dice == 6) sfx.six();
+    if (gameOver) _settle();
+  }
+
+  bool _remoteSeen = false;
+
+  void _soundsForRemote(List<List<int>> before, bool wasOver) {
+    if (!_remoteSeen) {
+      _remoteSeen = true;
+      return;
+    }
+    var moved = false, captured = false, arrived = false;
+    for (int i = 0; i < 4; i++) {
+      final b = before[i];
+      final a = players[i].pawns;
+      for (int k = 0; k < a.length && k < b.length; k++) {
+        if (a[k] == b[k]) continue;
+        if (a[k] == -1 && b[k] >= 0) {
+          captured = true;
+        } else if (a[k] == 56) {
+          arrived = true;
+        } else if (a[k] > b[k]) {
+          moved = true;
+        }
+      }
+    }
+    if (gameOver && !wasOver) {
+      sfx.win();
+    } else if (captured) {
+      sfx.capture();
+    } else if (arrived) {
+      sfx.arrive();
+    } else if (moved) {
+      sfx.step();
+    }
+  }
+
+  void _startPresence() {
+    final o = widget.online;
+    if (o == null || o.spectator || !firebaseReady) return;
+    final col = FirebaseFirestore.instance
+        .collection('games')
+        .doc(o.gameId)
+        .collection('presence');
+
+    void beat() {
+      col.doc(o.uid).set({'t': DateTime.now().millisecondsSinceEpoch}).then(
+        (_) => _lastAck = DateTime.now(),
+        onError: (_) {},
+      );
+    }
+
+    beat();
+    _beat = Timer.periodic(const Duration(seconds: 5), (_) => beat());
+
+    _presenceSub = col.snapshots().listen((snap) {
+      for (final d in snap.docs) {
+        final t = d.data()['t'];
+        if (_presenceVal[d.id] != t) {
+          _presenceVal[d.id] = t;
+          _presenceAt[d.id] = DateTime.now();
+        }
+      }
+    }, onError: (_) {});
+  }
+
+  bool _isStale(String uid) {
+    final at = _presenceAt[uid] ?? _presenceStart;
+    return DateTime.now().difference(at) > const Duration(seconds: staleSeconds);
+  }
+
+  void _watchDisconnected() {
+    final o = widget.online;
+    if (o == null || o.spectator || gameOver || o.uids.isEmpty) return;
+    if (!_connected || isRolling || isMoving || flightPhase != 0 || diceDragging) return;
+
+    final cur = currentPlayer;
+    if (forfeited.contains(cur)) return;
+    final seat = baseIdx.indexOf(cur);
+    if (seat < 0 || seat >= o.uids.length) return;
+    final targetUid = o.uids[seat];
+    if (targetUid == o.uid || !_isStale(targetUid)) return;
+
+    int? arbiter;
+    for (final c in activeIdx) {
+      if (c == cur) continue;
+      final s = baseIdx.indexOf(c);
+      if (s < 0 || s >= o.uids.length) continue;
+      final u = o.uids[s];
+      if (u == o.uid || !_isStale(u)) {
+        arbiter = c;
+        break;
+      }
+    }
+    if (arbiter != _myColor) return;
+
+    final count = autoCounts[targetUid] ?? 0;
+    if (count >= maxAutoPlays) {
+      _applyForfeit(cur, reason: 'est déclaré forfait (connexion perdue)');
+      return;
+    }
+    if (!hasRolled) autoCounts[targetUid] = count + 1;
+
+    _proxy = true;
+    try {
+      _bgPlay();
+    } finally {
+      _proxy = false;
+    }
+  }
+
+  bool _settled = false;
+  int jackpotWon = 0;
+
+  Future<void> _settle() async {
+    if (_settled || !gameOver || isSpectator || !firebaseReady) return;
+    final o = widget.online;
+    final localId = widget.localGameId;
+    if (o == null && localId == null) return;
+    _settled = true;
+    try {
+      if (o != null) {
+        await Wallet.settleOnline(o.gameId);
+      } else {
+        final w = winnerColor;
+        if (w == null) {
+          _settled = false;
+          return;
+        }
+        final uids = widget.accountUids ?? const <String?>[];
+        final winners = <String>{};
+        for (final c in [w, _mateOf(w)]) {
+          if (c >= 0 && c < uids.length && uids[c] != null) {
+            winners.add(uids[c]!);
+          }
+        }
+        final jp = await Wallet.settleLocal(localId!, winners.toList());
+        if (mounted && jp > 0) setState(() => jackpotWon = jp);
+      }
+    } catch (_) {
+      _settled = false;
+    }
+  }
+
+  Future<void> _pushState() async {
+    final o = widget.online;
+    if (o == null) {
+      if (gameOver) _settle();
+      return;
+    }
+    if (o.spectator || !firebaseReady) return;
+    autoCounts[o.uid] = 0;
+    try {
+      await FirebaseFirestore.instance.collection('games').doc(o.gameId).update({
+        for (int i = 0; i < 4; i++) 'p$i': players[i].pawns,
+        'cur': currentPlayer,
+        'hasRolled': hasRolled,
+        'dice': dice,
+        'lastRoll': lastRoll,
+        'msg': message,
+        'over': gameOver,
+        'forfeited': forfeited.toList(),
+        'auto': autoCounts,
+        'winner': winnerOverride ?? -1,
+        'writer': o.uid,
+        'rev': FieldValue.increment(1),
+        'roll': FieldValue.delete(),
+        if (gameOver) 'status': 'finished',
+      });
+      if (gameOver) _settle();
+    } catch (_) {}
+  }
+
+  List<int> get baseIdx => numPlayers == 2
+      ? [0, 2]
+      : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+
+  List<int> get activeIdx =>
+      baseIdx.where((i) => !forfeited.contains(i)).toList();
+
+  final Sfx sfx = Sfx();
+  late final AnimationController _pulse;
+  late final AnimationController _flight;
+
+  final GlobalKey rootKey = GlobalKey();
+  final GlobalKey boardKey = GlobalKey();
+  final List<GlobalKey> diceKeys = List.generate(4, (_) => GlobalKey());
+
+  late final List<Player> players = [
+    Player(
+      display: 'Rouge',
+      color: const Color(0xFFE5262B),
+      lightColor: const Color(0xFFFFE3E5),
+      start: 0,
+      avatar: Icons.person,
+    ),
+    Player(
+      display: 'Vert',
+      color: const Color(0xFF22B14C),
+      lightColor: const Color(0xFFDDF8E6),
+      start: 13,
+      avatar: Icons.face,
+    ),
+    Player(
+      display: 'Bleu',
+      color: const Color(0xFF1E6BFF),
+      lightColor: const Color(0xFFDFEAFF),
+      start: 26,
+      avatar: Icons.face_3,
+    ),
+    Player(
+      display: 'Jaune',
+      color: const Color(0xFFFFC21A),
+      lightColor: const Color(0xFFFFF3CC),
+      start: 39,
+      avatar: Icons.person_outline,
+    ),
+  ];
+
+  int currentPlayer = 0;
+  int dice = 1;
+  int pendingDice = 1;
+  final List<int> lastRoll = [1, 1, 1, 1];
+  bool hasRolled = false;
+  bool isRolling = false;
+  bool isMoving = false;
+  bool gameOver = false;
+  bool forcedCapture = true;
+  bool autoPlay = true;
+  bool autoPilot = true;
+  late final int autoSeconds = (widget.autoSecs == 5 || widget.autoSecs == 15)
+      ? widget.autoSecs
+      : 10;
+  int _turnElapsed = 0;
+  String _clockSig = '';
+  int get _turnLeft => max(0, autoSeconds - _turnElapsed);
+  bool get _turnUrgent => _turnElapsed >= (autoSeconds * 2 / 3).ceil();
+  bool gameStarted = false;
+  final int maxFinishThrows = 5;
+  final List<int> finishThrows = [0, 0, 0, 0];
+  Timer? _autoTimer;
+  String _lastSig = '';
+  int _idle = 0;
+  int stepMs = 105;
+  DateTime? _lastBack;
+
+  int? arrivalColor;
+  int arrivalKey = 0;
+
+  bool diceDragging = false;
+  Offset dragPos = Offset.zero;
+  int flightPhase = 0;
+  Offset flightFrom = Offset.zero;
+  Offset flightTo = Offset.zero;
+
+  int _token = 0;
+  String message = 'Touche ton dé ou glisse-le pour le lancer !';
+
+  final List<List<int>> track = const [
+    [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],
+    [5, 6], [4, 6], [3, 6], [2, 6], [1, 6],
+    [0, 6], [0, 7], [0, 8],
+    [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],
+    [6, 9], [6, 10], [6, 11], [6, 12], [6, 13],
+    [6, 14], [7, 14], [8, 14],
+    [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],
+    [9, 8], [10, 8], [11, 8], [12, 8], [13, 8],
+    [14, 8], [14, 7], [14, 6],
+    [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],
+    [8, 5], [8, 4], [8, 3], [8, 2], [8, 1],
+    [8, 0], [7, 0], [6, 0],
+  ];
+
+  List<List<int>> homeLane(int player) {
+    switch (player) {
+      case 0:
+        return const [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5]];
+      case 1:
+        return const [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7]];
+      case 2:
+        return const [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9]];
+      default:
+        return const [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]];
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    for (final p in players) {
+      p.pawns = List<int>.generate(pawnCount, _startPosOf);
+    }
+    final av = widget.avatars;
+    if (av != null) {
+      for (int i = 0; i < 4 && i < av.length; i++) {
+        players[i].avatar = av[i];
+      }
+    }
+    if (isOnline && !isSpectator) {
+      _reactions = EmojiReactions(
+        collection: 'games',
+        gameId: widget.online!.gameId,
+        myName: nameOf(_myColor),
+      );
+    }
+    _listenOnline();
+    _startPresence();
+    _autoTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _tickAutopilot(),
+    );
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    )..repeat(reverse: true);
+    _flight = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _beat?.cancel();
+    _presenceSub?.cancel();
+    _reactions?.dispose();
+    _autoTimer?.cancel();
+    _pulse.dispose();
+    _flight.dispose();
+    sfx.dispose();
+    super.dispose();
+  }
+
+  double progressOf(Player player) {
+    int total = 0;
+    for (final pos in player.pawns) {
+      if (pos > 0) total += pos;
+    }
+    return total / (pawnCount * 56.0);
+  }
+
+  bool get canRollNow =>
+      _isMyTurn &&
+      !hasRolled &&
+      !gameOver &&
+      !isRolling &&
+      !isMoving &&
+      flightPhase == 0;
+
+  bool canPawnMove(int position) => _canMoveWith(position, dice);
+
+  bool _canMoveWith(int position, int d) {
+    if (position == -1) return d == 6;
+    return position + d <= 56;
+  }
+
+  bool moveCaptures(int pawnIndex) => _captureWith(pawnIndex, dice);
+
+  bool _captureWith(int pawnIndex, int d) {
+    final player = players[currentPlayer];
+    final from = player.pawns[pawnIndex];
+    if (!_canMoveWith(from, d)) return false;
+
+    final target = from == -1 ? 0 : from + d;
+    if (target >= 51) return false;
+
+    final absolutePosition = (player.start + target) % 52;
+    if (safeCells.contains(absolutePosition)) return false;
+
+    for (int p = 0; p < players.length; p++) {
+      if (p == currentPlayer || _isMate(p, currentPlayer)) continue;
+      for (final pos in players[p].pawns) {
+        if (pos >= 0 &&
+            pos < 51 &&
+            (players[p].start + pos) % 52 == absolutePosition &&
+            !_isBlock(p, pos)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  List<int> legalMoves() {
+    final player = players[currentPlayer];
+    final all = <int>[
+      for (int i = 0; i < player.pawns.length; i++)
+        if (canPawnMove(player.pawns[i])) i,
+    ];
+    final captures = all.where(moveCaptures).toList();
+    return (forcedCapture && captures.isNotEmpty) ? captures : all;
+  }
+
+  List<int> distinctMoves(List<int> legal) {
+    final player = players[currentPlayer];
+    final seen = <int>{};
+    final result = <int>[];
+    for (final i in legal) {
+      if (seen.add(player.pawns[i])) result.add(i);
+    }
+    return result;
+  }
+
+  Offset _toRoot(GlobalKey key, [Offset local = Offset.zero]) {
+    final root = rootKey.currentContext!.findRenderObject() as RenderBox;
+    final box = key.currentContext!.findRenderObject() as RenderBox;
+    return root.globalToLocal(box.localToGlobal(local));
+  }
+
+  void onDicePanStart(int p) {
+    if (p != currentPlayer || !canRollNow) return;
+    final origin = _toRoot(diceKeys[p]);
+    setState(() {
+      diceDragging = true;
+      dragPos = origin;
+    });
+  }
+
+  void onDicePanUpdate(DragUpdateDetails details) {
+    if (!diceDragging) return;
+    setState(() {
+      dragPos += details.delta;
+    });
+  }
+
+  void onDicePanEnd() {
+    if (!diceDragging) return;
+    final from = dragPos;
+    setState(() {
+      diceDragging = false;
+    });
+    throwDice(from);
+  }
+
+  Future<void> throwDice(Offset from) async {
+    if (!canRollNow) return;
+
+    final newDice = _rollValue();
+    final rollToken = ++_token;
+
+    setState(() {
+      gameStarted = true;
+      isRolling = true;
+      pendingDice = newDice;
+      dieSpin = [
+        (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+        (random.nextBool() ? 1 : -1) * (2 + random.nextInt(2)),
+        (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
+      ];
+      _localRoll = true;
+      flightPhase = 1;
+      flightFrom = from;
+      flightTo = from;
+      message = 'Le dé roule...';
+    });
+    sfx.roll();
+    _pushRoll();
+
+    _flight.duration = const Duration(milliseconds: 1000);
+    await _flight.forward(from: 0);
+    _localRoll = false;
+    if (!mounted || rollToken != _token) return;
+
+    setState(() {
+      dice = newDice;
+      lastRoll[currentPlayer] = newDice;
+      isRolling = false;
+      hasRolled = true;
+      flightPhase = 2;
+    });
+    sfx.land();
+    if (dice == 6) sfx.six();
+
+    final legal = legalMoves();
+    final distinct = distinctMoves(legal);
+    final forced =
+        forcedCapture && legal.isNotEmpty && moveCaptures(legal.first);
+
+    setState(() {
+      if (legal.isEmpty) {
+        message = dice == 6
+            ? '6 ! Aucun déplacement possible, mais tu rejoues.'
+            : '$dice ! Aucun déplacement possible.';
+      } else if (autoPlay && distinct.length == 1) {
+        message = forced
+            ? 'Capture obligatoire ! Coup joué automatiquement.'
+            : 'Un seul coup possible : joué automatiquement.';
+      } else if (forced) {
+        message = 'Capture obligatoire : choisis le pion qui capture.';
+      } else if (dice == 6) {
+        message = 'Un 6 ! Sors un pion ou avance.';
+      } else {
+        message = 'Touche un pion pour le déplacer.';
+      }
+    });
+    _pushState();
+
+    await Future.delayed(const Duration(milliseconds: 650));
+    if (!mounted || rollToken != _token) return;
+
+    setState(() {
+      flightFrom = _toRoot(diceKeys[currentPlayer]);
+    });
+    _flight.duration = const Duration(milliseconds: 380);
+    await _flight.reverse();
+    if (!mounted || rollToken != _token) return;
+    setState(() {
+      flightPhase = 0;
+    });
+
+    if (legal.isEmpty) {
+      sfx.deny();
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted || rollToken != _token || gameOver) return;
+      if (dice == 6) {
+        setState(() {
+          hasRolled = false;
+          message = 'Un 6 ! Tu rejoues.';
+        });
+        _pushState();
+      } else {
+        nextTurn();
+      }
+    } else if (autoPlay && distinct.length == 1) {
+      await Future.delayed(const Duration(milliseconds: 250));
+      if (!mounted || rollToken != _token) return;
+      movePawn(currentPlayer, distinct.first);
+    }
+  }
+
+  void _advanceTurn() {
+    final act = activeIdx;
+    var next = currentPlayer;
+    for (int k = 0; k < act.length; k++) {
+      next = act[(act.indexOf(next) + 1) % act.length];
+      if (!_finishedAll(next)) break;
+    }
+    currentPlayer = next;
+    hasRolled = false;
+    message = 'Touche ton dé ou glisse-le pour le lancer !';
+  }
+
+  void nextTurn() {
+    setState(_advanceTurn);
+    _pushState();
+  }
+
+  Future<void> movePawn(int playerIndex, int pawnIndex) async {
+    if (!hasRolled ||
+        gameOver ||
+        isRolling ||
+        isMoving ||
+        flightPhase != 0 ||
+        diceDragging ||
+        playerIndex != currentPlayer ||
+        forfeited.contains(playerIndex) ||
+        !_isMyTurn) {
+      return;
+    }
+
+    final player = players[playerIndex];
+    final oldPosition = player.pawns[pawnIndex];
+
+    if (oldPosition == 56) return;
+
+    final legal = legalMoves();
+    if (!legal.contains(pawnIndex)) {
+      String reason;
+      if (oldPosition == -1 && dice != 6) {
+        reason = 'Il faut un 6 pour sortir ce pion.';
+      } else if (oldPosition >= 0 && oldPosition + dice > 56) {
+        reason = 'Ce pion ne peut pas finir avec ce lancer.';
+      } else {
+        reason = 'Capture obligatoire : prends un pion adverse !';
+      }
+      sfx.deny();
+      setState(() {
+        message = reason;
+      });
+      return;
+    }
+
+    final token = _token;
+    setState(() {
+      isMoving = true;
+    });
+
+    if (oldPosition == -1) {
+      sfx.step();
+      setState(() {
+        player.pawns[pawnIndex] = 0;
+      });
+      await Future.delayed(Duration(milliseconds: stepMs + 90));
+      if (!mounted || token != _token) return;
+    } else {
+      for (int s = 1; s <= dice; s++) {
+        sfx.step();
+        setState(() {
+          player.pawns[pawnIndex] = oldPosition + s;
+        });
+        await Future.delayed(Duration(milliseconds: stepMs));
+        if (!mounted || token != _token) return;
+      }
+    }
+
+    final newPosition = player.pawns[pawnIndex];
+    bool captured = false;
+    final victims = <int>[];
+
+    if (newPosition < 51) {
+      final absolutePosition = (player.start + newPosition) % 52;
+
+      if (!safeCells.contains(absolutePosition)) {
+        for (int p = 0; p < players.length; p++) {
+          if (p == playerIndex || _isMate(p, playerIndex)) continue;
+
+          for (int i = 0; i < players[p].pawns.length; i++) {
+            final opponentPosition = players[p].pawns[i];
+
+            if (opponentPosition >= 0 &&
+                opponentPosition < 51 &&
+                (players[p].start + opponentPosition) % 52 ==
+                    absolutePosition &&
+                !_isBlock(p, opponentPosition)) {
+              players[p].pawns[i] = -1;
+              captured = true;
+              victims.add(p);
+            }
+          }
+        }
+      }
+    }
+
+    final selfDone = player.pawns.every((p) => p == 56);
+    final won = selfDone;
+
+    if (won) {
+      sfx.win();
+    } else if (captured) {
+      sfx.capture();
+    } else if (newPosition == 56) {
+      sfx.arrive();
+    }
+
+    setState(() {
+      isMoving = false;
+
+      if (newPosition == 56) {
+        arrivalColor = playerIndex;
+        arrivalKey++;
+      }
+
+      if (won) {
+        gameOver = true;
+        message = '🏆 ${teamLabel(playerIndex)} remporte la partie !';
+      } else if (selfDone) {
+        _advanceTurn();
+      } else if (dice == 6 || captured || newPosition == 56) {
+        hasRolled = false;
+        message = captured
+            ? ((isOnline || widget.localGameId != null) && capturePay > 0
+                ? 'Capture ! +${Wallet.format(capturePay * victims.length)}. Tu rejoues.'
+                : 'Capture ! Tu rejoues.')
+            : newPosition == 56
+                ? 'Un pion est arrivé ! Tu rejoues.'
+                : 'Un 6 ! Tu rejoues.';
+      } else {
+        _advanceTurn();
+      }
+    });
+    _pushState();
+    _chargeCaptures(playerIndex, victims);
+
+    if (newPosition == 56) {
+      final k = arrivalKey;
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted && k == arrivalKey) setState(() => arrivalColor = null);
+      });
+    }
+  }
+
+  void restartGame() {
+    if (isOnline) {
+      setState(() => message = 'Pas de nouvelle partie en ligne.');
+      return;
+    }
+    _token++;
+    _flight.stop();
+    _flight.value = 0;
+    setState(() {
+      for (final player in players) {
+        player.pawns = List<int>.generate(pawnCount, _startPosOf);
+      }
+      for (int i = 0; i < 4; i++) {
+        lastRoll[i] = 1;
+        finishThrows[i] = 0;
+      }
+      forfeited.clear();
+      winnerOverride = null;
+      arrivalColor = null;
+      gameStarted = false;
+      currentPlayer = 0;
+      dice = 1;
+      hasRolled = false;
+      isRolling = false;
+      isMoving = false;
+      gameOver = false;
+      diceDragging = false;
+      flightPhase = 0;
+      message = 'Touche ton dé ou glisse-le pour le lancer !';
+    });
+  }
+
+  List<double> homeCenter(int p, int i) {
+    final rowStart = p < 2 ? 0 : 9;
+    final colStart = (p == 0 || p == 3) ? 0 : 9;
+    final r = i < 2 ? 1.5 : 4.5;
+    final c = i.isEven ? 1.1 : 4.9;
+    return [rowStart + r, colStart + c];
+  }
+
+  List<double>? pawnCenter(int p, int i) {
+    final position = players[p].pawns[i];
+    if (position == 56) return null;
+    if (position == -1) return homeCenter(p, i);
+
+    final cell = position >= 51
+        ? homeLane(p)[position - 51]
+        : track[(players[p].start + position) % 52];
+    return [cell[0] + 0.5, cell[1] + 0.5];
+  }
+
+  void onBoardTap(Offset pos, double c) {
+    if (!hasRolled ||
+        isRolling ||
+        isMoving ||
+        gameOver ||
+        flightPhase != 0 ||
+        diceDragging) {
+      return;
+    }
+
+    final tapRow = pos.dy / c;
+    final tapCol = pos.dx / c;
+    final legal = legalMoves();
+
+    int? best;
+    double bestDist = 1.8;
+    int? nearest;
+    double nearestDist = 1.2;
+
+    for (int i = 0; i < players[currentPlayer].pawns.length; i++) {
+      final center = pawnCenter(currentPlayer, i);
+      if (center == null) continue;
+
+      final dr = center[0] - 0.2 - tapRow;
+      final dc = center[1] - tapCol;
+      final dist = sqrt(dr * dr + dc * dc);
+
+      if (legal.contains(i) && dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = i;
+      }
+    }
+
+    if (best != null) {
+      movePawn(currentPlayer, best);
+    } else if (nearest != null) {
+      movePawn(currentPlayer, nearest);
+    }
+  }
+
+  List<Widget> buildPawns(double c) {
+    final legal = (_isMyTurn &&
+            hasRolled &&
+            !isRolling &&
+            !isMoving &&
+            !gameOver &&
+            flightPhase == 0)
+        ? legalMoves()
+        : <int>[];
+
+    final entries = <_PawnEntry>[];
+    for (final p in activeIdx) {
+      for (int i = 0; i < players[p].pawns.length; i++) {
+        final center = pawnCenter(p, i) ?? homeCenter(p, i);
+        entries.add(_PawnEntry(p, i, center));
+      }
+    }
+
+    final groups = <String, List<_PawnEntry>>{};
+    for (final e in entries) {
+      groups
+          .putIfAbsent('${e.center[0]}_${e.center[1]}', () => <_PawnEntry>[])
+          .add(e);
+    }
+
+    entries.sort((a, b) => a.center[0].compareTo(b.center[0]));
+
+    return entries.map((e) {
+      final group = groups['${e.center[0]}_${e.center[1]}']!;
+      final n = group.length;
+      final k = group.indexOf(e);
+      final position = players[e.p].pawns[e.i];
+      final done = position == 56;
+      final atHome = position == -1 || done;
+      final stacked = n > 1 && !atHome;
+
+      final w = (done ? c * 1.35 : (atHome ? c * 1.5 : c * 1.0)) *
+          (stacked ? 0.8 : 1.0);
+      final h = w * 1.25;
+      final dx = stacked ? (k - (n - 1) / 2) * c * 0.3 : 0.0;
+
+      final movable = e.p == currentPlayer && legal.contains(e.i);
+
+      return AnimatedPositioned(
+        key: ValueKey('pawn_${e.p}_${e.i}'),
+        duration: Duration(milliseconds: min(140, stepMs)),
+        curve: Curves.easeOut,
+        left: e.center[1] * c - w / 2 + dx,
+        top: e.center[0] * c - h * 0.65,
+        width: w,
+        height: h,
+        child: IgnorePointer(
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, child) => Transform.translate(
+              offset: Offset(0, movable ? -_pulse.value * c * 0.25 : 0),
+              child: child,
+            ),
+            child: CustomPaint(
+              painter: PawnPainter(
+                color: players[e.p].color,
+                highlight: movable,
+                done: done,
+              ),
+            ),
+          ),
+        ),
+      );
+    }).toList();
+  }
+
+  List<Widget> buildArrival(double c) {
+    final a = arrivalColor;
+    if (a == null || gameOver) return const <Widget>[];
+
+    const xs = [6.75, 7.5, 8.25, 7.5];
+    const ys = [7.5, 6.75, 7.5, 8.25];
+    final size = c * 5.0;
+
+    return [
+      Positioned(
+        left: xs[a] * c - size / 2,
+        top: ys[a] * c - size / 2,
+        width: size,
+        height: size,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey('arrival_$arrivalKey'),
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 1300),
+            builder: (context, t, child) => CustomPaint(
+              painter: BurstPainter(t, players[a].color),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> buildVictory(double c) {
+    final w = winnerColor;
+    if (w == null) return const <Widget>[];
+    final winner = players[w];
+
+    final rowStart = w < 2 ? 0 : 9;
+    final colStart = (w == 0 || w == 3) ? 0 : 9;
+    final crownBox = c * 3.2;
+
+    return [
+      Positioned(
+        left: (colStart + 3) * c - crownBox / 2,
+        top: (rowStart + 3) * c - crownBox / 2,
+        width: crownBox,
+        height: crownBox,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.2, end: 1.0),
+            duration: const Duration(milliseconds: 700),
+            curve: Curves.elasticOut,
+            builder: (context, value, child) =>
+                Transform.scale(scale: value, child: child),
+            child: Center(
+              child: Text('👑', style: TextStyle(fontSize: c * 2.3)),
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        left: 7.5 * c - c * 4.0,
+        top: 7.5 * c - c * 1.6,
+        width: c * 8.0,
+        height: c * 3.2,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutBack,
+            builder: (context, value, child) =>
+                Transform.scale(scale: value, child: child),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(c * 0.7),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [shade(winner.color, 0.1), shade(winner.color, -0.15)],
+                ),
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.45),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'VICTOIRE',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 1.15,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      Text(
+                        teamLabel(w),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 0.8,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget buildBoard(double size) {
+    final turnColor = players[currentPlayer].color;
+    return Container(
+      key: boardKey,
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: turnColor, width: 5),
+        boxShadow: [
+          BoxShadow(
+            color: turnColor.withOpacity(0.65),
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(13),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final c = constraints.maxWidth / 15;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: (details) => onBoardTap(details.localPosition, c),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: BoardPainter(
+                        colors: players.map((p) => p.color).toList(),
+                        lights: players.map((p) => p.lightColor).toList(),
+                        track: track,
+                        lanes: [for (int p = 0; p < 4; p++) homeLane(p)],
+                        starts: players.map((p) => p.start).toList(),
+                        safeStars: widget.starSafe ? safeStars : const <int>{},
+                        showDoorStars: widget.doorSafe,
+                      ),
+                    ),
+                  ),
+                  ...buildBaseLogos(c),
+                  ...buildPawns(c),
+                  ...buildArrival(c),
+                  ...buildVictory(c),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
+      child: Row(
+        children: [
+          PopupMenuButton<String>(
+            color: const Color(0xFF14267A),
+            onSelected: (value) {
+              if (value == 'quit') abandonGame();
+              if (value == 'home') _goHome();
+              if (value == 'sound') setState(() => sfx.enabled = !sfx.enabled);
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'home',
+                child: Text(
+                  isSpectator ? 'Quitter la partie' : "Retour à l'accueil",
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'sound',
+                child: Text(
+                  sfx.enabled ? 'Son : activé' : 'Son : désactivé',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              if (!isSpectator)
+                const PopupMenuItem<String>(
+                  value: 'quit',
+                  child: Text(
+                    'Abandonner la partie',
+                    style: TextStyle(color: Color(0xFFFF8A80)),
+                  ),
+                ),
+            ],
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.15),
+                border: Border.all(color: Colors.white54, width: 1.5),
+              ),
+              child: const Icon(Icons.menu, color: Colors.white),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('👑', style: TextStyle(fontSize: 15)),
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(text: 'Kati', style: _logoStyle(Colors.white, 28)),
+                      TextSpan(
+                        text: 'ka',
+                        style: _logoStyle(const Color(0xFFFFC21A), 28),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: tr('Règles', 'Rules'),
+            padding: const EdgeInsets.all(6),
+            constraints: const BoxConstraints(),
+            onPressed: () =>
+                showRulesDialog(context, 'Règles du Ludo', kLudoRules),
+            icon: const Icon(Icons.help_outline, color: Colors.white),
+          ),
+          if (isOnline) ...[
+            RoomInfoButton(
+              collection: 'games',
+              gameId: widget.online!.gameId,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget buildRanking() {
+    final order = ranking;
+    const medals = ['🥇', '🥈', '🥉', '4️⃣'];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      child: Row(
+        children: [
+          for (int k = 0; k < order.length; k++)
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: players[order[k]].color.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: players[order[k]].color,
+                    width: order[k] == currentPlayer && !gameOver ? 2 : 1,
+                  ),
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${medals[k]} ${nameOf(order[k])} '
+                    '${(progressOf(players[order[k]]) * 100).round()} %',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget playerBadge(int index, {required bool avatarOnRight}) {
+    if (!activeIdx.contains(index)) return const SizedBox(height: 52);
+
+    final player = players[index];
+    final active = index == currentPlayer && !gameOver;
+    final progress = progressOf(player);
+    final percent = (progress * 100).round();
+
+    final avatar = Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [shade(player.color, 0.15), shade(player.color, -0.12)],
+        ),
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      child: Icon(player.avatar, color: Colors.white, size: 26),
+    );
+
+    final ringCore = SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 52,
+            height: 52,
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0, end: progress),
+              duration: const Duration(milliseconds: 400),
+              builder: (context, value, child) => CircularProgressIndicator(
+                value: value,
+                strokeWidth: 3.5,
+                backgroundColor: Colors.white24,
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+          ),
+          avatar,
+        ],
+      ),
+    );
+
+    final reactions = _reactions;
+    final avatarWithRing = SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Builder(
+            builder: (ctx) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: reactions != null ? () => _tagPlayer(ctx, index) : null,
+              child: ringCore,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final info = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment:
+          avatarOnRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        Text(
+          nameOf(index),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Text(
+          '$percent %',
+          style: const TextStyle(
+            color: Color(0xFFFFE082),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+      decoration: BoxDecoration(
+        color: player.color.withOpacity(active ? 0.6 : 0.3),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: active ? Colors.white : player.color.withOpacity(0.8),
+          width: active ? 2.5 : 1.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: avatarOnRight
+            ? [info, const SizedBox(width: 6), avatarWithRing]
+            : [avatarWithRing, const SizedBox(width: 6), info],
+      ),
+    );
+  }
+
+  Widget diceSlot(int p) {
+    if (!activeIdx.contains(p)) return const SizedBox(width: 52, height: 52);
+
+    final player = players[p];
+    final isActive = p == currentPlayer && !gameOver;
+    final canRoll = isActive && canRollNow && !diceDragging;
+    final lifted = isActive && (diceDragging || flightPhase != 0);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: isActive
+          ? () {
+              if (canRollNow) throwDice(_toRoot(diceKeys[p]));
+            }
+          : null,
+      onPanStart: isActive ? (details) => onDicePanStart(p) : null,
+      onPanUpdate: isActive ? onDicePanUpdate : null,
+      onPanEnd: isActive ? (details) => onDicePanEnd() : null,
+      child: SizedBox(
+        key: diceKeys[p],
+        width: 52,
+        height: 52,
+        child: Opacity(
+          opacity: lifted ? 0.25 : (isActive ? 1.0 : 0.5),
+          child: Die3D(value: lastRoll[p], color: player.color, glow: canRoll),
+        ),
+      ),
+    );
+  }
+
+  Widget buildFlyingDie() {
+    final color = players[currentPlayer].color;
+
+    if (diceDragging) {
+      return Positioned(
+        left: dragPos.dx,
+        top: dragPos.dy,
+        width: 58,
+        height: 58,
+        child: IgnorePointer(
+          child: Die3D(value: lastRoll[currentPlayer], color: color, glow: true),
+        ),
+      );
+    }
+
+    if (flightPhase == 0) return const SizedBox.shrink();
+
+    return AnimatedBuilder(
+      animation: _flight,
+      builder: (context, child) {
+        final t = _flight.value;
+        final eased = Curves.easeOutCubic.transform(t);
+        final pos = Offset.lerp(flightFrom, flightTo, eased)!;
+        return Positioned(
+          left: pos.dx - 26,
+          top: pos.dy - 26,
+          width: 52,
+          height: 52,
+          child: IgnorePointer(
+            child: Die3D(
+              value: pendingDice,
+              t: t,
+              spin: dieSpin,
+              color: color,
+              glow: true,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget roundButton(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0xFF0A1B66),
+          border: Border.all(color: Colors.white24, width: 1.5),
+        ),
+        child: Icon(icon, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget buildStatusBar() {
+    final player = players[currentPlayer];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A1B66),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: gameOver ? Colors.white24 : player.color,
+                  width: 2.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 15,
+                    backgroundColor: player.color,
+                    child: Icon(player.avatar, color: Colors.white, size: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          message,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          roundButton(Icons.bar_chart, () {
+            showDialog<void>(
+              context: context,
+              builder: (context) => AlertDialog(
+                backgroundColor: const Color(0xFF14267A),
+                title: const Text('Classement',
+                    style: TextStyle(color: Colors.white)),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final p in ranking.map((i) => players[i]))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            CircleAvatar(radius: 10, backgroundColor: p.color),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                nameOf(players.indexOf(p)),
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget buildEndPanel() {
+    final w = winnerColor;
+    final color = w == null ? const Color(0xFFFFC21A) : players[w].color;
+
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 10,
+      child: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A1B66),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: color, width: 2.5),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                w == null
+                    ? '🏁 Partie terminée'
+                    : '🏆 ${teamLabel(w)} remporte la partie !',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFFFFC21A),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (!isOnline && widget.localGameId == null) ...[
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF22B14C),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: restartGame,
+                        child: const Text('Rejouer'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white54),
+                      ),
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Accueil'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget badgesRow(int left, int right) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      child: Row(
+        children: [
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: playerBadge(left, avatarOnRight: false),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: playerBadge(right, avatarOnRight: true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget diceRow(int left, int right) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [diceSlot(left), diceSlot(right)],
+      ),
+    );
+  }
+
+  void _onBackPressed(bool didPop, Object? result) {
+    if (didPop) return;
+    final now = DateTime.now();
+    if (_lastBack != null &&
+        now.difference(_lastBack!) < const Duration(seconds: 2)) {
+      _goHome();
+    } else {
+      _lastBack = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Appuie encore sur retour pour aller à l'accueil"),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: isSpectator,
+      onPopInvokedWithResult: _onBackPressed,
+      child: Scaffold(
+        body: Stack(
+          key: rootKey,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF1F5BFF),
+                      Color(0xFF0B2FA6),
+                      Color(0xFF061A66),
+                    ],
+                  ),
+                ),
+                child: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final boardSize = min(
+                        constraints.maxWidth - 24,
+                        constraints.maxHeight - (firebaseReady ? 505 : 470),
+                      ).clamp(180.0, 700.0).toDouble();
+
+                      return Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          buildHeader(),
+                          buildRanking(),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [badgesRow(0, 1), diceRow(0, 1)],
+                          ),
+                          buildBoard(boardSize),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [diceRow(3, 2), badgesRow(3, 2)],
+                          ),
+                          buildStatusBar(),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+            buildFlyingDie(),
+            if (gameOver)
+              const Positioned.fill(
+                child: IgnorePointer(child: Confetti()),
+              ),
+            if (gameOver) buildEndPanel(),
+          ],
+        ),
+      ),
+    );
+  }
+}
