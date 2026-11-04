@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'accounts.dart';
+import 'admin_manual.dart';
 import 'deux_des.dart';
 import 'hostess_screen.dart';
 import 'online.dart';
@@ -1052,6 +1053,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
               _stat('Versé aux parrains', _money(referrals)),
               _stat('Versé aux partenaires', _money(partnerPaid)),
               _stat('Parties affichées', '${shown.length}'),
+              GestureDetector(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const AdminManualScreen(),
+                  ),
+                ),
+                child: _stat(
+                  'Recharges et retraits · ouvrir ›',
+                  'Orange Money',
+                  color: _gold,
+                ),
+              ),
               GestureDetector(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
