@@ -378,6 +378,62 @@ class Wallet {
     });
   }
 
+  /// Recharge / retrait manuels par code marchand Orange Money.
+  /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
+  static Future<Map<String, dynamic>> manualInfo() {
+    return _call('manualInfo', <String, dynamic>{});
+  }
+
+  /// Le joueur a payé au code marchand : demande de recharge en attente de
+  /// confirmation. [txRef] = identifiant de transaction reçu par SMS.
+  static Future<void> manualDeposit({
+    required int amount,
+    required String phone,
+    required String txRef,
+  }) async {
+    await _call('manualDepositRequest', <String, dynamic>{
+      'amount': amount,
+      'phone': phone,
+      'txRef': txRef,
+    });
+  }
+
+  /// Demande de retrait : le montant est retiré du solde, l'administrateur
+  /// envoie l'argent puis confirme.
+  static Future<void> manualWithdraw({
+    required int amount,
+    required String phone,
+  }) async {
+    await _call('manualWithdrawRequest', <String, dynamic>{
+      'amount': amount,
+      'phone': phone,
+    });
+  }
+
+  /// Mes demandes : { deposits: [...], withdrawals: [...] }.
+  static Future<Map<String, dynamic>> manualMine() {
+    return _call('manualMine', <String, dynamic>{});
+  }
+
+  /// Administrateur : demandes en attente et dernières traitées.
+  static Future<Map<String, dynamic>> adminManualList() {
+    return _call('adminManualList', <String, dynamic>{});
+  }
+
+  /// Administrateur : confirme ou refuse une demande.
+  /// [kind] = 'deposit' ou 'withdrawal', [approve] = confirmer ou refuser.
+  static Future<void> adminManualDecide({
+    required String kind,
+    required String id,
+    required bool approve,
+  }) async {
+    await _call('adminManualDecide', <String, dynamic>{
+      'kind': kind,
+      'id': id,
+      'action': approve ? 'approve' : 'reject',
+    });
+  }
+
   /// Où en est un dépôt : 'pending', 'credited', 'failed' ou 'mismatch'.
   /// Renvoie { status, balance }.
   static Future<Map<String, dynamic>> campayDepositStatus(String depositId) {
