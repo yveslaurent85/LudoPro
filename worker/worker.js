@@ -2065,6 +2065,9 @@ async function hs256Verify(token, secret) {
 
 /** Demande un dépôt : le joueur reçoit la demande de paiement sur son téléphone. */
 async function campayDeposit({ uid, data, env }) {
+  if (!CAMPAY_ENABLED) {
+    throw new HttpError('failed-precondition', 'La recharge Campay est désactivée. Utilise le code marchand Orange Money.');
+  }
   const amount = intOr(data.amount, -1);
   if (amount < DEPOSIT_MIN || amount > DEPOSIT_MAX) {
     throw new HttpError('invalid-argument', `Montant entre ${DEPOSIT_MIN} et ${DEPOSIT_MAX} FCFA.`);
@@ -2552,6 +2555,193 @@ async function campayWebhook(request, env) {
 }
 
 // ======================================================================
+// Recharge et retrait MANUELS par code marchand Orange Money
+// ======================================================================
+// manualDeposits/{id}    : { uid, name, amount, phone, txRef, status, createdAt, closedAt, closedBy }
+//                          status : pending | credited | rejected
+// manualWithdrawals/{id} : { uid, name, amount, tokens, phone, status, createdAt, closedAt, closedBy }
+//                          status : pending | paid | rejected
+// manualRefs/{txRef}     : identifiant de transaction déjà utilisé (une seule fois)
+// L'administrateur compare avec ses SMS / son historique Orange Money, puis
+// confirme (la recharge est créditée) ou refuse. Pour un retrait, le montant
+// est retiré du solde au moment de la demande ; refusé = remboursé.
+
+const CAMPAY_ENABLED = false; // Campay désactivé : recharge uniquement par code marchand
+const OM_MERCHANT_CODE = '0529831'; // peut être remplacé par la variable OM_MERCHANT_CODE
+const OM_USSD_TEMPLATE = '#150*47*{code}*{amount}*2#'; // {amount} = montant saisi par le client
+const MANUAL_DEPOSIT_MIN = 100;
+const MANUAL_DEPOSIT_MAX = 250000;
+const MANUAL_WITHDRAW_MIN = 500;
+const MANUAL_WITHDRAW_MAX = 250000;
+const MANUAL_MAX_PENDING_DEPOSITS = 5;
+const MANUAL_MAX_PENDING_WITHDRAWALS = 3;
+
+function merchantCode(env) {
+  return String((env && env.OM_MERCHANT_CODE) || OM_MERCHANT_CODE);
+}
+
+function normTxRef(v) {
+  const s = String(v || '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
+  return s.length >= 6 && s.length <= 30 ? s : '';
+}
+
+function manualPublic(d) {
+  return {
+    id: d.id,
+    amount: intOr(d.amount, 0),
+    phone: typeof d.phone === 'string' ? d.phone : '',
+    txRef: typeof d.txRef === 'string' ? d.txRef : '',
+    status: typeof d.status === 'string' ? d.status : 'pending',
+    createdAt: typeof d.createdAt === 'string' ? d.createdAt : null,
+    closedAt: typeof d.closedAt === 'string' ? d.closedAt : null,
+  };
+}
+
+const byDateDesc = (k) => (a, b) => String(b[k] || '').localeCompare(String(a[k] || ''));
+
+/** Infos affichées dans l'appli : code marchand, USSD, limites. */
+async function manualInfo({ env }) {
+  return {
+    code: merchantCode(env),
+    ussd: OM_USSD_TEMPLATE.replace('{code}', merchantCode(env)),
+    depositMin: MANUAL_DEPOSIT_MIN,
+    depositMax: MANUAL_DEPOSIT_MAX,
+    withdrawMin: MANUAL_WITHDRAW_MIN,
+    withdrawMax: MANUAL_WITHDRAW_MAX,
+  };
+}
+
+/** Le joueur a payé au code marchand : il envoie le montant et l'identifiant de la transaction. */
+async function manualDepositRequest({ uid, data, env }) {
+  const amount = intOr(data.amount, -1);
+  if (amount < MANUAL_DEPOSIT_MIN || amount > MANUAL_DEPOSIT_MAX) {
+    throw new HttpError('invalid-argument', `Montant entre ${MANUAL_DEPOSIT_MIN} et ${MANUAL_DEPOSIT_MAX} FCFA.`);
+  }
+  const phone = normPhone(data.phone);
+  if (!phone) throw new HttpError('invalid-argument', 'Numéro Orange invalide (ex : 690000000).');
+  const txRef = normTxRef(data.txRef);
+  if (!txRef) {
+    throw new HttpError('invalid-argument', "Entre l'identifiant de la transaction reçu par SMS (6 à 30 caractères).");
+  }
+  const mine = await queryDocs(env, 'manualDeposits', eqFilter('uid', uid), 100);
+  if (mine.filter((x) => x.status === 'pending').length >= MANUAL_MAX_PENDING_DEPOSITS) {
+    throw new HttpError('failed-precondition', 'Tu as déjà trop de demandes en attente. Patiente le temps de la confirmation.');
+  }
+  const id = newId();
+  await runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const used = await tx.get(`manualRefs/${txRef}`);
+    if (used) throw new HttpError('failed-precondition', 'Cet identifiant de transaction a déjà été utilisé.');
+    tx.write(`manualRefs/${txRef}`, { create: true, set: { uid, depositId: id }, serverTime: ['createdAt'] });
+    tx.write(`manualDeposits/${id}`, {
+      create: true,
+      set: { uid, name: typeof me.pseudo === 'string' ? me.pseudo : '', amount, phone, txRef, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+  });
+  return { id };
+}
+
+/** Demande de retrait : le montant est retiré du solde tout de suite. */
+async function manualWithdrawRequest({ uid, data, env }) {
+  const amount = intOr(data.amount, -1);
+  if (amount < MANUAL_WITHDRAW_MIN || amount > MANUAL_WITHDRAW_MAX) {
+    throw new HttpError('invalid-argument', `Montant entre ${MANUAL_WITHDRAW_MIN} et ${MANUAL_WITHDRAW_MAX} FCFA.`);
+  }
+  const phone = normPhone(data.phone);
+  if (!phone) throw new HttpError('invalid-argument', 'Numéro Orange Money invalide (ex : 690000000).');
+  const mine = await queryDocs(env, 'manualWithdrawals', eqFilter('uid', uid), 100);
+  if (mine.filter((x) => x.status === 'pending').length >= MANUAL_MAX_PENDING_WITHDRAWALS) {
+    throw new HttpError('failed-precondition', 'Tu as déjà des retraits en attente.');
+  }
+  const tokens = amount * TOKENS_PER_XAF;
+  const id = newId();
+  const balance = await runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (balanceOf(me) < tokens) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    tx.write(`users/${uid}`, { incr: { balance: -tokens } });
+    tx.write(`manualWithdrawals/${id}`, {
+      create: true,
+      set: { uid, name: typeof me.pseudo === 'string' ? me.pseudo : '', amount, tokens, phone, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+    return balanceOf(me) - tokens;
+  });
+  return { id, balance };
+}
+
+/** Mes dernières demandes de recharge et de retrait. */
+async function manualMine({ uid, env }) {
+  const [dep, wit] = await Promise.all([
+    queryDocs(env, 'manualDeposits', eqFilter('uid', uid), 60),
+    queryDocs(env, 'manualWithdrawals', eqFilter('uid', uid), 60),
+  ]);
+  return {
+    deposits: dep.map(manualPublic).sort(byDateDesc('createdAt')).slice(0, 20),
+    withdrawals: wit.map(manualPublic).sort(byDateDesc('createdAt')).slice(0, 20),
+  };
+}
+
+/** Administrateur : demandes en attente + dernières demandes traitées. */
+async function adminManualList({ uid, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const row = (kind) => (d) => ({
+    ...manualPublic(d),
+    kind,
+    uid: d.uid,
+    name: typeof d.name === 'string' ? d.name : '',
+  });
+  const [dp, wp, d1, d2, w1, w2] = await Promise.all([
+    queryDocs(env, 'manualDeposits', eqFilter('status', 'pending'), 200),
+    queryDocs(env, 'manualWithdrawals', eqFilter('status', 'pending'), 200),
+    queryDocs(env, 'manualDeposits', eqFilter('status', 'credited'), 30),
+    queryDocs(env, 'manualDeposits', eqFilter('status', 'rejected'), 30),
+    queryDocs(env, 'manualWithdrawals', eqFilter('status', 'paid'), 30),
+    queryDocs(env, 'manualWithdrawals', eqFilter('status', 'rejected'), 30),
+  ]);
+  const recent = [...d1.map(row('deposit')), ...d2.map(row('deposit')), ...w1.map(row('withdrawal')), ...w2.map(row('withdrawal'))]
+    .sort(byDateDesc('closedAt'))
+    .slice(0, 40);
+  return {
+    deposits: dp.map(row('deposit')).sort(byDateDesc('createdAt')),
+    withdrawals: wp.map(row('withdrawal')).sort(byDateDesc('createdAt')),
+    recent,
+  };
+}
+
+/** Administrateur : confirme ou refuse une demande.
+ *  data : { kind: 'deposit' | 'withdrawal', id, action: 'approve' | 'reject' } */
+async function adminManualDecide({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  const kind = data.kind === 'withdrawal' ? 'withdrawal' : data.kind === 'deposit' ? 'deposit' : '';
+  const approve = data.action === 'approve';
+  if (!id || !kind || (!approve && data.action !== 'reject')) {
+    throw new HttpError('invalid-argument', 'Demande invalide.');
+  }
+  const path = kind === 'deposit' ? `manualDeposits/${id}` : `manualWithdrawals/${id}`;
+  return runTx(env, async (tx) => {
+    const d = await tx.get(path);
+    if (!d) throw new HttpError('not-found', 'Demande introuvable.');
+    if (d.status !== 'pending') throw new HttpError('failed-precondition', 'Cette demande est déjà traitée.');
+    const tokens = kind === 'deposit' ? intOr(d.amount, 0) * TOKENS_PER_XAF : intOr(d.tokens, 0);
+    let status;
+    if (kind === 'deposit') {
+      status = approve ? 'credited' : 'rejected';
+      if (approve) tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
+    } else {
+      status = approve ? 'paid' : 'rejected';
+      if (!approve) tx.write(`users/${d.uid}`, { incr: { balance: tokens } }); // remboursé
+    }
+    tx.write(path, { set: { status, closedBy: uid }, serverTime: ['closedAt'] });
+    return { status };
+  });
+}
+
+// ======================================================================
 // Point d'entrée
 // ======================================================================
 
@@ -2576,6 +2766,12 @@ const HANDLERS = {
   adminHouseWithdraw,
   campayDeposit,
   campayDepositStatus,
+  manualInfo,
+  manualDepositRequest,
+  manualWithdrawRequest,
+  manualMine,
+  adminManualList,
+  adminManualDecide,
   referralWithdraw,
   adminSetPartner,
   adminPartners,
