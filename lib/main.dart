@@ -33,6 +33,7 @@ import 'damier.dart';
 import 'songo.dart';
 import 'rules.dart';
 import 'whatsapp_group.dart';
+import 'withdraw_screen.dart';
 
 /// Vrai si Firebase a démarré correctement (sinon : pas de jeu en ligne).
 bool firebaseReady = false;
@@ -465,26 +466,8 @@ class HomeScreen extends StatelessWidget {
                 item(Icons.swap_horiz, 'Transférer de l\'argent',
                     const Color(0xFF00897B), () => go((_) => const TransferScreen())),
                 item(Icons.payments_outlined, 'Retrait',
-                    const Color(0xFF1E6BFF), () {
-                  Navigator.of(sheetCtx).pop();
-                  showDialog<void>(
-                    context: context,
-                    builder: (dCtx) => AlertDialog(
-                      title: const Text('Retrait'),
-                      content: const Text(
-                        'Le retrait vers Mobile Money arrive bientôt. '
-                        'Tes gains de parrainage se transfèrent déjà vers '
-                        'ton solde depuis « Code promo ».',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(dCtx).pop(),
-                          child: const Text('OK'),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
+                    const Color(0xFF1E6BFF),
+                    () => go((_) => const WithdrawScreen())),
                 item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
                   Navigator.of(sheetCtx).pop();
                   openWhatsAppGroup(context);
