@@ -1,15 +1,14 @@
-import 'dart:async';
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'accounts.dart';
 import 'lang.dart';
 
-/// Dépôt par Mobile Money (MTN / Orange) via Campay : le joueur saisit un
-/// montant et son numéro, reçoit une demande de paiement sur son téléphone et
-/// valide avec son code PIN. Le solde est crédité par le serveur.
+/// Recharge par le code marchand Orange Money : le joueur compose le code
+/// USSD, confirme le paiement, puis envoie l'identifiant de la transaction.
+/// L'administrateur vérifie et confirme : le solde est alors crédité.
 class DepositScreen extends StatefulWidget {
   const DepositScreen({super.key});
 
@@ -19,110 +18,149 @@ class DepositScreen extends StatefulWidget {
 
 class _DepositScreenState extends State<DepositScreen> {
   static const Color _gold = Color(0xFFFFC21A);
-  static const int _min = 25;
-  static const int _max = 250000;
-  static const List<int> _presets = [25, 100, 500, 1000, 2000, 5000];
+  static const List<int> _presets = [100, 500, 1000, 2000, 5000, 10000];
 
   final TextEditingController amountCtrl = TextEditingController();
   final TextEditingController phoneCtrl = TextEditingController();
+  final TextEditingController refCtrl = TextEditingController();
+
+  String code = '0529831';
+  String ussdTemplate = '#150*47*0529831*{amount}*2#';
+  int minAmount = 100;
+  int maxAmount = 250000;
 
   bool sending = false;
   String? error;
-  String? depositId;
-  int depositAmount = 0;
+  String? done;
+  List<Map<String, dynamic>> mine = [];
+  bool loadingMine = true;
 
-  /// '' = formulaire, sinon : pending, credited, failed, mismatch.
-  String status = '';
-  bool timedOut = false;
-
-  Timer? _timer;
-  int _ticks = 0;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
 
   @override
   void dispose() {
-    _timer?.cancel();
     amountCtrl.dispose();
     phoneCtrl.dispose();
+    refCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _start() async {
-    if (sending) return;
-    final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
-    final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
-    if (amount < _min || amount > _max) {
-      setState(() => error =
-          tr('Montant entre ${_fmt(_min)} et ${_fmt(_max)} FCFA.',
-              'Amount between ${_fmt(_min)} and ${_fmt(_max)} FCFA.'));
+  Future<void> _load() async {
+    try {
+      final info = await Wallet.manualInfo();
+      if (mounted) {
+        setState(() {
+          code = '${info['code'] ?? code}';
+          ussdTemplate = '${info['ussd'] ?? ussdTemplate}';
+          minAmount = (info['depositMin'] as num?)?.toInt() ?? minAmount;
+          maxAmount = (info['depositMax'] as num?)?.toInt() ?? maxAmount;
+        });
+      }
+    } catch (_) {}
+    await _loadMine();
+  }
+
+  Future<void> _loadMine() async {
+    try {
+      final r = await Wallet.manualMine();
+      final l = ((r['deposits'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (mounted) {
+        setState(() {
+          mine = l;
+          loadingMine = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => loadingMine = false);
+    }
+  }
+
+  int get _amount => int.tryParse(amountCtrl.text.trim()) ?? 0;
+
+  String get _ussd =>
+      ussdTemplate.replaceAll('{amount}', _amount > 0 ? '$_amount' : 'MONTANT');
+
+  Future<void> _dial() async {
+    if (_amount < minAmount || _amount > maxAmount) {
+      setState(() => error = tr(
+          'Entre d\'abord un montant entre ${_fmt(minAmount)} et ${_fmt(maxAmount)} FCFA.',
+          'First enter an amount between ${_fmt(minAmount)} and ${_fmt(maxAmount)} FCFA.'));
       return;
     }
-    final okPhone = RegExp(r'^(237)?6\d{8}$').hasMatch(phone);
-    if (!okPhone) {
-      setState(() => error = tr('Numéro MTN ou Orange invalide (ex : 670000000).',
-          'Invalid MTN or Orange number (e.g. 670000000).'));
+    try {
+      final ok = await launchUrl(
+        Uri.parse('tel:${Uri.encodeComponent(_ussd)}'),
+      );
+      if (ok) return;
+    } catch (_) {}
+    await Clipboard.setData(ClipboardData(text: _ussd));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(tr('Code copié : colle-le dans le composeur du téléphone.',
+            'Code copied: paste it in the phone dialer.')),
+      ),
+    );
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: _ussd));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(tr('Code copié', 'Code copied'))),
+    );
+  }
+
+  Future<void> _send() async {
+    if (sending) return;
+    final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    final ref = refCtrl.text.trim();
+    if (_amount < minAmount || _amount > maxAmount) {
+      setState(() => error = tr(
+          'Montant entre ${_fmt(minAmount)} et ${_fmt(maxAmount)} FCFA.',
+          'Amount between ${_fmt(minAmount)} and ${_fmt(maxAmount)} FCFA.'));
+      return;
+    }
+    if (!RegExp(r'^(237)?6\d{8}$').hasMatch(phone)) {
+      setState(() => error = tr('Numéro Orange invalide (ex : 690000000).',
+          'Invalid Orange number (e.g. 690000000).'));
+      return;
+    }
+    if (ref.replaceAll(RegExp(r'[^A-Za-z0-9.]'), '').length < 6) {
+      setState(() => error = tr(
+          "Entre l'identifiant de la transaction reçu par SMS.",
+          'Enter the transaction ID you received by SMS.'));
       return;
     }
     setState(() {
       sending = true;
       error = null;
+      done = null;
     });
     try {
-      final res = await Wallet.campayDeposit(amount: amount, phone: phone);
+      await Wallet.manualDeposit(amount: _amount, phone: phone, txRef: ref);
       if (!mounted) return;
       setState(() {
-        depositId = res['depositId'] as String?;
-        depositAmount = amount;
-        status = 'pending';
-        timedOut = false;
+        done = tr(
+            '✅ Demande envoyée. Ton solde sera crédité dès que ta transaction '
+                'sera confirmée.',
+            '✅ Request sent. Your balance will be credited as soon as your '
+                'transaction is confirmed.');
+        amountCtrl.clear();
+        refCtrl.clear();
       });
-      _startPolling();
+      await _loadMine();
     } catch (e) {
-      if (!mounted) return;
-      setState(() => error = Wallet.errorText(e));
+      if (mounted) setState(() => error = Wallet.errorText(e));
     } finally {
       if (mounted) setState(() => sending = false);
     }
-  }
-
-  void _startPolling() {
-    _timer?.cancel();
-    _ticks = 0;
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _check());
-  }
-
-  Future<void> _check() async {
-    final id = depositId;
-    if (id == null) return;
-    _ticks++;
-    try {
-      final res = await Wallet.campayDepositStatus(id);
-      if (!mounted) return;
-      final st = (res['status'] as String?) ?? 'pending';
-      setState(() => status = st);
-      if (st != 'pending') {
-        _timer?.cancel();
-        return;
-      }
-    } catch (_) {
-      // Réseau coupé un instant : on réessaie au prochain tour.
-    }
-    if (_ticks >= 90) {
-      // Environ 3 minutes : on arrête d'interroger. Le serveur créditera
-      // quand même le solde dès que Campay confirme le paiement.
-      _timer?.cancel();
-      if (mounted) setState(() => timedOut = true);
-    }
-  }
-
-  void _reset() {
-    _timer?.cancel();
-    setState(() {
-      status = '';
-      depositId = null;
-      error = null;
-      timedOut = false;
-      amountCtrl.clear();
-    });
   }
 
   /// 250000 -> « 250 000 ».
@@ -167,13 +205,25 @@ class _DepositScreenState extends State<DepositScreen> {
     );
   }
 
+  Widget _label(String s) => Padding(
+        padding: const EdgeInsets.only(top: 14, bottom: 6),
+        child: Text(
+          s,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+
   Widget _balance() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
     return _card([
-      const Text(
-        'Ton solde',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
+      Text(
+        tr('Ton solde', 'Your balance'),
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
       ),
       StreamBuilder<int>(
         stream: Wallet.watch(uid),
@@ -192,31 +242,71 @@ class _DepositScreenState extends State<DepositScreen> {
     ]);
   }
 
-  Widget _form() {
+  Widget _steps() {
+    Widget step(String n, String t) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                alignment: Alignment.center,
+                decoration:
+                    const BoxDecoration(shape: BoxShape.circle, color: _gold),
+                child: Text(n,
+                    style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(t,
+                    style: const TextStyle(color: Colors.white, fontSize: 13)),
+              ),
+            ],
+          ),
+        );
     return _card([
-      const Text(
-        'Déposer par Mobile Money',
-        style: TextStyle(
+      Text(
+        tr('Recharger par Orange Money', 'Top up with Orange Money'),
+        style: const TextStyle(
           color: Colors.white,
           fontSize: 16,
           fontWeight: FontWeight.w800,
         ),
       ),
       const SizedBox(height: 4),
-      const Text(
-        'MTN ou Orange. 1 FCFA = 1 jeton.',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
+      Text(
+        tr('Orange Money uniquement. 1 FCFA = 1 jeton.',
+            'Orange Money only. 1 FCFA = 1 token.'),
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
       ),
       const SizedBox(height: 12),
-      const Text(
-        'Montant à déposer',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-      const SizedBox(height: 6),
+      step('1', tr('Écris le montant ci-dessous.', 'Enter the amount below.')),
+      step(
+          '2',
+          tr('Touche « Composer le code » (ou copie-le) et confirme la '
+              'transaction avec ton code secret.',
+              'Tap "Dial the code" (or copy it) and confirm the transaction '
+              'with your PIN.')),
+      step(
+          '3',
+          tr('Tu reçois un SMS avec l\'identifiant de la transaction : recopie-le '
+              'ici et envoie ta demande.',
+              'You get an SMS with the transaction ID: copy it here and send '
+              'your request.')),
+      step(
+          '4',
+          tr('Dès que c\'est confirmé, ton solde est crédité.',
+              'As soon as it is confirmed, your balance is credited.')),
+    ]);
+  }
+
+  Widget _form() {
+    return _card([
+      _label(tr('Montant à déposer', 'Amount to deposit')),
       TextField(
         controller: amountCtrl,
         enabled: !sending,
@@ -228,7 +318,9 @@ class _DepositScreenState extends State<DepositScreen> {
           fontSize: 22,
           fontWeight: FontWeight.w900,
         ),
-        decoration: _dec(tr('Écris ton montant', 'Enter your amount'), Icons.payments).copyWith(
+        decoration: _dec(tr('Écris ton montant', 'Enter your amount'),
+                Icons.payments)
+            .copyWith(
           suffixText: 'FCFA',
           suffixStyle: const TextStyle(
             color: _gold,
@@ -238,20 +330,15 @@ class _DepositScreenState extends State<DepositScreen> {
       ),
       const SizedBox(height: 6),
       Text(
-        tr('Minimum : ${_fmt(_min)} FCFA   ·   Maximum : ${_fmt(_max)} FCFA',
-            'Minimum: ${_fmt(_min)} FCFA   ·   Maximum: ${_fmt(_max)} FCFA'),
+        tr('Minimum : ${_fmt(minAmount)} FCFA   ·   Maximum : ${_fmt(maxAmount)} FCFA',
+            'Minimum: ${_fmt(minAmount)} FCFA   ·   Maximum: ${_fmt(maxAmount)} FCFA'),
         style: const TextStyle(
           color: _gold,
           fontSize: 13,
           fontWeight: FontWeight.w700,
         ),
       ),
-      const SizedBox(height: 10),
-      const Text(
-        'Ou choisis un montant rapide :',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
-      ),
-      const SizedBox(height: 6),
+      const SizedBox(height: 8),
       Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -268,13 +355,75 @@ class _DepositScreenState extends State<DepositScreen> {
             ),
         ],
       ),
-      const SizedBox(height: 14),
+      _label(tr('Code à composer', 'Code to dial')),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: Colors.black26,
+          border: Border.all(color: _gold, width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SelectableText(
+              _ussd,
+              style: const TextStyle(
+                color: _gold,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              tr('Code marchand : $code', 'Merchant code: $code'),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF7900),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _dial,
+                    icon: const Icon(Icons.phone),
+                    label: Text(tr('Composer le code', 'Dial the code')),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: tr('Copier', 'Copy'),
+                  onPressed: _copy,
+                  icon: const Icon(Icons.copy, color: Colors.white),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      _label(tr('Ton numéro Orange Money', 'Your Orange Money number')),
       TextField(
         controller: phoneCtrl,
         enabled: !sending,
         keyboardType: TextInputType.phone,
         style: const TextStyle(color: Colors.white),
-        decoration: _dec(tr('Numéro (ex : 670000000)', 'Number (e.g. 670000000)'), Icons.phone_android),
+        decoration: _dec(tr('Numéro (ex : 690000000)', 'Number (e.g. 690000000)'),
+            Icons.phone_android),
+      ),
+      _label(tr('Identifiant de la transaction (SMS)',
+          'Transaction ID (from the SMS)')),
+      TextField(
+        controller: refCtrl,
+        enabled: !sending,
+        textCapitalization: TextCapitalization.characters,
+        style: const TextStyle(color: Colors.white),
+        decoration: _dec(tr('Ex : MP260101.1234.A12345', 'e.g. MP260101.1234.A12345'),
+            Icons.receipt_long),
       ),
       if (error != null)
         Padding(
@@ -283,6 +432,17 @@ class _DepositScreenState extends State<DepositScreen> {
             error!,
             style: const TextStyle(
               color: Color(0xFFFF8A80),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      if (done != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(
+            done!,
+            style: const TextStyle(
+              color: Color(0xFF7CFFB0),
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -296,9 +456,11 @@ class _DepositScreenState extends State<DepositScreen> {
             backgroundColor: const Color(0xFF22B14C),
             foregroundColor: Colors.white,
           ),
-          onPressed: sending ? null : _start,
+          onPressed: sending ? null : _send,
           child: Text(
-            sending ? '...' : 'Déposer',
+            sending
+                ? '...'
+                : tr('J\'ai payé · envoyer ma demande', 'I paid · send my request'),
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
           ),
         ),
@@ -306,100 +468,65 @@ class _DepositScreenState extends State<DepositScreen> {
     ]);
   }
 
-  Widget _result() {
-    final Widget content;
-    if (status == 'credited') {
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  String _statusText(String st) {
+    switch (st) {
+      case 'credited':
+        return tr('✅ Crédité', '✅ Credited');
+      case 'rejected':
+        return tr('❌ Refusé', '❌ Rejected');
+    }
+    return tr('⏳ En attente de confirmation', '⏳ Waiting for confirmation');
+  }
+
+  Widget _history() {
+    return _card([
+      Row(
         children: [
-          const Text(
-            '✅ Dépôt réussi !',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
+          Expanded(
+            child: Text(
+              tr('Mes demandes de recharge', 'My top-up requests'),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            tr('${Wallet.format(depositAmount)} ajoutés à ton solde.',
-                '${Wallet.format(depositAmount)} added to your balance.'),
-            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          IconButton(
+            tooltip: tr('Actualiser', 'Refresh'),
+            onPressed: _loadMine,
+            icon: const Icon(Icons.refresh, color: Colors.white),
           ),
         ],
-      );
-    } else if (status == 'failed') {
-      content = const Text(
-        '❌ Le paiement a échoué ou a été refusé. Aucun montant n\'a été ajouté.',
-        style: TextStyle(
-          color: Color(0xFFFF8A80),
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
+      ),
+      if (loadingMine)
+        const Center(child: CircularProgressIndicator())
+      else if (mine.isEmpty)
+        Text(
+          tr('Aucune demande pour le moment.', 'No requests yet.'),
+          style: const TextStyle(color: Colors.white70),
         ),
-      );
-    } else if (status == 'mismatch') {
-      content = const Text(
-        '⚠️ Le montant reçu ne correspond pas à la demande. Contacte le support.',
-        style: TextStyle(
-          color: Color(0xFFFF8A80),
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
-        ),
-      );
-    } else {
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      for (final d in mine)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Row(
             children: [
-              if (!timedOut)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
-                ),
-              if (!timedOut) const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Confirme le paiement sur ton téléphone',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  '${_fmt((d['amount'] as num?)?.toInt() ?? 0)} FCFA · ${d['txRef']}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
                 ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _statusText('${d['status']}'),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            timedOut
-                ? tr('Toujours en attente. Si tu as validé, ton solde sera mis à '
-                    'jour automatiquement.',
-                    'Still pending. If you have confirmed, your balance will '
-                    'update automatically.')
-                : tr('Tape ton code PIN Mobile Money pour valider '
-                    '${Wallet.format(depositAmount)}.',
-                    'Enter your Mobile Money PIN to confirm '
-                    '${Wallet.format(depositAmount)}.'),
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
-          ),
-        ],
-      );
-    }
-    return _card([
-      content,
-      if (status != 'pending' || timedOut) ...[
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          height: 46,
-          child: ElevatedButton(
-            onPressed: _reset,
-            child: const Text('Nouveau dépôt'),
-          ),
         ),
-      ],
     ]);
   }
 
@@ -427,10 +554,10 @@ class _DepositScreenState extends State<DepositScreen> {
                       onPressed: () => Navigator.of(context).maybePop(),
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                     ),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        '💰 Déposer',
-                        style: TextStyle(
+                        tr('💰 Déposer', '💰 Deposit'),
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
@@ -445,7 +572,9 @@ class _DepositScreenState extends State<DepositScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   children: [
                     _balance(),
-                    if (status.isEmpty) _form() else _result(),
+                    _steps(),
+                    _form(),
+                    _history(),
                   ],
                 ),
               ),
