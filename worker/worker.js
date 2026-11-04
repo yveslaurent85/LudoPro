@@ -21,7 +21,7 @@
 //
 // Exception : /campay/webhook est appelé par Campay (sans connexion joueur).
 
-const WELCOME = 10000; // jetons offerts à chaque compte
+const WELCOME = 0; // plus de jetons offerts : seul l'argent réel compte
 const MIN_STAKE = 100; // mise minimale
 const MAX_STAKE = 250000; // mise maximale
 const MIN_CAPTURE = 100; // capture payante : montant minimum par pion
@@ -2714,6 +2714,31 @@ async function adminManualList({ uid, env }) {
 
 /** Administrateur : confirme ou refuse une demande.
  *  data : { kind: 'deposit' | 'withdrawal', id, action: 'approve' | 'reject' } */
+/** Administrateur : remet TOUS les soldes à zéro (action unique, irréversible).
+ *  Il faut envoyer confirm = 'ZERO'. */
+async function adminResetBalances({ uid, data, env }) {
+  requireAdmin(uid, env);
+  if (data.confirm !== 'ZERO') throw new HttpError('invalid-argument', 'Confirmation manquante.');
+  const gt0 = {
+    fieldFilter: { field: { fieldPath: 'balance' }, op: 'GREATER_THAN', value: toFs(0) },
+  };
+  const lt0 = {
+    fieldFilter: { field: { fieldPath: 'balance' }, op: 'LESS_THAN', value: toFs(0) },
+  };
+  let count = 0;
+  for (const where of [gt0, lt0]) {
+    for (let round = 0; round < 50; round++) {
+      const docs = await queryDocs(env, 'users', where, 200);
+      if (!docs.length) break;
+      await runTx(env, async (tx) => {
+        for (const d of docs) tx.write(`users/${d.id}`, { set: { balance: 0 } });
+      });
+      count += docs.length;
+    }
+  }
+  return { reset: count };
+}
+
 async function adminManualDecide({ uid, data, env }) {
   requireAdmin(uid, env);
   const id = idStr(data.id);
@@ -2772,6 +2797,7 @@ const HANDLERS = {
   manualMine,
   adminManualList,
   adminManualDecide,
+  adminResetBalances,
   referralWithdraw,
   adminSetPartner,
   adminPartners,
