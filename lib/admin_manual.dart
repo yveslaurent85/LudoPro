@@ -228,6 +228,50 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
     );
   }
 
+  Future<void> _resetAll() async {
+    for (int step = 0; step < 2; step++) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(step == 0
+              ? tr('Tout remettre à zéro ?', 'Reset everything to zero?')
+              : tr('Dernière confirmation', 'Last confirmation')),
+          content: Text(step == 0
+              ? tr('Le solde de TOUS les joueurs passera à 0 FCFA. '
+                  'Traite d\'abord les retraits en attente.',
+                  'EVERY player balance will become 0 FCFA. '
+                  'Handle pending withdrawals first.')
+              : tr('Action irréversible. Continuer ?',
+                  'This cannot be undone. Continue?')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(tr('Annuler', 'Cancel')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(tr('Oui', 'Yes')),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    try {
+      final n = await Wallet.adminResetBalances();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('$n soldes remis à zéro.', '$n balances reset to zero.'))),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(Wallet.errorText(e))),
+        );
+      }
+    }
+  }
+
   Widget _title(String s) => Padding(
         padding: const EdgeInsets.only(top: 14, bottom: 8),
         child: Text(
@@ -336,6 +380,16 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
                             Text(tr('Rien pour le moment.', 'Nothing yet.'),
                                 style: const TextStyle(color: Colors.white70)),
                           for (final r in recent) _recentRow(r),
+                          const SizedBox(height: 24),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFFF8A80),
+                              side: const BorderSide(color: Color(0xFFFF8A80)),
+                            ),
+                            onPressed: _resetAll,
+                            child: Text(tr('Remettre tous les soldes à zéro',
+                                'Reset all balances to zero')),
+                          ),
                         ],
                       ),
               ),
