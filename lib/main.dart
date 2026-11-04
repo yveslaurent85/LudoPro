@@ -4649,12 +4649,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                 child: SafeArea(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final boardSize = min(
-                        constraints.maxWidth - 24,
-                        constraints.maxHeight - (firebaseReady ? 505 : 470),
-                      ).clamp(180.0, 700.0).toDouble();
+                      // Plateau sur toute la largeur du téléphone.
+                      final boardSize =
+                          (constraints.maxWidth - 8).clamp(180.0, 700.0).toDouble();
 
-                      return Column(
+                      return SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints:
+                              BoxConstraints(minHeight: constraints.maxHeight),
+                          child: Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           buildHeader(),
@@ -4671,6 +4674,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                           ),
                           buildStatusBar(),
                         ],
+                          ),
+                        ),
                       );
                     },
                   ),
