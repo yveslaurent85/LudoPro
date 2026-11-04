@@ -48,7 +48,7 @@ class Wallet {
   static const String currency = 'FCFA';
 
   /// Jetons offerts à chaque compte.
-  static const int welcomeBonus = 10000;
+  static const int welcomeBonus = 0;
 
   /// Mise minimale, et mises proposées.
   static const int minStake = 100;
@@ -127,7 +127,7 @@ class Wallet {
     return 'Pas de connexion. Réessaie.';
   }
 
-  /// Crée le compte de jetons s'il n'existe pas (10 000 offerts) et renvoie
+  /// Crée le compte de jetons s'il n'existe pas (0 jeton offert) et renvoie
   /// le solde. Les comptes déjà existants reçoivent le crédit une seule fois.
   static Future<int> ensure(
     FirebaseFirestore db,
@@ -422,6 +422,14 @@ class Wallet {
 
   /// Administrateur : confirme ou refuse une demande.
   /// [kind] = 'deposit' ou 'withdrawal', [approve] = confirmer ou refuser.
+  /// Administrateur : remet tous les soldes à zéro (irréversible).
+  static Future<int> adminResetBalances() async {
+    final r = await _call('adminResetBalances', <String, dynamic>{
+      'confirm': 'ZERO',
+    });
+    return (r['reset'] as num?)?.toInt() ?? 0;
+  }
+
   static Future<void> adminManualDecide({
     required String kind,
     required String id,
