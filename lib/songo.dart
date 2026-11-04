@@ -365,6 +365,8 @@ class _SongoBoardViewState extends State<SongoBoardView> {
   @override
   void initState() {
     super.initState();
+    // Valeurs de départ fixées ici (et non « late ») : sinon elles seraient
+    // lues trop tard, après l'arrivée du premier coup.
     _shown = List<int>.from(widget.board);
     _doneMove = widget.moveN;
   }
@@ -380,6 +382,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
     super.didUpdateWidget(old);
     if (!_running && widget.moveN != _doneMove) _run();
     if (!_running && widget.moveN == _doneMove) {
+      // Même coup : le plateau reste celui du serveur.
       if (!_same(_shown, widget.board)) _shown = List<int>.from(widget.board);
     }
   }
@@ -507,54 +510,54 @@ class _SongoBoardViewState extends State<SongoBoardView> {
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOut,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(m * 0.5),
-              gradient: RadialGradient(
-                colors: [
-                  flash
-                      ? const Color(0xFF9B2C2C)
-                      : canTap
-                          ? const Color(0xFF8A5A2B)
-                          : const Color(0xFF6B4423),
-                  const Color(0xFF301A0B),
-                ],
-              ),
-              border: Border.all(
-                color: border,
-                width: canTap || glow || flash ? 4 : 2,
-              ),
-              boxShadow: [
-                if (canTap)
-                  BoxShadow(
-                    color: _gold.withOpacity(0.5),
-                    blurRadius: 14,
-                  ),
+          duration: const Duration(milliseconds: 160),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(m * 0.5),
+            gradient: RadialGradient(
+              colors: [
+                flash
+                    ? const Color(0xFF9B2C2C)
+                    : canTap
+                        ? const Color(0xFF8A5A2B)
+                        : const Color(0xFF6B4423),
+                const Color(0xFF301A0B),
               ],
             ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: CustomPaint(painter: _SeedPainter(_shown[idx], idx)),
-                ),
-                Positioned(
-                  right: m * 0.12,
-                  bottom: m * 0.04,
-                  child: Text(
-                    '${_shown[idx]}',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: max(16.0, min(34.0, m * 0.32)),
-                      fontWeight: FontWeight.w900,
-                      shadows: const [
-                        Shadow(color: Colors.black, blurRadius: 5),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+            border: Border.all(
+              color: border,
+              width: canTap || glow || flash ? 4 : 2,
             ),
+            boxShadow: [
+              if (canTap)
+                BoxShadow(
+                  color: _gold.withOpacity(0.5),
+                  blurRadius: 14,
+                ),
+            ],
           ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(painter: _SeedPainter(_shown[idx], idx)),
+              ),
+              Positioned(
+                right: m * 0.12,
+                bottom: m * 0.04,
+                child: Text(
+                  '${_shown[idx]}',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: max(16.0, min(34.0, m * 0.32)),
+                    fontWeight: FontWeight.w900,
+                    shadows: const [
+                      Shadow(color: Colors.black, blurRadius: 5),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
         ),
       ),
     );
@@ -575,6 +578,8 @@ class _SongoBoardViewState extends State<SongoBoardView> {
         final topY = nameH + pad;
         final botY = nameH + pad * 2 + ph;
         final children = <Widget>[];
+        // Rangée du haut : l'adversaire (de gauche à droite : 0 -> 6).
+        // Rangée du bas : toi (de gauche à droite : 6 -> 0).
         for (int k = 0; k < 7; k++) {
           final x = pad + k * (pw + pad);
           final ti = SongoEngine.base(opp) + k;
@@ -672,23 +677,15 @@ class _SongoBoardViewState extends State<SongoBoardView> {
   }
 }
 
+/// Le Songô se joue en mode paysage (plateau plus grand) ; l'icône de
+/// rotation permet de revenir en portrait.
 class SongoOrient {
   static bool landscape = true;
-  static final ValueNotifier<bool> mode = ValueNotifier<bool>(true);
-
-  static void setLandscape(bool value) {
-    landscape = value;
-    mode.value = value;
-    apply();
-  }
 
   static void apply() {
     try {
       SystemChrome.setPreferredOrientations(landscape
-          ? [
-              DeviceOrientation.landscapeLeft,
-              DeviceOrientation.landscapeRight,
-            ]
+          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
           : [DeviceOrientation.portraitUp]);
     } catch (_) {}
   }
@@ -697,8 +694,6 @@ class SongoOrient {
     try {
       SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     } catch (_) {}
-    landscape = true;
-    mode.value = true;
   }
 }
 
@@ -712,22 +707,18 @@ class _RotateToggle extends StatefulWidget {
 class _RotateToggleState extends State<_RotateToggle> {
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: SongoOrient.mode,
-      builder: (context, landscape, _) {
-        return IconButton(
-          tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
-          onPressed: () {
-            SongoOrient.setLandscape(!landscape);
-          },
-          icon: Icon(
-            landscape
-                ? Icons.stay_current_portrait
-                : Icons.stay_current_landscape,
-            color: Colors.white,
-          ),
-        );
+    return IconButton(
+      tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
+      onPressed: () {
+        setState(() => SongoOrient.landscape = !SongoOrient.landscape);
+        SongoOrient.apply();
       },
+      icon: Icon(
+        SongoOrient.landscape
+            ? Icons.stay_current_portrait
+            : Icons.stay_current_landscape,
+        color: Colors.white,
+      ),
     );
   }
 }
@@ -753,6 +744,7 @@ class _SoundToggleState extends State<_SoundToggle> {
   }
 }
 
+/// Boutons du haut de l'écran : son + règles.
 Widget _gameActions(BuildContext context) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -766,6 +758,7 @@ Widget _gameActions(BuildContext context) => Row(
       ],
     );
 
+/// Scores : graines capturées par chaque joueur, et à qui c'est de jouer.
 class _ScoreBar extends StatelessWidget {
   const _ScoreBar({
     required this.names,
@@ -807,7 +800,7 @@ class _ScoreBar extends StatelessWidget {
               ),
             ),
             Text(
-              '${scores[i]} /$kSongoWin',
+              '${scores[i]} / $kSongoWin',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 18,
@@ -821,7 +814,8 @@ class _ScoreBar extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Row(children: [_chip(0), _chip(1)]);
+  Widget build(BuildContext context) =>
+      Row(children: [_chip(0), _chip(1)]);
 }
 
 class _SShell extends StatelessWidget {
@@ -883,7 +877,7 @@ String _newCode() {
   return List.generate(6, (_) => chars[r.nextInt(chars.length)]).join();
 }
 
-List> _playersOf(Map<String, dynamic> d) =>
+List<Map<String, dynamic>> _playersOf(Map<String, dynamic> d) =>
     ((d['players'] as List?) ?? const [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -899,7 +893,7 @@ String _stakeText(Map<String, dynamic> d) {
       : tr(' • gratuite', ' • free');
 }
 
-CollectionReference> get _rooms =>
+CollectionReference<Map<String, dynamic>> get _rooms =>
     FirebaseFirestore.instance.collection('songo');
 
 Widget _label(String s) => Padding(
@@ -919,6 +913,7 @@ Widget _hint(String s) => Padding(
       child: Text(s, style: const TextStyle(color: Colors.white70)),
     );
 
+/// Panneau de fin de partie.
 class _ResultPanel extends StatelessWidget {
   const _ResultPanel({
     required this.names,
@@ -971,7 +966,7 @@ class _ResultPanel extends StatelessWidget {
               style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
           Text(
-            '${names[0]}${scores[0]}  –  ${scores[1]}${names[1]}',
+            '${names[0]} ${scores[0]}  –  ${scores[1]} ${names[1]}',
             style: const TextStyle(color: Colors.white, fontSize: 16),
           ),
           if (stake > 0)
@@ -980,7 +975,7 @@ class _ResultPanel extends StatelessWidget {
                   ? tr('Égalité : la cagnotte est partagée.',
                       'Draw: the pot is shared.')
                   : tr(
-                      'Gain : ${Wallet.format(Wallet.prize(stake * 2))} (commission${Wallet.commissionPercent} %)',
+                      'Gain : ${Wallet.format(Wallet.prize(stake * 2))} (commission ${Wallet.commissionPercent} %)',
                       'Prize: ${Wallet.format(Wallet.prize(stake * 2))} (${Wallet.commissionPercent} % commission)'),
               style: const TextStyle(color: _goldSoft, fontSize: 13),
             ),
@@ -1012,4 +1007,1628 @@ const String _rulesText =
     'Interdit d\'affamer : une rafle qui viderait tout le camp adverse est '
     'annulée, et si l\'adversaire n\'a plus de graines il faut lui en envoyer.\n'
     'Fin : 36 graines capturées, ou moins de 10 graines sur le plateau, ou '
-    '
+    'plus aucun coup possible (chacun garde les graines de son camp).';
+
+void _showRules(BuildContext context) {
+  showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF0B2FA6),
+      title: const Text('Règles du Songô',
+          style: TextStyle(color: _goldSoft, fontWeight: FontWeight.w900)),
+      content: SingleChildScrollView(
+        child: Text(_rulesText, style: const TextStyle(color: Colors.white)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Fermer', style: TextStyle(color: _goldSoft)),
+        ),
+      ],
+    ),
+  );
+}
+
+// ======================================================================
+// Page d'accueil du Songô
+// ======================================================================
+
+class SongoPage extends StatelessWidget {
+  const SongoPage({super.key});
+
+  void _go(BuildContext context, Widget Function(BuildContext) page) {
+    final loggedIn =
+        !firebaseReady || FirebaseAuth.instance.currentUser != null;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (c) => loggedIn ? page(c) : OnlineScreen(onSignedIn: page),
+      ),
+    );
+  }
+
+  Widget _card(IconData icon, String title, String subtitle, Color color,
+      VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(
+            colors: [color.withOpacity(0.95), color.withOpacity(0.7)],
+          ),
+          border: Border.all(color: Colors.white54, width: 2),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.white, size: 32),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SShell(
+      title: 'Songô',
+      trailing: IconButton(
+        tooltip: tr('Règles', 'Rules'),
+        onPressed: () => _showRules(context),
+        icon: const Icon(Icons.help_outline, color: Colors.white),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _card(
+              Icons.groups,
+              'En présentiel',
+              'Deux joueurs sur un téléphone',
+              const Color(0xFF22B14C),
+              () => _go(context, (_) => const _SongoLocalSetup()),
+            ),
+            const SizedBox(height: 14),
+            _card(
+              Icons.public,
+              'En ligne',
+              'Chacun joue depuis son téléphone',
+              const Color(0xFF1E6BFF),
+              () {
+                if (!firebaseReady) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Le jeu en ligne est indisponible.'),
+                    ),
+                  );
+                  return;
+                }
+                _go(context, (_) => const _SongoHub());
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ======================================================================
+// Présentiel
+// ======================================================================
+
+class _SongoLocalSetup extends StatefulWidget {
+  const _SongoLocalSetup();
+
+  @override
+  State<_SongoLocalSetup> createState() => _SongoLocalSetupState();
+}
+
+class _SongoLocalSetupState extends State<_SongoLocalSetup> {
+  int stake = Wallet.minStake;
+  bool starting = false;
+  final Map<int, PlayerAccount> accounts = {};
+  final List<TextEditingController> ctrls =
+      List.generate(2, (_) => TextEditingController());
+
+  @override
+  void initState() {
+    super.initState();
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      if (u != null) _loadHost(u);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in ctrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadHost(User u) async {
+    int bal = 0;
+    String? token;
+    try {
+      bal = await Wallet.ensure(FirebaseFirestore.instance, u);
+      token = await u.getIdToken();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      accounts[0] = PlayerAccount(
+        idToken: token,
+        uid: u.uid,
+        name: _userName(u),
+        email: u.email ?? '',
+        balance: bal,
+      );
+    });
+  }
+
+  Future<void> _connect(int seat) async {
+    final acc = await showPlayerLogin(
+      context,
+      colorName: seat == 0 ? 'Jaune' : 'Vert',
+      color: _seatColor[seat],
+    );
+    if (acc == null || !mounted) return;
+    if (accounts.entries.any((e) => e.key != seat && e.value.uid == acc.uid)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ce compte joue déjà dans la partie.')),
+      );
+      return;
+    }
+    setState(() => accounts[seat] = acc);
+  }
+
+  bool get ready => !firebaseReady || accounts.length == 2;
+
+  String? get brokePlayer {
+    if (!firebaseReady) return null;
+    for (int s = 0; s < 2; s++) {
+      final a = accounts[s];
+      if (a != null && a.balance < stake) return a.name;
+    }
+    return null;
+  }
+
+  Widget _row(int seat) {
+    final acc = accounts[seat];
+    Widget field;
+    if (!firebaseReady) {
+      field = TextField(
+        controller: ctrls[seat],
+        maxLength: 12,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          counterText: '',
+          isDense: true,
+          hintText: tr('Joueur ${seat + 1}', 'Player ${seat + 1}'),
+          hintStyle: const TextStyle(color: Colors.white54),
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      );
+    } else if (acc != null) {
+      field = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: Colors.white.withOpacity(0.12),
+          border: Border.all(color: _seatColor[seat], width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(acc.name,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800)),
+            Text('💰 ${Wallet.format(acc.balance)}',
+                style: const TextStyle(color: _goldSoft, fontSize: 12)),
+          ],
+        ),
+      );
+    } else {
+      field = OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          side: BorderSide(color: _seatColor[seat], width: 2),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+        onPressed: () => _connect(seat),
+        icon: const Icon(Icons.login),
+        label: Text(tr('Joueur ${seat + 1} : se connecter',
+            'Player ${seat + 1}: sign in')),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 14, backgroundColor: _seatColor[seat]),
+          const SizedBox(width: 12),
+          Expanded(child: field),
+          if (firebaseReady && acc != null && seat != 0)
+            IconButton(
+              tooltip: tr('Changer de compte', 'Switch account'),
+              onPressed: () => setState(() => accounts.remove(seat)),
+              icon: const Icon(Icons.logout, color: Colors.white70),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _start() async {
+    if (starting || stake < 0) return;
+    String? localId;
+    final uids = <String?>[null, null];
+    if (firebaseReady) {
+      setState(() => starting = true);
+      try {
+        final tokens = <String>[];
+        for (int s = 0; s < 2; s++) {
+          final a = accounts[s]!;
+          uids[s] = a.uid;
+          if (a.uid == FirebaseAuth.instance.currentUser?.uid) {
+            final u = FirebaseAuth.instance.currentUser;
+            tokens.add((await u?.getIdToken(true)) ?? '');
+          } else {
+            tokens.add(a.idToken ?? '');
+          }
+        }
+        localId = await Wallet.startLocalGame(
+          stake: stake,
+          tokens: tokens,
+          names: [accounts[0]!.name, accounts[1]!.name],
+          game: 'songo',
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => starting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(Wallet.errorText(e))),
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() => starting = false);
+    }
+    final names = <String>[
+      for (int i = 0; i < 2; i++)
+        firebaseReady
+            ? accounts[i]!.name
+            : (ctrls[i].text.trim().isNotEmpty
+                ? ctrls[i].text.trim()
+                : tr('Joueur ${i + 1}', 'Player ${i + 1}')),
+    ];
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _SongoLocalGame(
+          names: names,
+          stake: firebaseReady ? stake : 0,
+          localId: localId,
+          uids: uids,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    // Soldes à jour pour la partie suivante.
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      setState(() => accounts.removeWhere((k, v) => k != 0));
+      if (u != null) await _loadHost(u);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final broke = brokePlayer;
+    return _SShell(
+      title: 'Songô · présentiel',
+      trailing: IconButton(
+        onPressed: () => _showRules(context),
+        icon: const Icon(Icons.help_outline, color: Colors.white),
+      ),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: [
+          if (firebaseReady) ...[
+            const JackpotBanner(),
+            _label('Mise de chaque joueur'),
+            StakeField(
+              stake: stake,
+              players: 2,
+              local: true,
+              onChanged: (v) => setState(() => stake = v),
+            ),
+          ],
+          _label(firebaseReady
+              ? 'Joueurs (chacun se connecte à son compte)'
+              : 'Joueurs'),
+          _row(0),
+          _row(1),
+          if (broke != null && stake > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                tr('Solde insuffisant : $broke', 'Insufficient balance: $broke'),
+                style: const TextStyle(
+                  color: Color(0xFFFF8A80),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 52,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF22B14C),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: (!ready || starting || stake < 0 ||
+                      (broke != null && stake > 0))
+                  ? null
+                  : _start,
+              child: Text(
+                starting
+                    ? 'Mise en cours...'
+                    : (stake <= 0
+                        ? 'Lancer · partie gratuite'
+                        : tr('Lancer · mise ${Wallet.format(stake)}',
+                            'Start · stake ${Wallet.format(stake)}')),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SongoLocalGame extends StatefulWidget {
+  const _SongoLocalGame({
+    required this.names,
+    this.stake = 0,
+    this.localId,
+    this.uids = const [],
+  });
+
+  final List<String> names;
+  final int stake;
+  final String? localId;
+  final List<String?> uids;
+
+  @override
+  State<_SongoLocalGame> createState() => _SongoLocalGameState();
+}
+
+class _SongoLocalGameState extends State<_SongoLocalGame> {
+  SongoGame g = SongoGame();
+  bool _settled = false;
+  int _tries = 0;
+  int jackpot = 0;
+
+  /// Dernier coup dont l'animation est terminée, et scores à ce moment-là.
+  int _doneMove = 0;
+  final Map<int, List<int>> _scoresAt = {0: [0, 0]};
+
+  bool get _busy => g.moveN != _doneMove;
+  bool get _overShown => g.over && !_busy;
+
+  @override
+  void initState() {
+    super.initState();
+    SongoOrient.apply();
+  }
+
+  @override
+  void dispose() {
+    SongoOrient.release();
+    super.dispose();
+  }
+
+  void _tap(int pit) {
+    if (_busy || !g.play(pit)) return;
+    _scoresAt[g.moveN] = List<int>.from(g.scores);
+    setState(() {});
+  }
+
+  void _settledMove(int m) {
+    if (!mounted) return;
+    setState(() => _doneMove = m);
+    if (g.over && g.moveN == m) _settle();
+  }
+
+  Future<void> _settle() async {
+    final id = widget.localId;
+    if (id == null || _settled || !firebaseReady) return;
+    _settled = true;
+    try {
+      final ws = <String>[
+        for (final s in g.winners)
+          if (s < widget.uids.length && widget.uids[s] != null)
+            widget.uids[s]!,
+      ];
+      final res = await Wallet.settleLocalFull(id, ws, List<int>.from(g.scores));
+      final jp = (res['jackpot'] as num?)?.toInt() ?? 0;
+      if (mounted && jp > 0) setState(() => jackpot = jp);
+    } catch (_) {
+      _settled = false;
+      if (mounted && ++_tries < 4) {
+        Future.delayed(const Duration(seconds: 5), _settle);
+      }
+    }
+  }
+
+  String get _lastText {
+    if (g.moveN == 0) return tr('À toi de commencer !', 'Your move!');
+    final who = widget.names[1 - g.cur];
+    if (g.lastCap > 0) {
+      return tr('$who a pris ${g.lastCap} graines.',
+          '$who captured ${g.lastCap} seeds.');
+    }
+    if (g.lastCancelled) {
+      return tr('Rafle annulée : on ne peut pas affamer l\'adversaire.',
+          'Capture cancelled: you cannot starve the opponent.');
+    }
+    return tr('$who a joué.', '$who played.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shownScores = _scoresAt[_doneMove] ?? g.scores;
+    return PopScope(
+      canPop: widget.stake == 0 || g.over,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Termine la partie pour régler les mises.'),
+            ),
+          );
+        }
+      },
+      child: _SShell(
+        title: 'Songô',
+        trailing: _gameActions(context),
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: _ScoreBar(
+                    names: widget.names,
+                    scores: shownScores,
+                    cur: g.cur,
+                    over: _overShown,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: SongoBoardView(
+                      board: g.board,
+                      viewer: 0,
+                      legal: (_busy || g.over) ? const [] : g.legal,
+                      onPit: _tap,
+                      moveN: g.moveN,
+                      lastFrom: g.lastFrom,
+                      onSettled: _settledMove,
+                      over: g.over,
+                      names: widget.names,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    _overShown || _busy ? ' ' : _lastText,
+                    style: const TextStyle(color: _goldSoft, fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
+            if (_overShown)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  alignment: Alignment.center,
+                  child: ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(maxWidth: 440, maxHeight: 330),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(12),
+                      child: _ResultPanel(
+                        names: widget.names,
+                        scores: g.scores,
+                        winners: g.winners,
+                        stake: widget.stake,
+                        jackpot: jackpot,
+                        extra: Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF22B14C),
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Terminer'),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ======================================================================
+// En ligne : salon
+// ======================================================================
+
+class _SongoHub extends StatefulWidget {
+  const _SongoHub();
+
+  @override
+  State<_SongoHub> createState() => _SongoHubState();
+}
+
+class _SongoHubState extends State<_SongoHub> {
+  int stake = Wallet.minStake;
+  bool privateRoom = false;
+  bool busy = false;
+  String? error;
+  bool showOpen = false;
+  bool showLive = false;
+  final TextEditingController codeCtrl = TextEditingController();
+
+  late final String uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> openStream =
+      _rooms.where('status', isEqualTo: 'waiting').limit(30).snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> liveStream =
+      _rooms.where('status', isEqualTo: 'playing').limit(30).snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
+      _rooms.where('uids', arrayContains: uid).snapshots();
+
+  @override
+  void dispose() {
+    codeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _open(String id, {bool spectate = false}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _SongoRoom(roomId: id, spectate: spectate),
+      ),
+    );
+  }
+
+  Future<int> _myBalance() async {
+    final s =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final b = s.data()?['balance'];
+    return b is num ? b.toInt() : 0;
+  }
+
+  Future<void> _create() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || busy || stake < 0) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      if (await _myBalance() < stake) {
+        if (mounted) {
+          setState(() => error = tr(
+              'Solde insuffisant : il te faut au moins ${Wallet.format(stake)}.',
+              'Insufficient balance: you need at least ${Wallet.format(stake)}.'));
+        }
+        return;
+      }
+      final ref = _rooms.doc();
+      final init = SongoGame();
+      await ref.set({
+        'hostUid': user.uid,
+        'hostName': _userName(user),
+        'maxPlayers': 2,
+        'private': privateRoom,
+        'stake': stake,
+        'paid': <String>[],
+        'pot': 0,
+        'code': _newCode(),
+        'status': 'waiting',
+        'players': [
+          {'uid': user.uid, 'name': _userName(user)},
+        ],
+        'uids': [user.uid],
+        'miss': [0, 0],
+        ...init.toDoc(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      try {
+        await Wallet.payStake(ref.id);
+      } catch (e) {
+        try {
+          await Wallet.leaveGame(ref.id);
+        } catch (_) {}
+        if (mounted) setState(() => error = Wallet.errorText(e));
+        return;
+      }
+      if (mounted) _open(ref.id);
+    } catch (_) {
+      if (mounted) {
+        setState(() => error = 'Impossible de créer la partie. Vérifie les '
+            'règles Firestore (collection « songo »).');
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _join(String id) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || busy) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final ref = _rooms.doc(id);
+      final pre = await ref.get();
+      final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      if (pre.exists && need > 0 && await _myBalance() < need) {
+        if (mounted) {
+          setState(() => error = tr(
+              'Solde insuffisant : mise de ${Wallet.format(need)}.',
+              'Insufficient balance: stake of ${Wallet.format(need)}.'));
+        }
+        return;
+      }
+      final result =
+          await FirebaseFirestore.instance.runTransaction<String?>((tx) async {
+        final snap = await tx.get(ref);
+        final d = snap.data();
+        if (d == null) return "Cette partie n'existe plus.";
+        final players = _playersOf(d);
+        if (players.any((p) => p['uid'] == user.uid)) return null;
+        if (d['status'] != 'waiting' || players.length >= 2) {
+          return 'Cette partie est déjà complète.';
+        }
+        players.add({'uid': user.uid, 'name': _userName(user)});
+        tx.update(ref, {
+          'players': players,
+          'uids': FieldValue.arrayUnion([user.uid]),
+        });
+        return null;
+      });
+      if (!mounted) return;
+      if (result != null) {
+        setState(() => error = result);
+        return;
+      }
+      try {
+        await Wallet.payStake(id);
+        if (mounted) _open(id);
+      } catch (e) {
+        try {
+          await Wallet.leaveGame(id);
+        } catch (_) {}
+        if (mounted) setState(() => error = Wallet.errorText(e));
+      }
+    } catch (_) {
+      if (mounted) setState(() => error = 'Impossible de rejoindre la partie.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _joinByCode() async {
+    final code = codeCtrl.text.trim().toUpperCase();
+    if (busy) return;
+    if (code.length != 6) {
+      setState(() => error = 'Entre le code à 6 caractères.');
+      return;
+    }
+    String? id;
+    try {
+      final q = await _rooms.where('code', isEqualTo: code).limit(1).get();
+      if (q.docs.isEmpty) {
+        setState(() => error = 'Aucune partie avec ce code.');
+      } else {
+        id = q.docs.first.id;
+      }
+    } catch (_) {
+      setState(() => error = 'Impossible de chercher la partie.');
+    }
+    if (id != null && mounted) await _join(id);
+  }
+
+  int _createdMs(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final t = doc.data()['createdAt'];
+    return t is Timestamp ? t.millisecondsSinceEpoch : 0;
+  }
+
+  Widget _tile(String title, String sub, String btn, VoidCallback? onTap) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.white.withOpacity(0.12),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w800)),
+                Text(sub,
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF22B14C),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: onTap,
+            child: Text(btn),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _listButton(String label, bool open, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SizedBox(
+        height: 50,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white.withOpacity(0.16),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Colors.white30),
+            ),
+          ),
+          onPressed: onTap,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800)),
+              ),
+              Icon(open ? Icons.expand_less : Icons.expand_more),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mine() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: mineStream,
+      builder: (context, snap) {
+        final docs = (snap.data?.docs ?? [])
+            .where((d) => d.data()['status'] != 'finished')
+            .toList()
+          ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _label('Mes parties'),
+            for (final doc in docs)
+              Builder(builder: (context) {
+                final d = doc.data();
+                final waiting = d['status'] == 'waiting';
+                final n = _playersOf(d).length;
+                return _tile(
+                  tr("Partie de ${d['hostName']}", "${d['hostName']}'s game"),
+                  waiting
+                      ? tr('En attente ($n/2 joueurs)${_stakeText(d)}',
+                          'Waiting ($n/2 players)${_stakeText(d)}')
+                      : tr('En cours${_stakeText(d)}',
+                          'In progress${_stakeText(d)}'),
+                  waiting ? 'Ouvrir' : 'Reprendre',
+                  busy ? null : () => _open(doc.id),
+                );
+              }),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _openList() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: openStream,
+      builder: (context, snap) {
+        if (snap.hasError) return _hint('Impossible de charger les parties.');
+        if (!snap.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final docs = snap.data!.docs
+            .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+            .where((d) => d.data()['private'] != true)
+            .toList()
+          ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+        if (docs.isEmpty) {
+          return _hint('Aucune partie ouverte pour le moment. Crée la tienne !');
+        }
+        return Column(
+          children: [
+            for (final doc in docs)
+              _tile(
+                tr("Partie de ${doc.data()['hostName']}",
+                    "${doc.data()['hostName']}'s game"),
+                '${_playersOf(doc.data()).length}/2${_stakeText(doc.data())}',
+                'Rejoindre',
+                busy ? null : () => _join(doc.id),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _liveList() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: liveStream,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return _hint('Impossible de charger les parties en cours.');
+        }
+        if (!snap.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final docs = snap.data!.docs
+            .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+            .where((d) => d.data()['private'] != true)
+            .where((d) => d.data()['over'] != true)
+            .toList()
+          ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+        if (docs.isEmpty) {
+          return _hint('Aucune partie en cours à regarder pour le moment.');
+        }
+        return Column(
+          children: [
+            for (final doc in docs)
+              _tile(
+                _playersOf(doc.data()).map((p) => '${p['name']}').join(' vs '),
+                _stakeText(doc.data()).replaceFirst(' • ', ''),
+                'Regarder',
+                () => _open(doc.id, spectate: true),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SShell(
+      title: 'Songô · en ligne',
+      trailing: IconButton(
+        onPressed: () => _showRules(context),
+        icon: const Icon(Icons.help_outline, color: Colors.white),
+      ),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: [
+          const JackpotBanner(),
+          _label('Créer une partie'),
+          StreamBuilder<int>(
+            stream: Wallet.watch(uid),
+            builder: (context, s) => Text(
+              tr(
+                'Mise de chaque joueur · ton solde : ${Wallet.format(s.data ?? 0)}',
+                "Each player's stake · your balance: ${Wallet.format(s.data ?? 0)}",
+              ),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          StakeField(
+            stake: stake,
+            players: 2,
+            onChanged: (v) => setState(() => stake = v),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeColor: _gold,
+            title: const Text('Partie privée',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800)),
+            subtitle: const Text(
+              'Invisible dans la liste : on la rejoint avec un code',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: privateRoom,
+            onChanged: (v) => setState(() => privateRoom = v),
+          ),
+          SizedBox(
+            height: 50,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF22B14C),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: (busy || stake < 0) ? null : _create,
+              child: Text(busy ? 'Patiente...' : 'Créer la partie'),
+            ),
+          ),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                error!,
+                style: const TextStyle(
+                  color: Color(0xFFFF8A80),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          _label('Rejoindre avec un code'),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 6,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    letterSpacing: 4,
+                  ),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'CODE',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF22B14C),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: busy ? null : _joinByCode,
+                  child: const Text('Rejoindre'),
+                ),
+              ),
+            ],
+          ),
+          _mine(),
+          _listButton('🌰 Parties ouvertes', showOpen,
+              () => setState(() => showOpen = !showOpen)),
+          if (showOpen) _openList(),
+          _listButton('👀 Parties en cours', showLive,
+              () => setState(() => showLive = !showLive)),
+          if (showLive) _liveList(),
+        ],
+      ),
+    );
+  }
+}
+
+// ======================================================================
+// En ligne : salle d'attente puis partie
+// ======================================================================
+
+/// Revoir une partie de Songô en ligne (lecture seule) : tableau de bord admin.
+class SongoSpectator extends StatelessWidget {
+  const SongoSpectator({super.key, required this.roomId});
+  final String roomId;
+
+  @override
+  Widget build(BuildContext context) =>
+      _SongoRoom(roomId: roomId, spectate: true);
+}
+
+class _SongoRoom extends StatefulWidget {
+  const _SongoRoom({required this.roomId, this.spectate = false});
+
+  final String roomId;
+  final bool spectate;
+
+  @override
+  State<_SongoRoom> createState() => _SongoRoomState();
+}
+
+class _SongoRoomState extends State<_SongoRoom> {
+  bool _settled = false;
+  int _tries = 0;
+  Timer? _timer;
+  int _seenMove = -1;
+  DateTime _stamp = DateTime.now();
+  int _left = kSongoTurnSecs;
+  bool _autoBusy = false;
+  Map<String, dynamic>? _last;
+  int _jackpotShown = 0;
+  int _doneMove = -1;
+  final Map<int, List<int>> _scoresAt = {};
+
+  void _settledMove(int m) {
+    if (!mounted) return;
+    setState(() => _doneMove = m);
+  }
+
+  DocumentReference<Map<String, dynamic>> get _ref =>
+      _rooms.doc(widget.roomId);
+
+  bool _oriented = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    if (_oriented) SongoOrient.release();
+    super.dispose();
+  }
+
+  void _tick() {
+    final d = _last;
+    if (!mounted || d == null) return;
+    if (d['status'] != 'playing' || d['over'] == true) return;
+    final left = kSongoTurnSecs - DateTime.now().difference(_stamp).inSeconds;
+    setState(() => _left = max(0, left));
+    final players = _playersOf(d);
+    final me = players.indexWhere(
+        (p) => p['uid'] == FirebaseAuth.instance.currentUser?.uid);
+    // Tous les joueurs assis peuvent jouer à la place d'un joueur absent.
+    if (left <= -1 && me >= 0 && !_autoBusy) {
+      _autoBusy = true;
+      final g = SongoGame.fromDoc(d);
+      _play(g.cur, null, g.moveN, auto: true).whenComplete(() {
+        _autoBusy = false;
+      });
+    }
+  }
+
+  Widget _info(String text, {bool loading = false}) {
+    return _SShell(
+      title: 'Songô',
+      child: Center(
+        child: loading
+            ? const CircularProgressIndicator()
+            : Text(text, style: const TextStyle(color: Colors.white)),
+      ),
+    );
+  }
+
+  Future<void> _leave() async {
+    Navigator.of(context).pop();
+    try {
+      await Wallet.leaveGame(widget.roomId);
+    } catch (_) {}
+  }
+
+  Future<void> _settle() async {
+    if (_settled) return;
+    _settled = true;
+    try {
+      await Wallet.settleOnline(widget.roomId);
+    } catch (_) {
+      _settled = false;
+      if (mounted && ++_tries < 4) {
+        Future.delayed(const Duration(seconds: 5), _settle);
+      }
+    }
+  }
+
+  /// Joue un coup (ou un coup automatique) dans une transaction.
+  Future<void> _play(int seat, int? pit, int expectMove,
+      {bool auto = false}) async {
+    try {
+      await FirebaseFirestore.instance.runTransaction<void>((tx) async {
+        final snap = await tx.get(_ref);
+        final d = snap.data();
+        if (d == null) return;
+        if (d['over'] == true || d['status'] != 'playing') return;
+        final g = SongoGame.fromDoc(d);
+        if (g.cur != seat || g.moveN != expectMove) return;
+        final legal = g.legal;
+        if (legal.isEmpty) return;
+        var p = pit;
+        if (p == null || !legal.contains(p)) {
+          if (!auto) return;
+          p = legal[Random().nextInt(legal.length)];
+        }
+        final miss = _intsOf(d['miss'], [0, 0]);
+        while (miss.length < 2) {
+          miss.add(0);
+        }
+        miss[seat] = auto ? miss[seat] + 1 : 0;
+        if (auto && miss[seat] >= 3) {
+          // Joueur absent : il perd la partie.
+          tx.update(_ref, {
+            'over': true,
+            'status': 'finished',
+            'forfeit': seat,
+            'winners': [1 - seat],
+            'miss': miss,
+            'moveN': g.moveN + 1,
+          });
+          return;
+        }
+        g.play(p);
+        tx.update(_ref, {
+          ...g.toDoc(),
+          'miss': miss,
+          if (g.over) 'status': 'finished',
+        });
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _forfeit(int seat) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Abandonner ?'),
+        content: const Text('Tu perds la partie et ta mise.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Non'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Abandonner'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await FirebaseFirestore.instance.runTransaction<void>((tx) async {
+        final snap = await tx.get(_ref);
+        final d = snap.data();
+        if (d == null || d['over'] == true || d['status'] != 'playing') return;
+        tx.update(_ref, {
+          'over': true,
+          'status': 'finished',
+          'forfeit': seat,
+          'winners': [1 - seat],
+          'moveN': ((d['moveN'] as num?)?.toInt() ?? 0) + 1,
+        });
+      });
+    } catch (_) {}
+  }
+
+  Widget _waiting(Map<String, dynamic> d, List<Map<String, dynamic>> players,
+      String uid) {
+    final isHost = d['hostUid'] == uid;
+    final stake = (d['stake'] as num?)?.toInt() ?? 0;
+    final pot = stake * 2;
+    final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
+
+    return _SShell(
+      title: "Salle d'attente",
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text(
+            tr('${players.length}/2 joueurs', '${players.length}/2 players'),
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Le créateur lance la partie quand les deux joueurs ont payé leur mise.",
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            stake > 0
+                ? tr(
+                    'Mise : ${Wallet.format(stake)} • '
+                        'Cagnotte : ${Wallet.format(pot)} '
+                        '(gain ${Wallet.format(Wallet.prize(pot))})',
+                    'Stake: ${Wallet.format(stake)} • '
+                        'Pot: ${Wallet.format(pot)} '
+                        '(prize ${Wallet.format(Wallet.prize(pot))})',
+                  )
+                : 'Partie gratuite',
+            style: const TextStyle(
+              color: _goldSoft,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (!paid.contains(uid))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF22B14C),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  try {
+                    await Wallet.payStake(widget.roomId);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(Wallet.errorText(e))),
+                      );
+                    }
+                  }
+                },
+                child: Text(
+                  stake > 0
+                      ? tr('Payer ma mise (${Wallet.format(stake)})',
+                          'Pay my stake (${Wallet.format(stake)})')
+                      : 'Valider ma participation',
+                ),
+              ),
+            ),
+          WaitingBell(collection: 'songo', gameId: widget.roomId),
+          HostStartButton(
+            gameId: widget.roomId,
+            isHost: isHost,
+            playerCount: players.length,
+            paidCount: paid.length,
+          ),
+          Container(
+            margin: const EdgeInsets.only(top: 14, bottom: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: Colors.black26,
+              border: Border.all(color: _gold, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${d['code']}',
+                    style: const TextStyle(
+                      color: _gold,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy, color: Colors.white),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: '${d['code']}'));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Code copié')),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          for (int i = 0; i < 2; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.white.withOpacity(0.12),
+                border: Border.all(color: _seatColor[i], width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(radius: 12, backgroundColor: _seatColor[i]),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      i < players.length
+                          ? '${players[i]['name']}'
+                              '${paid.contains(players[i]['uid']) ? ' ✅' : ''}'
+                          : "En attente d'un joueur...",
+                      style: TextStyle(
+                        color:
+                            i < players.length ? Colors.white : Colors.white54,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          SizedBox(
+            height: 48,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white54),
+              ),
+              onPressed: _leave,
+              child: Text(isHost ? 'Annuler la partie' : 'Quitter la partie'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return _info('Tu dois être connecté.');
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _ref.snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) return _info('Erreur de connexion à la partie.');
+        if (!snap.hasData) return _info('', loading: true);
+        final d = snap.data!.data();
+        if (d == null) return _info("Cette partie n'existe plus.");
+        _last = d;
+
+        final players = _playersOf(d);
+        final seat = players.indexWhere((p) => p['uid'] == user.uid);
+        if (seat < 0 && !widget.spectate) {
+          return _info('Tu ne fais pas partie de cette partie.');
+        }
+        if (seat < 0 && d['status'] == 'waiting') {
+          return _info("Cette partie n'a pas encore commencé.");
+        }
+        if (d['status'] == 'waiting') return _waiting(d, players, user.uid);
+
+        if (!_oriented) {
+          _oriented = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) SongoOrient.apply();
+          });
+        }
+        final g = SongoGame.fromDoc(d);
+        if (g.moveN != _seenMove) {
+          _seenMove = g.moveN;
+          _stamp = DateTime.now();
+          _left = kSongoTurnSecs;
+        }
+        // Coup dont l'animation est terminée (au premier affichage : le coup
+        // en cours, sans animation).
+        if (_doneMove < 0) _doneMove = g.moveN;
+        _scoresAt[g.moveN] = List<int>.from(g.scores);
+        final busy = g.moveN != _doneMove;
+        final shownScores = _scoresAt[_doneMove] ?? g.scores;
+
+        final over = d['over'] == true;
+        final overShown = over && !busy;
+        if (overShown && seat >= 0) _settle();
+        final stake = (d['stake'] as num?)?.toInt() ?? 0;
+        final names = [
+          for (int i = 0; i < 2; i++)
+            i < players.length ? '${players[i]['name']}' : '?',
+        ];
+        final viewer = seat < 0 ? 0 : seat;
+        final myTurn = seat >= 0 && g.cur == seat && !over && !busy;
+        final forfeit = (d['forfeit'] as num?)?.toInt() ?? -1;
+        final jp = (d['jackpot'] as num?)?.toInt() ?? 0;
+        if (jp > 0) _jackpotShown = jp;
+
+        String status;
+        if (over || busy) {
+          status = ' ';
+        } else if (myTurn) {
+          status = tr('À toi de jouer · $_left s', 'Your move · $_left s');
+        } else {
+          status = tr('${names[g.cur]} réfléchit · $_left s',
+              '${names[g.cur]} is thinking · $_left s');
+        }
+        final lastInfo = g.moveN == 0 || over || busy
+            ? ''
+            : g.lastCap > 0
+                ? tr('${names[1 - g.cur]} a pris ${g.lastCap} graines.',
+                    '${names[1 - g.cur]} captured ${g.lastCap} seeds.')
+                : g.lastCancelled
+                    ? tr('Rafle annulée (interdit d\'affamer).',
+                        'Capture cancelled (no starving).')
+                    : '';
+
+        return PopScope(
+          canPop: stake == 0 || over || seat < 0,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                      'Termine la partie (ou abandonne) pour régler la mise.'),
+                ),
+              );
+            }
+          },
+          child: _SShell(
+            title: 'Songô',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _gameActions(context),
+                RoomInfoButton(collection: 'songo', gameId: widget.roomId),
+                if (seat >= 0) ...[
+                  const SizedBox(width: 6),
+                  GameChat(
+                    collection: 'songo',
+                    gameId: widget.roomId,
+                    myName: names[seat],
+                  ),
+                ],
+              ],
+            ),
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: _ScoreBar(
+                        names: names,
+                        scores: shownScores,
+                        cur: g.cur,
+                        over: overShown,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: SongoBoardView(
+                          board: g.board,
+                          viewer: viewer,
+                          legal: myTurn ? g.legal : const [],
+                          onPit: (p) => _play(seat, p, g.moveN),
+                          moveN: g.moveN,
+                          lastFrom: g.lastFrom,
+                          onSettled: _settledMove,
+                          over: over,
+                          names: names,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 2, 4, 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              lastInfo.isEmpty ? status : '$status  ·  $lastInfo',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: myTurn ? _gold : _goldSoft,
+                                fontSize: 15,
+                                fontWeight:
+                                    myTurn ? FontWeight.w900 : FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (!over && seat >= 0)
+                            TextButton(
+                              onPressed: () => _forfeit(seat),
+                              child: const Text(
+                                'Abandonner',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (overShown)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black54,
+                      alignment: Alignment.center,
+                      child: ConstrainedBox(
+                        constraints:
+                            const BoxConstraints(maxWidth: 440, maxHeight: 330),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(12),
+                          child: _ResultPanel(
+                            names: names,
+                            scores: g.scores,
+                            winners: g.winners,
+                            stake: stake,
+                            forfeit: forfeit,
+                            jackpot: _jackpotShown,
+                            extra: Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF22B14C),
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Terminer'),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
