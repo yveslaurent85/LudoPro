@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'sebpay_pay.dart';
 
 /// Retrait : le joueur demande un montant et son numéro Orange Money. Le
 /// montant est retiré de son solde ; l'administrateur envoie l'argent puis
@@ -21,6 +22,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   final TextEditingController amountCtrl = TextEditingController();
   final TextEditingController phoneCtrl = TextEditingController();
 
+  bool auto = false; // retrait automatique SebPay (par défaut s'il est actif)
+  bool sebpayOn = false;
   int minAmount = 500;
   int maxAmount = 250000;
   bool sending = false;
@@ -43,6 +46,15 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<void> _load() async {
+    try {
+      final sp = await Wallet.sebpayInfo();
+      if (mounted && sp['enabled'] == true) {
+        setState(() {
+          sebpayOn = true;
+          auto = true;
+        });
+      }
+    } catch (_) {}
     try {
       final info = await Wallet.manualInfo();
       if (mounted) {
@@ -245,6 +257,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                           ),
                         ),
                       ]),
+                    if (sebpayOn)
+                      PayModeSwitch(
+                        auto: auto,
+                        onChanged: (v) => setState(() => auto = v),
+                      ),
+                    if (sebpayOn && auto)
+                      const SebpayWithdrawPanel()
+                    else ...[
                     _card([
                       Text(
                         tr('Retirer vers Orange Money', 'Withdraw to Orange Money'),
@@ -400,6 +420,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                           ),
                         ),
                     ]),
+                    ],
                   ],
                 ),
               ),
