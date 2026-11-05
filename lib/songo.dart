@@ -972,8 +972,8 @@ class _ResultPanel extends StatelessWidget {
           if (stake > 0)
             Text(
               draw
-                  ? tr('Égalité : la cagnotte est partagée.',
-                      'Draw: the pot is shared.')
+                  ? tr('Égalité : mises remboursées, aucune commission.',
+                      'Draw: stakes refunded, no commission.')
                   : tr(
                       'Gain : ${Wallet.format(Wallet.prize(stake * 2))} (commission ${Wallet.commissionPercent} %)',
                       'Prize: ${Wallet.format(Wallet.prize(stake * 2))} (${Wallet.commissionPercent} % commission)'),
