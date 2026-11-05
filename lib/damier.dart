@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
+import 'package:camera/camera.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart' hide Text;
@@ -937,18 +939,127 @@ void _dShowRules(BuildContext context) {
 }
 
 /// Barre des joueurs : nom, nombre de pièces, joueur actif en surbrillance.
+/// Les photos instantanées de la partie (visibles par les deux joueurs).
+void _showPhotos(BuildContext context, String roomId, List<String> names) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFF14267A),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (ctx) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.8,
+      builder: (ctx, scroll) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: _dRooms.doc(roomId).snapshots(),
+        builder: (ctx, roomSnap) {
+          final uids = ((roomSnap.data?.data()?['players'] as List?) ?? const [])
+              .map((e) => '${(e as Map)['uid']}')
+              .toList();
+          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _dRooms.doc(roomId).collection('photos').snapshots(),
+            builder: (ctx, snap) {
+              final docs = (snap.data?.docs ?? []).toList()
+                ..sort((a, b) {
+                  final x = a.data()['createdAt'];
+                  final y = b.data()['createdAt'];
+                  final xm = x is Timestamp ? x.millisecondsSinceEpoch : 0;
+                  final ym = y is Timestamp ? y.millisecondsSinceEpoch : 0;
+                  return xm.compareTo(ym);
+                });
+              return ListView(
+                controller: scroll,
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    tr('📷 Photos de la partie', '📷 Game photos'),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    tr('5 photos instantanées par joueur, prises à des moments aléatoires pour éviter la triche.',
+                        '5 instant photos per player, taken at random moments to prevent cheating.'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  if (docs.isEmpty)
+                    Text(tr('Aucune photo pour le moment.', 'No photos yet.'),
+                        style: const TextStyle(color: Colors.white)),
+                  for (final doc in docs)
+                    Builder(builder: (_) {
+                      final x = doc.data();
+                      final i = uids.indexOf('${x['uid']}');
+                      final who = (i >= 0 && i < names.length) ? names[i] : '?';
+                      final t = x['createdAt'];
+                      String when = '';
+                      if (t is Timestamp) {
+                        final d = t.toDate();
+                        String two(int n) => n < 10 ? '0$n' : '$n';
+                        when = '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
+                      }
+                      Widget img;
+                      try {
+                        img = Image.memory(base64Decode('${x['b64']}'),
+                            fit: BoxFit.cover, gaplessPlayback: true);
+                      } catch (_) {
+                        img = const SizedBox(height: 80);
+                      }
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(13)),
+                              child: SizedBox(
+                                  width: double.infinity, height: 220, child: img),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Text(
+                                '$who · ${tr('coup', 'move')} ${x['moveN']} · $when',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    ),
+  );
+}
+
 class _DScoreBar extends StatelessWidget {
   const _DScoreBar({
     required this.names,
     required this.counts,
     required this.cur,
     required this.over,
+    this.clocks,
   });
 
   final List<String> names;
   final List<int> counts;
   final int cur;
   final bool over;
+  final List<String>? clocks;
 
   Widget _side(int i) {
     final active = !over && cur == i;
@@ -987,6 +1098,18 @@ class _DScoreBar extends StatelessWidget {
                 ),
               ),
             ),
+            if (clocks != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  clocks![i],
+                  style: TextStyle(
+                    color: active ? _dGold : Colors.white70,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
             Text(
               '${counts[i]}',
               style: const TextStyle(
@@ -1022,6 +1145,7 @@ class _DResultPanel extends StatelessWidget {
     required this.stake,
     this.reason = '',
     this.forfeit = -1,
+    this.timeout = false,
     this.jackpot = 0,
     this.extra,
   });
@@ -1032,6 +1156,7 @@ class _DResultPanel extends StatelessWidget {
   final int stake;
   final String reason;
   final int forfeit;
+  final bool timeout;
   final int jackpot;
   final Widget? extra;
 
@@ -1077,8 +1202,11 @@ class _DResultPanel extends StatelessWidget {
           ),
           if (forfeit >= 0)
             Text(
-              tr('${names[forfeit]} a abandonné.',
-                  '${names[forfeit]} gave up.'),
+              timeout
+                  ? tr('${names[forfeit]} a perdu au temps.',
+                      '${names[forfeit]} lost on time.')
+                  : tr('${names[forfeit]} a abandonné.',
+                      '${names[forfeit]} gave up.'),
               style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
           if (_reasonText.isNotEmpty)
@@ -1761,6 +1889,8 @@ class _DamierHub extends StatefulWidget {
 
 class _DamierHubState extends State<_DamierHub> {
   int stake = Wallet.minStake;
+  int timeMin = 5; // temps de réflexion de chaque joueur (minutes)
+  int incSec = 2; // secondes ajoutées après chaque coup
   bool privateRoom = false;
   bool busy = false;
   String? error;
@@ -1831,6 +1961,9 @@ class _DamierHubState extends State<_DamierHub> {
         ],
         'uids': [user.uid],
         'miss': [0, 0],
+        'timeMin': timeMin,
+        'incSec': incSec,
+        'clockMs': [timeMin * 60000, timeMin * 60000],
         ...init.toDoc(),
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -2160,6 +2293,32 @@ class _DamierHubState extends State<_DamierHub> {
             players: 2,
             onChanged: (v) => setState(() => stake = v),
           ),
+          _dLabel(tr('⏱️ Temps par joueur', '⏱️ Time per player')),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final m in const [1, 3, 5, 10, 15])
+                ChoiceChip(
+                  label: Text('$m min'),
+                  selected: timeMin == m,
+                  selectedColor: _dGold,
+                  onSelected: (_) => setState(() => timeMin = m),
+                ),
+            ],
+          ),
+          _dLabel(tr('➕ Bonus après chaque coup', '➕ Bonus after each move')),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final b in const [0, 2, 5, 10])
+                ChoiceChip(
+                  label: Text('$b s'),
+                  selected: incSec == b,
+                  selectedColor: _dGold,
+                  onSelected: (_) => setState(() => incSec = b),
+                ),
+            ],
+          ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             activeColor: _dGold,
@@ -2289,6 +2448,86 @@ class _DamierRoomState extends State<_DamierRoom> {
   bool _autoBusy = false;
   Map<String, dynamic>? _last;
   int _jackpotShown = 0;
+
+  // --- Photos instantanées (anti-triche) ---------------------------------
+  CameraController? _cam;
+  bool _camTried = false;
+  final List<int> _plan = () {
+    final r = Random.secure();
+    final set = <int>{};
+    while (set.length < 5) {
+      set.add(1 + r.nextInt(14)); // 5 de mes tours, tirés au hasard
+    }
+    return set.toList();
+  }();
+  int _myTurns = 0;
+  int _turnCounted = -1;
+  int _shots = 0;
+
+  Future<void> _initCam(String uid) async {
+    if (_camTried) return;
+    _camTried = true;
+    try {
+      final cams = await availableCameras();
+      if (cams.isEmpty) throw StateError('no camera');
+      final cam = cams.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.front,
+          orElse: () => cams.first);
+      final c = CameraController(cam, ResolutionPreset.low, enableAudio: false);
+      await c.initialize();
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      _cam = c;
+    } catch (_) {
+      try {
+        await _ref.update({
+          'camOff': FieldValue.arrayUnion([uid]),
+        });
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _snap(String uid, int moveN) async {
+    final c = _cam;
+    if (c == null || !c.value.isInitialized || _shots >= 5) return;
+    try {
+      final f = await c.takePicture();
+      final bytes = await f.readAsBytes();
+      final b64 = base64Encode(bytes);
+      if (b64.length > 140000) return;
+      final n = _shots;
+      _shots++;
+      await _ref.collection('photos').doc('${uid}_$n').set({
+        'uid': uid,
+        'b64': b64,
+        'moveN': moveN,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+  }
+
+  void _stopCam() {
+    final c = _cam;
+    _cam = null;
+    c?.dispose();
+  }
+
+  List<int>? _clockOf(Map<String, dynamic> d) {
+    final c = d['clockMs'];
+    if (c is List && c.length == 2) {
+      return [(c[0] as num).toInt(), (c[1] as num).toInt()];
+    }
+    return null;
+  }
+
+  String _fmtClock(int ms) {
+    final s = (max(0, ms) / 1000).ceil();
+    final m = s ~/ 60;
+    final r = s % 60;
+    return '$m:${r < 10 ? '0' : ''}$r';
+  }
   int _doneMove = -1;
   final Map<int, List<int>> _countsAt = {};
 
@@ -2309,6 +2548,7 @@ class _DamierRoomState extends State<_DamierRoom> {
   @override
   void dispose() {
     _timer?.cancel();
+    _stopCam();
     super.dispose();
   }
 
@@ -2316,6 +2556,22 @@ class _DamierRoomState extends State<_DamierRoom> {
     final d = _last;
     if (!mounted || d == null) return;
     if (d['status'] != 'playing' || d['over'] == true) return;
+    final clock = _clockOf(d);
+    if (clock != null) {
+      final g0 = DamierGame.fromDoc(d);
+      final rem = clock[g0.cur] - DateTime.now().difference(_stamp).inMilliseconds;
+      setState(() => _left = max(0, (rem / 1000).ceil()));
+      final pl = _dPlayersOf(d);
+      final meSeat = pl.indexWhere(
+          (p) => p['uid'] == FirebaseAuth.instance.currentUser?.uid);
+      if (rem <= 0 && meSeat >= 0 && !_autoBusy) {
+        _autoBusy = true;
+        _flag(g0.cur, g0.moveN).whenComplete(() {
+          _autoBusy = false;
+        });
+      }
+      return;
+    }
     final left = kDamierTurnSecs - DateTime.now().difference(_stamp).inSeconds;
     setState(() => _left = max(0, left));
     final players = _dPlayersOf(d);
@@ -2364,7 +2620,7 @@ class _DamierRoomState extends State<_DamierRoom> {
 
   /// Joue un coup (ou un coup automatique) dans une transaction.
   Future<void> _play(int seat, DMove? move, int expectMove,
-      {bool auto = false}) async {
+      {bool auto = false, int elapsedMs = 0}) async {
     try {
       await FirebaseFirestore.instance.runTransaction<void>((tx) async {
         final snap = await tx.get(_ref);
@@ -2409,10 +2665,46 @@ class _DamierRoomState extends State<_DamierRoom> {
           return;
         }
         g.play(chosen);
+        final clock = _clockOf(d);
+        if (clock != null) {
+          final inc = ((d['incSec'] as num?)?.toInt() ?? 0) * 1000;
+          final used = min(max(0, elapsedMs), max(0, clock[seat] - 1));
+          clock[seat] = max(1000, clock[seat] - used + inc);
+        }
         tx.update(_ref, {
           ...g.toDoc(),
           'miss': miss,
+          if (clock != null) 'clockMs': clock,
           if (g.over) 'status': 'finished',
+        });
+      });
+    } catch (_) {}
+  }
+
+  /// Le temps d'un joueur est écoulé : il perd la partie.
+  Future<void> _flag(int seat, int expectMove) async {
+    try {
+      await FirebaseFirestore.instance.runTransaction<void>((tx) async {
+        final snap = await tx.get(_ref);
+        final d = snap.data();
+        if (d == null) return;
+        if (d['over'] == true || d['status'] != 'playing') return;
+        final clock = _clockOf(d);
+        if (clock == null) return;
+        final g = DamierGame.fromDoc(d);
+        if (g.cur != seat || g.moveN != expectMove) return;
+        clock[seat] = 0;
+        tx.update(_ref, {
+          'over': true,
+          'status': 'finished',
+          'forfeit': seat,
+          'timeout': true,
+          'winners': [1 - seat],
+          'clockMs': clock,
+          'lastFrom': -1,
+          'lastPath': <int>[],
+          'lastCaps': <int>[],
+          'moveN': g.moveN + 1,
         });
       });
     } catch (_) {}
@@ -2662,6 +2954,37 @@ class _DamierRoomState extends State<_DamierRoom> {
 
         final over = d['over'] == true;
         final overShown = over && !busy;
+        final clock = _clockOf(d);
+        int remain(int i) =>
+            (clock?[i] ?? 0) -
+            ((i == g.cur && !over && !busy)
+                ? DateTime.now().difference(_stamp).inMilliseconds
+                : 0);
+        if (seat >= 0 && !widget.spectate) {
+          if (over) {
+            if (_cam != null) _stopCam();
+          } else {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _initCam(user.uid);
+            });
+            if (g.cur == seat && g.moveN != _turnCounted) {
+              _turnCounted = g.moveN;
+              _myTurns++;
+              if (_plan.contains(_myTurns)) {
+                final wait = 1 + Random().nextInt(6);
+                final mv = g.moveN;
+                Future.delayed(Duration(seconds: wait), () {
+                  if (mounted) _snap(user.uid, mv);
+                });
+              }
+            }
+          }
+        }
+        final camOff = ((d['camOff'] as List?) ?? const []).map((e) => '$e').toList();
+        final camWarn = <String>[
+          for (int i = 0; i < players.length && i < 2; i++)
+            if (camOff.contains(players[i]['uid'])) '${players[i]['name']}',
+        ];
         if (overShown && seat >= 0) _settle();
         final stake = (d['stake'] as num?)?.toInt() ?? 0;
         final names = [
@@ -2677,17 +3000,18 @@ class _DamierRoomState extends State<_DamierRoom> {
         final mustCapture =
             myTurn && legal.isNotEmpty && legal.first.caps.isNotEmpty;
 
+        final tl = clock != null ? _fmtClock(remain(g.cur)) : '$_left s';
         String status;
         if (over || busy) {
           status = ' ';
         } else if (myTurn) {
           status = mustCapture
-              ? tr('À toi · prise obligatoire · $_left s',
-                  'Your move · capture compulsory · $_left s')
-              : tr('À toi de jouer · $_left s', 'Your move · $_left s');
+              ? tr('À toi · prise obligatoire · $tl',
+                  'Your move · capture compulsory · $tl')
+              : tr('À toi de jouer · $tl', 'Your move · $tl');
         } else {
-          status = tr('${names[g.cur]} réfléchit · $_left s',
-              '${names[g.cur]} is thinking · $_left s');
+          status = tr('${names[g.cur]} réfléchit · $tl',
+              '${names[g.cur]} is thinking · $tl');
         }
 
         return PopScope(
@@ -2714,6 +3038,12 @@ class _DamierRoomState extends State<_DamierRoom> {
                   icon: const Icon(Icons.help_outline, color: Colors.white),
                 ),
                 RoomInfoButton(collection: 'damier', gameId: widget.roomId),
+                if (seat >= 0)
+                  IconButton(
+                    tooltip: tr('Photos de la partie', 'Game photos'),
+                    onPressed: () => _showPhotos(context, widget.roomId, names),
+                    icon: const Icon(Icons.photo_camera, color: Colors.white),
+                  ),
                 if (seat >= 0) ...[
                   const SizedBox(width: 6),
                   GameChat(
@@ -2735,8 +3065,23 @@ class _DamierRoomState extends State<_DamierRoom> {
                         counts: shown,
                         cur: g.cur,
                         over: overShown,
+                        clocks: clock == null
+                            ? null
+                            : [_fmtClock(remain(0)), _fmtClock(remain(1))],
                       ),
                     ),
+                    if (camWarn.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                        child: Text(
+                          tr('📷 Caméra non autorisée : ${camWarn.join(', ')}',
+                              '📷 Camera not allowed: ${camWarn.join(', ')}'),
+                          style: const TextStyle(
+                              color: Color(0xFFFFB74D),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     Expanded(
                       child: Padding(
@@ -2745,7 +3090,8 @@ class _DamierRoomState extends State<_DamierRoom> {
                           board: g.board,
                           flip: seat == 1,
                           legal: legal,
-                          onMove: (m) => _play(seat, m, g.moveN),
+                          onMove: (m) => _play(seat, m, g.moveN,
+                              elapsedMs: DateTime.now().difference(_stamp).inMilliseconds),
                           moveN: g.moveN,
                           lastFrom: g.lastFrom,
                           lastPath: g.lastPath,
@@ -2801,6 +3147,7 @@ class _DamierRoomState extends State<_DamierRoom> {
                             stake: stake,
                             reason: g.reason,
                             forfeit: forfeit,
+                            timeout: d['timeout'] == true,
                             jackpot: _jackpotShown,
                             extra: Padding(
                               padding: const EdgeInsets.only(top: 10),
