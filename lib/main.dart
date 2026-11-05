@@ -2141,10 +2141,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _pushState();
   }
 
-  /// Face aléatoire avec un 6 plus fréquent : 22,5 % de chances
-  /// (33 % si tous les pions du joueur sont encore à la base).
-  /// Pour régler la difficulté, change les deux valeurs ci-dessous
-  /// (exprimées en pour mille : 330 = 33 %, 225 = 22,5 %).
+  /// Face aléatoire : chaque chiffre (1 à 6) a exactement la même chance
+  /// de sortir. Seul un léger coup de pouce aux captures est conservé.
   int _randomFace() {
     // Les captures sont un peu plus fréquentes : quand une face permet de
     // capturer, elle a 12 % de chances de plus de sortir (120 pour mille).
@@ -2156,10 +2154,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (capFaces.isNotEmpty && random.nextInt(1000) < captureBoost) {
       return capFaces[random.nextInt(capFaces.length)];
     }
-    final allHome = players[currentPlayer].pawns.every((x) => x == -1);
-    final sixChance = allHome ? 330 : 225;
-    if (random.nextInt(1000) < sixChance) return 6;
-    return random.nextInt(5) + 1;
+    return random.nextInt(6) + 1;
   }
 
   /// Un des pions du joueur courant capturerait-il avec la face [f] ?
