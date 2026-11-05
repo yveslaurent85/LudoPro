@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import 'accounts.dart' show Wallet;
 import 'lang.dart' show tr;
+import 'share_game.dart' show showShareSheet;
 
 /// Chat d'une partie en ligne : les joueurs s'envoient des messages et des
 /// emojis sans quitter la partie (la fenêtre s'ouvre par-dessus le jeu).
@@ -1304,6 +1305,27 @@ class _RoomInfoSheetState extends State<_RoomInfoSheet> {
           ),
         ),
         const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+            icon: const Icon(Icons.share),
+            label: Text(
+              tr('Partager la partie', 'Share the game'),
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            onPressed: () => showShareSheet(
+              context,
+              collection: widget.collection,
+              gameId: widget.gameId,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
         _line(tr('Statut', 'Status'), statusText),
         if (stake > 0) ...[
           _line(
