@@ -24,6 +24,7 @@ import 'online_screen.dart';
 import 'painters.dart';
 import 'rejouer.dart';
 import 'promo_screen.dart';
+import 'share_game.dart';
 import 'password_screen.dart';
 import 'player_stats.dart';
 import 'update_check.dart';
@@ -72,7 +73,7 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
-      home: const HomeScreen(),
+      home: const SharedLinkGate(child: HomeScreen()),
     );
   }
 }
