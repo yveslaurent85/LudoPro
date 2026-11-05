@@ -670,41 +670,6 @@ function ludoWinners(d, uids) {
   }
   return list.map((c) => uids[colors.indexOf(c)]).filter((u) => typeof u === 'string');
 }
-
-/** Deux dés : le(s) joueur(s) au score le plus élevé (ex æquo possibles). */
-function deuxDesWinners(d, uids) {
-  const scores = Array.isArray(d.scores) ? d.scores : [];
-  if (scores.length !== uids.length || scores.length === 0) return [];
-  const best = Math.max(...scores);
-  return uids.filter((_, i) => scores[i] === best);
-}
-
-/** Songô : abandon (forfeit = place du perdant) sinon le plus de graines. */
-function songoWinners(d, uids) {
-  const f = intOr(d.forfeit, -1);
-  if (f === 0 || f === 1) return uids[1 - f] ? [uids[1 - f]] : [];
-  return deuxDesWinners(d, uids);
-}
-
-/** Damier : abandon (forfeit = place du perdant) sinon les places listées dans
- *  `winners` (une place, ou les deux en cas de partie nulle). */
-function damierWinners(d, uids) {
-  const f = intOr(d.forfeit, -1);
-  if (f === 0 || f === 1) return uids[1 - f] ? [uids[1 - f]] : [];
-  const seats = Array.isArray(d.winners) ? d.winners : [];
-  return seats
-    .filter((s) => s === 0 || s === 1)
-    .map((s) => uids[s])
-    .filter((u) => typeof u === 'string');
-}
-
-function winnersFor(col, d, uids) {
-  if (col === 'deuxdes') return deuxDesWinners(d, uids);
-  if (col === 'damier') return damierWinners(d, uids);
-  if (col === 'songo') return songoWinners(d, uids);
-  return ludoWinners(d, uids);
-}
-
 // ======================================================================
 // Les fonctions (mêmes noms que les anciennes Cloud Functions)
 // ======================================================================
@@ -2612,6 +2577,47 @@ async function manualInfo({ env }) {
 }
 
 /** Le joueur a payé au code marchand : il envoie le montant et l'identifiant de la transaction. */
+/** Prévient l'administrateur sur ntfy, WhatsApp et/ou Telegram (selon les
+ *  variables définies). Ne bloque jamais la demande du joueur. */
+async function notifyAdmin(env, text) {
+  // WhatsApp (service CallMeBot) : variables WHATSAPP_PHONE et WHATSAPP_APIKEY.
+  try {
+    if (env.WHATSAPP_PHONE && env.WHATSAPP_APIKEY) {
+      const phone = String(env.WHATSAPP_PHONE).replace(/\D/g, '');
+      const url =
+        `https://api.callmebot.com/whatsapp.php?phone=${phone}` +
+        `&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(env.WHATSAPP_APIKEY)}`;
+      await fetch(url);
+    }
+  } catch (_) {
+    /* sans effet */
+  }
+  // ntfy (notification gratuite, sans compte) : variable NTFY_TOPIC.
+  try {
+    if (env.NTFY_TOPIC) {
+      await fetch(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
+        method: 'POST',
+        headers: { Title: 'Katika', Priority: 'high', Tags: 'moneybag' },
+        body: text,
+      });
+    }
+  } catch (_) {
+    /* sans effet */
+  }
+  // Telegram (facultatif) : TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.
+  try {
+    if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
+      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text }),
+      });
+    }
+  } catch (_) {
+    /* sans effet */
+  }
+}
+
 async function manualDepositRequest({ uid, data, env }) {
   const amount = intOr(data.amount, -1);
   if (amount < MANUAL_DEPOSIT_MIN || amount > MANUAL_DEPOSIT_MAX) {
@@ -2640,6 +2646,10 @@ async function manualDepositRequest({ uid, data, env }) {
       serverTime: ['createdAt'],
     });
   });
+  await notifyAdmin(
+    env,
+    `⬇️ Recharge à confirmer\n${amount} FCFA · ${phone}\nTransaction : ${txRef}\nOuvre Katika > Admin > Recharges et retraits.`
+  );
   return { id };
 }
 
@@ -2669,6 +2679,10 @@ async function manualWithdrawRequest({ uid, data, env }) {
     });
     return balanceOf(me) - tokens;
   });
+  await notifyAdmin(
+    env,
+    `⬆️ Retrait à payer\n${amount} FCFA vers ${phone}\nOuvre Katika > Admin > Recharges et retraits.`
+  );
   return { id, balance };
 }
 
