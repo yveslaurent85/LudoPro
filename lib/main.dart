@@ -2964,10 +2964,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 650));
     if (!mounted || rollToken != _token) return;
 
-    // Le dé retourne devant son joueur
-    setState(() {
-      flightFrom = _toRoot(diceKeys[currentPlayer]);
-    });
+    // Le dé s'efface sur place (il ne se déplace plus)
     _flight.duration = const Duration(milliseconds: 380);
     await _flight.reverse();
     if (!mounted || rollToken != _token) return;
@@ -4061,10 +4058,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         final eased = Curves.easeOutCubic.transform(t);
         final pos = Offset.lerp(flightFrom, flightTo, eased)!;
         final rolling = flightPhase == 1;
-        // Le dé tourne sur place : léger rebond et petit grossissement.
-        final bounce = rolling ? sin(t * pi * 3).abs() * (1 - t) * 14 : 0.0;
-        final size = 64.0 + (rolling ? 14.0 * sin(t * pi) : 0.0);
-        final grow = (size - 52.0) / 2;
+        // Le dé tourne sur place, sans se déplacer ni changer de taille.
+        const bounce = 0.0;
+        const size = 70.0;
+        const grow = (size - 52.0) / 2;
 
         return Positioned(
           left: pos.dx - grow,
@@ -4072,12 +4069,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           width: size,
           height: size,
           child: IgnorePointer(
-            child: Die3D(
-              value: pendingDice,
-              t: rolling ? t : 1.0,
-              spin: dieSpin,
-              color: color,
-              glow: true,
+            // Une fois posé, le dé s'efface doucement sur place.
+            child: Opacity(
+              opacity: rolling ? 1.0 : t.clamp(0.0, 1.0).toDouble(),
+              child: Die3D(
+                value: pendingDice,
+                t: rolling ? t : 1.0,
+                spin: dieSpin,
+                color: color,
+                glow: true,
+              ),
             ),
           ),
         );
