@@ -39,4 +39,5 @@ jobs:
           git config user.email "bot@katika.local"
           git add -A
           git commit -m "Mise à jour de la version web" || echo "Rien à publier"
+          git pull --rebase origin main
           git push
