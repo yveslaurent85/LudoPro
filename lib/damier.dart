@@ -2256,6 +2256,9 @@ class _DamierHubState extends State<_DamierHub> {
 // En ligne : salle d'attente puis partie
 // ======================================================================
 
+/// Salle de jeu (pour les liens partagés).
+Widget damierRoomPage(String id) => _DamierRoom(roomId: id);
+
 /// Revoir une partie de Damier en ligne (lecture seule) : tableau de bord admin.
 class DamierSpectator extends StatelessWidget {
   const DamierSpectator({super.key, required this.roomId});
