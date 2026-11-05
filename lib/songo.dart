@@ -2089,6 +2089,9 @@ class _SongoHubState extends State<_SongoHub> {
 // ======================================================================
 
 /// Revoir une partie de Songô en ligne (lecture seule) : tableau de bord admin.
+/// Salle de jeu (pour les liens partagés).
+Widget songoRoomPage(String id) => _SongoRoom(roomId: id);
+
 class SongoSpectator extends StatelessWidget {
   const SongoSpectator({super.key, required this.roomId});
   final String roomId;
