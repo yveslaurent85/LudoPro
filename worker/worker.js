@@ -26,8 +26,8 @@ const MIN_STAKE = 100; // mise minimale
 const MAX_STAKE = 250000; // mise maximale
 const MIN_CAPTURE = 100; // capture payante : montant minimum par pion
 const MAX_CAPTURE = 5000; // et maximum
-const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
-const COMMISSION_LOCAL_PERCENT = 5; // présentiel (Ludo, Deux dés et Songô)
+const COMMISSION_PERCENT = 6; // en ligne : part gardée par Katika sur la cagnotte (0-100)
+const COMMISSION_LOCAL_PERCENT = 6; // présentiel (Ludo, Deux dés et Songô)
 const TRANSFER_MIN = 25; // transfert de compte à compte
 const TRANSFER_MAX = 250000;
 const JACKPOT_ENABLED = false; // jackpot désactivé : toute la commission reste à Katika
@@ -389,7 +389,7 @@ function newId() {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
 
-/** Gain du gagnant : la cagnotte moins la commission (5 % en ligne et en présentiel). */
+/** Gain du gagnant : la cagnotte moins la commission (6 % en ligne et en présentiel). */
 function prizeOf(pot, percent = COMMISSION_PERCENT) {
   // percent peut avoir une décimale (ex. 7,5 %) : on calcule en dixièmes.
   return Math.floor((pot * (1000 - Math.round(percent * 10))) / 1000);
@@ -1348,7 +1348,7 @@ async function startLocalGame({ uid: hostUid, data, env }) {
 }
 
 /** Fin d'une partie en présentiel : verse la cagnotte aux gagnants désignés
- *  (commission de 5 %), règle les paris (Duel / Défi 7) avec les scores
+ *  (commission de 6 %), règle les paris (Duel / Défi 7) avec les scores
  *  envoyés par l'appli et renvoie le jackpot éventuel + le résumé des paris.
  *  Les commissions (partie + paris) et la part des parrains sont enregistrées
  *  pour le tableau de bord. */
@@ -1720,7 +1720,7 @@ async function sideBetSync({ uid, data, env }) {
 }
 
 // ======================================================================
-// Paris en présentiel (Deux dés, un seul téléphone) — commission 5 %
+// Paris en présentiel (Deux dés, un seul téléphone) — commission 6 %
 // ======================================================================
 // localGames/{id}/bets/{betId}      le pari
 // localGames/{id}/betMeta/index     { ids: [...] }
@@ -2914,6 +2914,413 @@ async function adminManualDecide({ uid, data, env }) {
 }
 
 // ======================================================================
+// Paiement AUTOMATIQUE par SebPay (recharge + retrait)
+// ======================================================================
+// Secrets Cloudflare (worker katika-api) : SEBPAY_PUBLIC_KEY (pk_live_...) et
+// SEBPAY_SECRET_KEY (sk_live_...). Facultatif : SEBPAY_OP_ORANGE, SEBPAY_OP_MTN
+// (code ou slug de l'opérateur renvoyé par GET /operators, si celui par défaut
+// est refusé) et SEBPAY_CALLBACK_URL.
+// sebpayDeposits/{id}  : { uid, name, amount, phone, operator, status, sebpayTx }
+//                        status : pending | credited | failed | mismatch
+// sebpayPayouts/{id}   : { uid, name, amount, tokens, phone, operator, status, sebpayTx }
+//                        status : pending | paid | failed (jetons remboursés)
+// external_reference envoyée à SebPay : "D" + id (recharge) ou "W" + id (retrait).
+// Un crédit n'est fait qu'après lecture de la transaction chez SebPay
+// (GET /collections), jamais sur la seule foi d'un webhook.
+
+const SEBPAY_BASE = 'https://newapi.sebpay.bj/api/v1';
+const SEBPAY_CALLBACK = 'https://katika-api.ychachouang.workers.dev/sebpay/webhook';
+const SEBPAY_COUNTRY = 'CM';
+const SEBPAY_CURRENCY = 'XAF';
+const SEBPAY_DEPOSIT_MIN = 100;
+const SEBPAY_DEPOSIT_MAX = 250000;
+const SEBPAY_WITHDRAW_MIN = 500;
+const SEBPAY_WITHDRAW_MAX = 100000; // au-delà : retrait manuel validé par l'administrateur
+const SEBPAY_MAX_PENDING_DEPOSITS = 3;
+const SEBPAY_MAX_PENDING_PAYOUTS = 3;
+const SEBPAY_OPERATORS = {
+  orange: { label: 'Orange Money', code: 'orange-cm' },
+  mtn: { label: 'MTN MoMo', code: 'mtn-cm' },
+};
+
+function sebpayEnabled(env) {
+  return !!(env.SEBPAY_PUBLIC_KEY && env.SEBPAY_SECRET_KEY);
+}
+
+function sebpayOperatorCode(env, key) {
+  const o = SEBPAY_OPERATORS[String(key || '')];
+  if (!o) return '';
+  return String(env['SEBPAY_OP_' + String(key).toUpperCase()] || o.code);
+}
+
+async function sebpayCall(env, method, path, body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(SEBPAY_BASE + path, {
+      method,
+      headers: {
+        'X-Public-Key': env.SEBPAY_PUBLIC_KEY,
+        'X-Secret-Key': env.SEBPAY_SECRET_KEY,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+    let j = {};
+    try {
+      j = (await res.json()) || {};
+    } catch (_) {}
+    const data = j && typeof j.data === 'object' && j.data ? j.data : j;
+    return { ok: res.ok, status: res.status, j, data, raw: JSON.stringify(j) };
+  } catch (e) {
+    return { ok: false, status: 0, network: true, j: {}, data: {}, raw: 'NETWORK' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const sebpayHas = (r, code) => String(r.raw || '').includes(code);
+const sebpayMsg = (r) => (typeof r.j.message === 'string' && r.j.message) || '';
+
+function sebpayAgeMs(d) {
+  const t = Date.parse(d && d.createdAt);
+  return Number.isFinite(t) ? Date.now() - t : 0;
+}
+
+function sebpayPublic(d) {
+  return {
+    id: d.id,
+    amount: intOr(d.amount, 0),
+    phone: typeof d.phone === 'string' ? d.phone : '',
+    operator: typeof d.operator === 'string' ? d.operator : '',
+    status: typeof d.status === 'string' ? d.status : 'pending',
+    createdAt: typeof d.createdAt === 'string' ? d.createdAt : null,
+    closedAt: typeof d.closedAt === 'string' ? d.closedAt : null,
+  };
+}
+
+/** Infos pour l'appli : SebPay disponible ? opérateurs, limites. */
+async function sebpayInfo({ env }) {
+  return {
+    enabled: sebpayEnabled(env),
+    operators: Object.entries(SEBPAY_OPERATORS).map(([id, o]) => ({ id, label: o.label })),
+    depositMin: SEBPAY_DEPOSIT_MIN,
+    depositMax: SEBPAY_DEPOSIT_MAX,
+    withdrawMin: SEBPAY_WITHDRAW_MIN,
+    withdrawMax: SEBPAY_WITHDRAW_MAX,
+  };
+}
+
+/** Recharge automatique : le joueur reçoit la demande de validation sur son téléphone. */
+async function sebpayDeposit({ uid, data, env }) {
+  if (!sebpayEnabled(env)) throw new HttpError('failed-precondition', 'Le paiement automatique est indisponible.');
+  const amount = intOr(data.amount, -1);
+  if (amount < SEBPAY_DEPOSIT_MIN || amount > SEBPAY_DEPOSIT_MAX) {
+    throw new HttpError('invalid-argument', `Montant entre ${SEBPAY_DEPOSIT_MIN} et ${SEBPAY_DEPOSIT_MAX} FCFA.`);
+  }
+  const phone = normPhone(data.phone);
+  if (!phone) throw new HttpError('invalid-argument', 'Numéro invalide (ex : 690000000).');
+  const opKey = String(data.operator || '');
+  const operator = sebpayOperatorCode(env, opKey);
+  if (!operator) throw new HttpError('invalid-argument', 'Choisis Orange Money ou MTN MoMo.');
+
+  const mine = await queryDocs(env, 'sebpayDeposits', eqFilter('uid', uid), 100);
+  if (mine.filter((x) => x.status === 'pending').length >= SEBPAY_MAX_PENDING_DEPOSITS) {
+    throw new HttpError('failed-precondition', 'Tu as déjà des recharges en attente. Valide-les sur ton téléphone ou patiente.');
+  }
+  const id = newId();
+  let pseudo = '';
+  await runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    pseudo = typeof me.pseudo === 'string' ? me.pseudo : '';
+    tx.write(`sebpayDeposits/${id}`, {
+      create: true,
+      set: { uid, name: pseudo, amount, phone, operator: opKey, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+  });
+
+  const body = {
+    amount,
+    currency: SEBPAY_CURRENCY,
+    phone,
+    operator,
+    country: SEBPAY_COUNTRY,
+    external_reference: 'D' + id,
+    callback_url: String(env.SEBPAY_CALLBACK_URL || SEBPAY_CALLBACK),
+  };
+  if (pseudo) body.customer_name = pseudo.slice(0, 80);
+  const otp = String(data.otp || '').replace(/\D/g, '');
+  if (otp) body.otp_code = otp;
+
+  const r = await sebpayCall(env, 'POST', '/collections', body);
+  if (r.network || r.status >= 500) {
+    // Réponse inconnue : la demande a peut-être été créée. On la laisse en attente (vérifiée ensuite).
+    console.error('SebPay collect (réponse incertaine)', r.status, r.raw);
+    return { id, status: 'pending', providerLink: null };
+  }
+  if (!r.ok) {
+    console.error('SebPay collect', r.status, r.raw);
+    await runTx(env, async (tx) =>
+      tx.write(`sebpayDeposits/${id}`, { set: { status: 'failed' }, serverTime: ['closedAt'] }),
+    );
+    if (sebpayHas(r, 'OTP_REQUIRED')) {
+      throw new HttpError('failed-precondition', 'Cet opérateur demande un code OTP. Compose le code de ton opérateur puis réessaie.');
+    }
+    if (sebpayHas(r, 'AMOUNT_TOO_LOW')) throw new HttpError('invalid-argument', 'Montant trop faible pour cet opérateur.');
+    if (sebpayHas(r, 'OPERATOR_MAINTENANCE')) {
+      throw new HttpError('failed-precondition', "Cet opérateur est en maintenance. Réessaie plus tard ou choisis l'autre.");
+    }
+    if (sebpayHas(r, 'PAYMENT_DECLINED')) {
+      throw new HttpError('failed-precondition', "L'opérateur a refusé la demande. Vérifie le numéro et l'opérateur choisis.");
+    }
+    if (r.status === 401 || r.status === 403) {
+      await notifyAdmin(env, `⚠️ SebPay refuse nos clés (${r.status}). Vérifie SEBPAY_PUBLIC_KEY / SEBPAY_SECRET_KEY.`);
+    }
+    throw new HttpError('failed-precondition', sebpayMsg(r) || 'La demande de paiement a été refusée.');
+  }
+  const tx = String(r.data.transaction_id || '');
+  if (tx) await runTx(env, async (t) => t.write(`sebpayDeposits/${id}`, { set: { sebpayTx: tx } }));
+  const link = typeof r.data.provider_link === 'string' && r.data.provider_link ? r.data.provider_link : null;
+  return { id, status: 'pending', providerLink: link };
+}
+
+/** Lit la collecte chez SebPay et crédite le solde (une seule fois). */
+async function settleSebpayDeposit(env, id) {
+  const dep = await readDoc(env, `sebpayDeposits/${id}`);
+  if (!dep) return { status: 'unknown' };
+  if (dep.status !== 'pending') return { status: dep.status };
+
+  const r = await sebpayCall(env, 'GET', `/collections/${encodeURIComponent('D' + id)}`);
+  if (!r.ok) {
+    if (r.status === 404 && sebpayAgeMs(dep) > 15 * 60 * 1000) {
+      await runTx(env, async (tx) => {
+        const d = await tx.get(`sebpayDeposits/${id}`);
+        if (d && d.status === 'pending') tx.write(`sebpayDeposits/${id}`, { set: { status: 'failed' }, serverTime: ['closedAt'] });
+      });
+      return { status: 'failed' };
+    }
+    return { status: 'pending' };
+  }
+  const st = String(r.data.status || '').toLowerCase();
+  if (st !== 'approved' && st !== 'rejected') return { status: 'pending' };
+
+  const res = await runTx(env, async (tx) => {
+    const d = await tx.get(`sebpayDeposits/${id}`);
+    if (!d || d.status !== 'pending') return { status: d ? d.status : 'unknown' };
+    if (st === 'rejected') {
+      tx.write(`sebpayDeposits/${id}`, { set: { status: 'failed' }, serverTime: ['closedAt'] });
+      return { status: 'failed' };
+    }
+    const paid = Number(r.data.amount);
+    const refOk = !r.data.external_reference || r.data.external_reference === 'D' + id;
+    if (!refOk || (Number.isFinite(paid) && paid !== d.amount)) {
+      tx.write(`sebpayDeposits/${id}`, { set: { status: 'mismatch', paidAmount: Number.isFinite(paid) ? paid : 0 }, serverTime: ['closedAt'] });
+      return { status: 'mismatch', amount: d.amount, paid };
+    }
+    const tokens = d.amount * TOKENS_PER_XAF;
+    tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
+    tx.write(`sebpayDeposits/${id}`, {
+      set: { status: 'credited', tokens, sebpayTx: String(r.data.transaction_id || d.sebpayTx || '') },
+      serverTime: ['closedAt'],
+    });
+    return { status: 'credited', amount: d.amount };
+  });
+  if (res.status === 'mismatch') {
+    await notifyAdmin(env, `⚠️ Recharge SebPay à vérifier : demandé ${res.amount}, reçu ${res.paid}. Référence D${id}.`);
+  }
+  return { status: res.status };
+}
+
+/** L'appli demande où en est sa recharge. */
+async function sebpayDepositStatus({ uid, data, env }) {
+  const id = idStr(data.id);
+  const dep = id ? await readDoc(env, `sebpayDeposits/${id}`) : null;
+  if (!dep || dep.uid !== uid) throw new HttpError('not-found', 'Recharge introuvable.');
+  const r = await settleSebpayDeposit(env, id);
+  const me = await readDoc(env, `users/${uid}`);
+  return { status: r.status, balance: balanceOf(me) };
+}
+
+/** Retrait automatique : le solde est débité tout de suite, SebPay envoie l'argent. */
+async function sebpayWithdrawRequest({ uid, data, env }) {
+  if (!sebpayEnabled(env)) throw new HttpError('failed-precondition', 'Le retrait automatique est indisponible.');
+  const amount = intOr(data.amount, -1);
+  if (amount < SEBPAY_WITHDRAW_MIN) {
+    throw new HttpError('invalid-argument', `Retrait automatique à partir de ${SEBPAY_WITHDRAW_MIN} FCFA.`);
+  }
+  if (amount > SEBPAY_WITHDRAW_MAX) {
+    throw new HttpError('invalid-argument', `Retrait automatique limité à ${SEBPAY_WITHDRAW_MAX} FCFA. Pour plus, utilise le retrait manuel.`);
+  }
+  const phone = normPhone(data.phone);
+  if (!phone) throw new HttpError('invalid-argument', 'Numéro invalide (ex : 690000000).');
+  const opKey = String(data.operator || '');
+  const operator = sebpayOperatorCode(env, opKey);
+  if (!operator) throw new HttpError('invalid-argument', 'Choisis Orange Money ou MTN MoMo.');
+
+  const mine = await queryDocs(env, 'sebpayPayouts', eqFilter('uid', uid), 100);
+  if (mine.filter((x) => x.status === 'pending').length >= SEBPAY_MAX_PENDING_PAYOUTS) {
+    throw new HttpError('failed-precondition', 'Tu as déjà des retraits en attente.');
+  }
+  const tokens = amount * TOKENS_PER_XAF;
+  const id = newId();
+  let pseudo = '';
+  const balance = await runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (balanceOf(me) < tokens) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    pseudo = typeof me.pseudo === 'string' ? me.pseudo : '';
+    tx.write(`users/${uid}`, { incr: { balance: -tokens } });
+    tx.write(`sebpayPayouts/${id}`, {
+      create: true,
+      set: { uid, name: pseudo, amount, tokens, phone, operator: opKey, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+    return balanceOf(me) - tokens;
+  });
+
+  const r = await sebpayCall(env, 'POST', '/payouts', {
+    recipient_name: (pseudo || 'Joueur Katika').slice(0, 180),
+    phone,
+    operator,
+    country: SEBPAY_COUNTRY,
+    amount,
+    currency: SEBPAY_CURRENCY,
+    external_reference: 'W' + id,
+    callback_url: String(env.SEBPAY_CALLBACK_URL || SEBPAY_CALLBACK),
+    description: 'Retrait Katika',
+  });
+  if (r.ok) {
+    const tx = String(r.data.transaction_id || '');
+    if (tx) await runTx(env, async (t) => t.write(`sebpayPayouts/${id}`, { set: { sebpayTx: tx } }));
+    return { id, status: 'pending', balance };
+  }
+  if (r.network || r.status >= 500) {
+    // Réponse inconnue : le retrait a peut-être été créé. Il reste en attente, vérifié ensuite.
+    console.error('SebPay payout (réponse incertaine)', r.status, r.raw);
+    return { id, status: 'pending', balance };
+  }
+  // Refus net : on rend les jetons.
+  console.error('SebPay payout', r.status, r.raw);
+  const back = await runTx(env, async (tx) => {
+    const d = await tx.get(`sebpayPayouts/${id}`);
+    if (!d || d.status !== 'pending') return false;
+    tx.write(`users/${uid}`, { incr: { balance: tokens } });
+    tx.write(`sebpayPayouts/${id}`, { set: { status: 'failed' }, serverTime: ['closedAt'] });
+    return true;
+  });
+  if (sebpayHas(r, 'INSUFFICIENT_BALANCE') || sebpayHas(r, 'PAYOUTS_FROZEN') || sebpayHas(r, 'PAYOUTS_LOCKED') || r.status === 401 || r.status === 403) {
+    await notifyAdmin(env, `⚠️ Retrait SebPay refusé (${r.status}) : ${sebpayMsg(r) || 'solde SebPay insuffisant ou compte bloqué'}. Recharge ton compte SebPay.`);
+    throw new HttpError('failed-precondition', 'Retrait automatique momentanément indisponible. Réessaie plus tard ou utilise le retrait manuel.');
+  }
+  if (sebpayHas(r, 'AMOUNT_TOO_LOW')) throw new HttpError('invalid-argument', 'Montant trop faible pour cet opérateur.');
+  if (sebpayHas(r, 'PAYOUT_DECLINED')) {
+    throw new HttpError('failed-precondition', "L'opérateur a refusé le retrait. Vérifie le numéro et l'opérateur choisis.");
+  }
+  void back;
+  throw new HttpError('failed-precondition', sebpayMsg(r) || 'Le retrait a été refusé.');
+}
+
+/** Lit le payout chez SebPay : payé, ou échoué (jetons remboursés une seule fois). */
+async function settleSebpayPayout(env, id) {
+  const p = await readDoc(env, `sebpayPayouts/${id}`);
+  if (!p) return { status: 'unknown' };
+  if (p.status !== 'pending') return { status: p.status };
+
+  const r = await sebpayCall(env, 'GET', `/payouts/${encodeURIComponent('W' + id)}`);
+  let st = '';
+  if (r.ok) {
+    st = String(r.data.status || '').toLowerCase();
+  } else if (r.status === 404 && sebpayAgeMs(p) > 30 * 60 * 1000) {
+    st = 'rejected'; // jamais créé chez SebPay
+  }
+  if (st !== 'approved' && st !== 'rejected') return { status: 'pending' };
+
+  return runTx(env, async (tx) => {
+    const d = await tx.get(`sebpayPayouts/${id}`);
+    if (!d || d.status !== 'pending') return { status: d ? d.status : 'unknown' };
+    if (st === 'approved') {
+      tx.write(`sebpayPayouts/${id}`, { set: { status: 'paid' }, serverTime: ['closedAt'] });
+      return { status: 'paid' };
+    }
+    tx.write(`users/${d.uid}`, { incr: { balance: intOr(d.tokens, 0) } });
+    tx.write(`sebpayPayouts/${id}`, { set: { status: 'failed' }, serverTime: ['closedAt'] });
+    return { status: 'failed' };
+  });
+}
+
+/** Mes dernières recharges et retraits SebPay (met à jour ceux qui sont en attente). */
+async function sebpayMine({ uid, env }) {
+  const [dep, pay] = await Promise.all([
+    queryDocs(env, 'sebpayDeposits', eqFilter('uid', uid), 60),
+    queryDocs(env, 'sebpayPayouts', eqFilter('uid', uid), 60),
+  ]);
+  if (sebpayEnabled(env)) {
+    const pd = dep.filter((x) => x.status === 'pending').slice(0, 3);
+    const pp = pay.filter((x) => x.status === 'pending').slice(0, 3);
+    try {
+      for (const d of pd) d.status = (await settleSebpayDeposit(env, d.id)).status;
+      for (const p of pp) p.status = (await settleSebpayPayout(env, p.id)).status;
+    } catch (e) {
+      console.error(e);
+    }
+  }
+  const me = await readDoc(env, `users/${uid}`);
+  return {
+    deposits: dep.map(sebpayPublic).sort(byDateDesc('createdAt')).slice(0, 20),
+    withdrawals: pay.map(sebpayPublic).sort(byDateDesc('createdAt')).slice(0, 20),
+    balance: balanceOf(me),
+  };
+}
+
+async function sebpayHmacHex(secret, raw) {
+  const key = await crypto.subtle.importKey('raw', te.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, te.encode(raw)));
+  return Array.from(sig, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function sebpayEqual(a, b) {
+  const x = String(a || '').toLowerCase();
+  const y = String(b || '').toLowerCase();
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Appelé par SebPay (sans connexion joueur). Signature vérifiée, puis lecture chez SebPay avant tout crédit. */
+async function sebpayWebhook(request, env) {
+  if (request.method !== 'POST') return new Response('POST requis', { status: 405 });
+  if (!env.SEBPAY_SECRET_KEY) return new Response('non configuré', { status: 503 });
+  const raw = await request.text();
+  const expected = await sebpayHmacHex(env.SEBPAY_SECRET_KEY, raw);
+  if (!sebpayEqual(expected, request.headers.get('x-sebpay-signature'))) {
+    return new Response('bad signature', { status: 401 });
+  }
+  let p = {};
+  try {
+    p = JSON.parse(raw) || {};
+  } catch (_) {
+    return new Response('bad json', { status: 400 });
+  }
+  const ref = String(p.external_reference || '');
+  const id = idStr(ref.slice(1));
+  if (id) {
+    try {
+      if (ref[0] === 'D') await settleSebpayDeposit(env, id);
+      else if (ref[0] === 'W') await settleSebpayPayout(env, id);
+    } catch (e) {
+      console.error(e);
+      return new Response('error', { status: 500 });
+    }
+  }
+  return new Response('ok');
+}
+
+// ======================================================================
 // Point d'entrée
 // ======================================================================
 
@@ -2945,6 +3352,11 @@ const HANDLERS = {
   adminManualList,
   adminManualDecide,
   adminResetBalances,
+  sebpayInfo,
+  sebpayDeposit,
+  sebpayDepositStatus,
+  sebpayWithdrawRequest,
+  sebpayMine,
   setPush,
   referralWithdraw,
   adminSetPartner,
@@ -2976,6 +3388,7 @@ export default {
     // Webhook Campay : appelé par Campay, sans connexion joueur.
     const p0 = new URL(request.url).pathname.replace(/^\/+|\/+$/g, '');
     if (p0 === 'campay/webhook') return campayWebhook(request, env);
+    if (p0 === 'sebpay/webhook') return sebpayWebhook(request, env);
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (request.method !== 'POST') {
