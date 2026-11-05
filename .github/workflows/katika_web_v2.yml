@@ -1,0 +1,45 @@
+
+name: Katika Web V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    env:
+      SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Compiler la version web
+        run: |
+          flutter pub get
+          flutter create . --platforms web --project-name katika
+          flutter build web --release --base-href /jouer/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: katika-web
+          path: build/web
+
+      - name: Publier sur le site
+        if: env.SITE_TOKEN != ''
+        run: |
+          git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web site
+          rm -rf site/jouer
+          mkdir -p site/jouer
+          cp -r build/web/. site/jouer/
+          cd site
+          git config user.name "katika-bot"
+          git config user.email "bot@katika.local"
+          git add -A
+          git commit -m "Mise à jour de la version web" || echo "Rien à publier"
+          git push
