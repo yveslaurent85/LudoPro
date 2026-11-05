@@ -6,7 +6,6 @@ on:
   push:
     branches: [main]
 
-# Empêche deux publications simultanées
 concurrency:
   group: katika-web-publication
   cancel-in-progress: false
@@ -33,10 +32,10 @@ jobs:
         run: flutter pub get
 
       - name: Préparer Flutter Web
-        run: flutter create . --platforms web --project-name katika
+        run: flutter create . --platforms=web --project-name katika
 
       - name: Compiler Katika Web
-        run: flutter build web --release --base-href /jouer/
+        run: flutter build web --release --base-href /katikagames-web/jouer/
 
       - name: Sauvegarder les fichiers compilés
         uses: actions/upload-artifact@v4
@@ -47,38 +46,44 @@ jobs:
       - name: Publier sur le site
         if: env.SITE_TOKEN != ''
         run: |
-          git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web site
+          git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web.git site
 
           cd site
 
           git config user.name "katika-bot"
           git config user.email "bot@katika.local"
 
+          mkdir -p jouer
+
+          cp -r ../build/web/. jouer/
+
+          touch .nojekyll
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Le site est déjà à jour."
+            exit 0
+          fi
+
+          git commit -m "Mise à jour de Katika Web"
+
           for attempt in 1 2 3 4 5; do
             echo "Tentative de publication $attempt"
 
             git fetch origin main
-            git reset --hard origin/main
 
-            rm -rf jouer
-            mkdir -p jouer
-            cp -r ../build/web/. jouer/
-
-            git add -A
-
-            if git diff --cached --quiet; then
-              echo "Le site est déjà à jour."
-              exit 0
+            if ! git rebase origin/main; then
+              echo "Conflit pendant le rebase."
+              git rebase --abort
+              exit 1
             fi
-
-            git commit -m "Mise à jour de Katika Web"
 
             if git push origin HEAD:main; then
               echo "Publication de Katika réussie !"
               exit 0
             fi
 
-            echo "Nouvelle tentative..."
             sleep 5
           done
 
