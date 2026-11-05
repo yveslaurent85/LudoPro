@@ -9,23 +9,32 @@ on:
 jobs:
   web:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
     env:
       SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Télécharger le code de Katika
+        uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      - name: Compiler la version web
-        run: |
-          flutter pub get
-          flutter create . --platforms web --project-name katika
-          flutter build web --release --base-href /jouer/
+      - name: Installer les dépendances
+        run: flutter pub get
 
-      - uses: actions/upload-artifact@v4
+      - name: Préparer Flutter Web
+        run: flutter create . --platforms web --project-name katika
+
+      - name: Compiler Katika Web
+        run: flutter build web --release --base-href /jouer/
+
+      - name: Sauvegarder les fichiers compilés
+        uses: actions/upload-artifact@v4
         with:
           name: katika-web
           path: build/web
@@ -34,12 +43,34 @@ jobs:
         if: env.SITE_TOKEN != ''
         run: |
           git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web site
-          rm -rf site/jouer
-          mkdir -p site/jouer
-          cp -r build/web/. site/jouer/
+
           cd site
+
           git config user.name "katika-bot"
           git config user.email "bot@katika.local"
-          git add -A
-          git commit -m "Mise à jour de la version web" || echo "Rien à publier"
-          git push
+
+          for attempt in 1 2 3; do
+            echo "Tentative de publication $attempt"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            rm -rf jouer
+            mkdir -p jouer
+            cp -r ../build/web/. jouer/
+
+            git add -A
+
+            git commit -m "Mise à jour de la version web" || true
+
+            if git push origin main; then
+              echo "Publication de Katika réussie !"
+              exit 0
+            fi
+
+            echo "Conflit GitHub, nouvelle tentative..."
+            sleep 3
+          done
+
+          echo "Échec de la publication après 3 tentatives"
+          exit 1
