@@ -870,6 +870,53 @@ String _dStakeText(Map<String, dynamic> d) {
 CollectionReference<Map<String, dynamic>> get _dRooms =>
     FirebaseFirestore.instance.collection('damier');
 
+String _dFmtClock(int ms) {
+  final s = (max(0, ms) / 1000).ceil();
+  final m = s ~/ 60;
+  final r = s % 60;
+  return '$m:${r < 10 ? '0' : ''}$r';
+}
+
+/// Choix du temps : 1 à 10 minutes par joueur, bonus de 0 à 5 s par coup.
+Widget _dClockPicker({
+  required int timeMin,
+  required int incSec,
+  required ValueChanged<int> onMin,
+  required ValueChanged<int> onInc,
+}) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _dLabel(tr('⏱️ Temps par joueur', '⏱️ Time per player')),
+      Wrap(
+        spacing: 8,
+        children: [
+          for (int m = 1; m <= 10; m++)
+            ChoiceChip(
+              label: Text('$m min'),
+              selected: timeMin == m,
+              selectedColor: _dGold,
+              onSelected: (_) => onMin(m),
+            ),
+        ],
+      ),
+      _dLabel(tr('➕ Bonus après chaque coup', '➕ Bonus after each move')),
+      Wrap(
+        spacing: 8,
+        children: [
+          for (int b = 0; b <= 5; b++)
+            ChoiceChip(
+              label: Text('$b s'),
+              selected: incSec == b,
+              selectedColor: _dGold,
+              onSelected: (_) => onInc(b),
+            ),
+        ],
+      ),
+    ],
+  );
+}
+
 Widget _dLabel(String s) => Padding(
       padding: const EdgeInsets.only(top: 18, bottom: 8),
       child: Text(
@@ -1363,6 +1410,8 @@ class _DamierLocalSetup extends StatefulWidget {
 
 class _DamierLocalSetupState extends State<_DamierLocalSetup> {
   int stake = Wallet.minStake;
+  int timeMin = 5;
+  int incSec = 2;
   bool starting = false;
   final Map<int, PlayerAccount> accounts = {};
   final List<TextEditingController> ctrls =
@@ -1555,6 +1604,8 @@ class _DamierLocalSetupState extends State<_DamierLocalSetup> {
           stake: firebaseReady ? stake : 0,
           localId: localId,
           uids: uids,
+          timeMin: timeMin,
+          incSec: incSec,
         ),
       ),
     );
@@ -1588,6 +1639,12 @@ class _DamierLocalSetupState extends State<_DamierLocalSetup> {
               onChanged: (v) => setState(() => stake = v),
             ),
           ],
+          _dClockPicker(
+            timeMin: timeMin,
+            incSec: incSec,
+            onMin: (v) => setState(() => timeMin = v),
+            onInc: (v) => setState(() => incSec = v),
+          ),
           _dLabel(firebaseReady
               ? tr('Joueurs (chacun se connecte à son compte)',
                   'Players (each one signs in to their account)')
@@ -1642,12 +1699,16 @@ class _DamierLocalGame extends StatefulWidget {
     this.stake = 0,
     this.localId,
     this.uids = const [],
+    this.timeMin = 5,
+    this.incSec = 2,
   });
 
   final List<String> names;
   final int stake;
   final String? localId;
   final List<String?> uids;
+  final int timeMin;
+  final int incSec;
 
   @override
   State<_DamierLocalGame> createState() => _DamierLocalGameState();
@@ -1667,14 +1728,73 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
   bool get _busy => g.moveN != _doneMove;
   bool get _overShown => g.over && !_busy;
 
+  // --- Horloges (temps par joueur + bonus par coup) -----------------------
+  late final List<int> _clock = [widget.timeMin * 60000, widget.timeMin * 60000];
+  DateTime _turnStart = DateTime.now();
+  Timer? _ticker;
+  int _lostBy = -1;
+  bool _timedOut = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) => _tickClock());
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  int _remain(int i) =>
+      _clock[i] -
+      ((i == g.cur && !g.over && !_busy)
+          ? DateTime.now().difference(_turnStart).inMilliseconds
+          : 0);
+
+  void _tickClock() {
+    if (!mounted || g.over || _busy) return;
+    if (_remain(g.cur) <= 0) {
+      _timeUp();
+      return;
+    }
+    setState(() {});
+  }
+
+  void _timeUp() {
+    final seat = g.cur;
+    setState(() {
+      _clock[seat] = 0;
+      g.over = true;
+      g.winners = [1 - seat];
+      g.lastFrom = -1;
+      g.lastPath = [];
+      g.lastCaps = [];
+      g.moveN++;
+      _doneMove = g.moveN;
+      _countsAt[g.moveN] = [g.count(0), g.count(1)];
+      _lostBy = seat;
+      _timedOut = true;
+    });
+    _settle();
+  }
+
   void _onMove(DMove m) {
-    if (_busy || !g.play(m)) return;
+    if (_busy || g.over) return;
+    final seat = g.cur;
+    if (!g.play(m)) return;
+    final used = min(DateTime.now().difference(_turnStart).inMilliseconds,
+        max(0, _clock[seat] - 1));
+    _clock[seat] = max(1000, _clock[seat] - used + widget.incSec * 1000);
+    _turnStart = DateTime.now();
     _countsAt[g.moveN] = [g.count(0), g.count(1)];
     setState(() {});
   }
 
   void _settledMove(int m) {
     if (!mounted) return;
+    _turnStart = DateTime.now();
     setState(() => _doneMove = m);
     if (g.over && g.moveN == m) _settle();
   }
@@ -1788,6 +1908,7 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
                     counts: shown,
                     cur: g.cur,
                     over: _overShown,
+                    clocks: [_dFmtClock(_remain(0)), _dFmtClock(_remain(1))],
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1852,6 +1973,8 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
                         winners: g.winners,
                         stake: widget.stake,
                         reason: g.reason,
+                        forfeit: _lostBy,
+                        timeout: _timedOut,
                         jackpot: jackpot,
                         extra: Padding(
                           padding: const EdgeInsets.only(top: 10),
@@ -2293,31 +2416,11 @@ class _DamierHubState extends State<_DamierHub> {
             players: 2,
             onChanged: (v) => setState(() => stake = v),
           ),
-          _dLabel(tr('⏱️ Temps par joueur', '⏱️ Time per player')),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final m in const [1, 3, 5, 10, 15])
-                ChoiceChip(
-                  label: Text('$m min'),
-                  selected: timeMin == m,
-                  selectedColor: _dGold,
-                  onSelected: (_) => setState(() => timeMin = m),
-                ),
-            ],
-          ),
-          _dLabel(tr('➕ Bonus après chaque coup', '➕ Bonus after each move')),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final b in const [0, 2, 5, 10])
-                ChoiceChip(
-                  label: Text('$b s'),
-                  selected: incSec == b,
-                  selectedColor: _dGold,
-                  onSelected: (_) => setState(() => incSec = b),
-                ),
-            ],
+          _dClockPicker(
+            timeMin: timeMin,
+            incSec: incSec,
+            onMin: (v) => setState(() => timeMin = v),
+            onInc: (v) => setState(() => incSec = v),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
