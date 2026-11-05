@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'sebpay_pay.dart';
 
 /// Recharge par le code marchand Orange Money : le joueur compose le code
 /// USSD, confirme le paiement, puis envoie l'identifiant de la transaction.
@@ -29,6 +30,9 @@ class _DepositScreenState extends State<DepositScreen> {
   int minAmount = 100;
   int maxAmount = 250000;
 
+  bool auto = false; // paiement automatique SebPay (choisi par défaut s'il est actif)
+  bool sebpayOn = false;
+
   bool sending = false;
   String? error;
   String? done;
@@ -50,6 +54,15 @@ class _DepositScreenState extends State<DepositScreen> {
   }
 
   Future<void> _load() async {
+    try {
+      final sp = await Wallet.sebpayInfo();
+      if (mounted && sp['enabled'] == true) {
+        setState(() {
+          sebpayOn = true;
+          auto = true;
+        });
+      }
+    } catch (_) {}
     try {
       final info = await Wallet.manualInfo();
       if (mounted) {
@@ -572,9 +585,18 @@ class _DepositScreenState extends State<DepositScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   children: [
                     _balance(),
-                    _steps(),
-                    _form(),
-                    _history(),
+                    if (sebpayOn)
+                      PayModeSwitch(
+                        auto: auto,
+                        onChanged: (v) => setState(() => auto = v),
+                      ),
+                    if (sebpayOn && auto)
+                      const SebpayDepositPanel()
+                    else ...[
+                      _steps(),
+                      _form(),
+                      _history(),
+                    ],
                   ],
                 ),
               ),
