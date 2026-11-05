@@ -130,7 +130,7 @@ class _Die3DPainter extends CustomPainter {
     );
     // L'inclinaison disparaît à la fin : le dé se pose bien à plat et ne
     // montre qu'une seule face (le numéro).
-    final k = 1 - Curves.easeInOut(t.clamp(0.0, 1.0));
+    final k = 1 - Curves.easeInOut.transform(t.clamp(0.0, 1.0));
     final tilt = _mul(_rx(-0.42 * k), _ry(0.5 * k));
     final m = _mul(tilt, _mul(spinM, _align(value)));
 
