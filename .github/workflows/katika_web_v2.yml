@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
 
+# Empêche deux publications simultanées
+concurrency:
+  group: katika-web-publication
+  cancel-in-progress: false
+
 jobs:
   web:
     runs-on: ubuntu-latest
@@ -49,7 +54,7 @@ jobs:
           git config user.name "katika-bot"
           git config user.email "bot@katika.local"
 
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             echo "Tentative de publication $attempt"
 
             git fetch origin main
@@ -61,16 +66,21 @@ jobs:
 
             git add -A
 
-            git commit -m "Mise à jour de la version web" || true
+            if git diff --cached --quiet; then
+              echo "Le site est déjà à jour."
+              exit 0
+            fi
 
-            if git push origin main; then
+            git commit -m "Mise à jour de Katika Web"
+
+            if git push origin HEAD:main; then
               echo "Publication de Katika réussie !"
               exit 0
             fi
 
-            echo "Conflit GitHub, nouvelle tentative..."
-            sleep 3
+            echo "Nouvelle tentative..."
+            sleep 5
           done
 
-          echo "Échec de la publication après 3 tentatives"
+          echo "Échec de publication après 5 tentatives."
           exit 1
