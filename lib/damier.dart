@@ -1266,8 +1266,8 @@ class _DResultPanel extends StatelessWidget {
           if (stake > 0)
             Text(
               draw
-                  ? tr('Égalité : la cagnotte est partagée.',
-                      'Draw: the pot is shared.')
+                  ? tr('Égalité : mises remboursées, aucune commission.',
+                      'Draw: stakes refunded, no commission.')
                   : tr(
                       'Gain : ${Wallet.format(Wallet.prize(stake * 2))} (commission ${Wallet.commissionPercent} %)',
                       'Prize: ${Wallet.format(Wallet.prize(stake * 2))} (${Wallet.commissionPercent} % commission)'),
@@ -1749,13 +1749,13 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
 
   int _remain(int i) =>
       _clock[i] -
-      ((i == g.cur && !g.over && !_busy)
+      ((i == g.cur && !g.over && !_busy && g.moveN >= 2)
           ? DateTime.now().difference(_turnStart).inMilliseconds
           : 0);
 
   void _tickClock() {
     if (!mounted || g.over || _busy) return;
-    if (_remain(g.cur) <= 0) {
+    if (g.moveN >= 2 && _remain(g.cur) <= 0) {
       _timeUp();
       return;
     }
@@ -1783,10 +1783,13 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
   void _onMove(DMove m) {
     if (_busy || g.over) return;
     final seat = g.cur;
+    final firstMove = g.moveN < 2; // l'horloge démarre après le 1er coup
     if (!g.play(m)) return;
-    final used = min(DateTime.now().difference(_turnStart).inMilliseconds,
-        max(0, _clock[seat] - 1));
-    _clock[seat] = max(1000, _clock[seat] - used + widget.incSec * 1000);
+    if (!firstMove) {
+      final used = min(DateTime.now().difference(_turnStart).inMilliseconds,
+          max(0, _clock[seat] - 1));
+      _clock[seat] = max(1000, _clock[seat] - used + widget.incSec * 1000);
+    }
     _turnStart = DateTime.now();
     _countsAt[g.moveN] = [g.count(0), g.count(1)];
     setState(() {});
@@ -2662,12 +2665,17 @@ class _DamierRoomState extends State<_DamierRoom> {
     final clock = _clockOf(d);
     if (clock != null) {
       final g0 = DamierGame.fromDoc(d);
-      final rem = clock[g0.cur] - DateTime.now().difference(_stamp).inMilliseconds;
+      // L'horloge d'un joueur démarre après son 1er coup. Avant, il dispose
+      // seulement de 60 s (pour qu'une partie ne reste pas bloquée).
+      final first = g0.moveN < 2;
+      final elapsed = DateTime.now().difference(_stamp).inMilliseconds;
+      final rem = first ? clock[g0.cur] : clock[g0.cur] - elapsed;
       setState(() => _left = max(0, (rem / 1000).ceil()));
       final pl = _dPlayersOf(d);
       final meSeat = pl.indexWhere(
           (p) => p['uid'] == FirebaseAuth.instance.currentUser?.uid);
-      if (rem <= 0 && meSeat >= 0 && !_autoBusy) {
+      final expired = first ? elapsed >= kDamierTurnSecs * 1000 : rem <= 0;
+      if (expired && meSeat >= 0 && !_autoBusy) {
         _autoBusy = true;
         _flag(g0.cur, g0.moveN).whenComplete(() {
           _autoBusy = false;
@@ -2767,9 +2775,10 @@ class _DamierRoomState extends State<_DamierRoom> {
           });
           return;
         }
+        final firstMove = g.moveN < 2;
         g.play(chosen);
         final clock = _clockOf(d);
-        if (clock != null) {
+        if (clock != null && !firstMove) {
           final inc = ((d['incSec'] as num?)?.toInt() ?? 0) * 1000;
           final used = min(max(0, elapsedMs), max(0, clock[seat] - 1));
           clock[seat] = max(1000, clock[seat] - used + inc);
@@ -3060,7 +3069,7 @@ class _DamierRoomState extends State<_DamierRoom> {
         final clock = _clockOf(d);
         int remain(int i) =>
             (clock?[i] ?? 0) -
-            ((i == g.cur && !over && !busy)
+            ((i == g.cur && !over && !busy && g.moveN >= 2)
                 ? DateTime.now().difference(_stamp).inMilliseconds
                 : 0);
         if (seat >= 0 && !widget.spectate) {
@@ -3103,7 +3112,12 @@ class _DamierRoomState extends State<_DamierRoom> {
         final mustCapture =
             myTurn && legal.isNotEmpty && legal.first.caps.isNotEmpty;
 
-        final tl = clock != null ? _fmtClock(remain(g.cur)) : '$_left s';
+        final tl = clock != null
+            ? (g.moveN < 2
+                ? tr('l\'horloge démarre après le 1er coup',
+                    'clock starts after the 1st move')
+                : _fmtClock(remain(g.cur)))
+            : '$_left s';
         String status;
         if (over || busy) {
           status = ' ';
