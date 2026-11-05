@@ -2019,6 +2019,9 @@ class _OnlineHubState extends State<_OnlineHub> {
 
 /// Salle d'une partie en ligne : attente (mises payées), puis jeu.
 /// Administrateur : revoit une partie de Deux dés en ligne (lecture seule).
+/// Salle de jeu (pour les liens partagés).
+Widget deuxDesRoomPage(String id) => _OnlineRoom(roomId: id);
+
 class DeuxDesSpectator extends StatelessWidget {
   const DeuxDesSpectator({super.key, required this.roomId});
 
