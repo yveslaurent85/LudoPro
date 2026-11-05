@@ -59,14 +59,14 @@ class Wallet {
 
   /// Commission de l'application sur la cagnotte en ligne (doit être la même
   /// que COMMISSION_PERCENT dans worker.js).
-  static const int commissionPercent = 5;
+  static const int commissionPercent = 6;
 
   /// Commission en présentiel, sur tous les jeux (Ludo, Deux dés, Songô). Doit
   /// être la même que COMMISSION_LOCAL_PERCENT dans worker.js.
-  static const int commissionLocalPercent = 5;
+  static const int commissionLocalPercent = 6;
 
   /// Gain du gagnant pour une cagnotte donnée (après commission).
-  /// [local] = true : partie en présentiel (commission de 5 %).
+  /// [local] = true : partie en présentiel (commission de 6 %).
   static int prize(int pot, {bool local = false}) {
     // La commission peut avoir une décimale (ex. 7,5 %) : calcul en dixièmes.
     final tenths =
@@ -376,6 +376,49 @@ class Wallet {
       'amount': amount,
       'phone': phone,
     });
+  }
+
+  /// Paiement AUTOMATIQUE SebPay (Orange Money / MTN MoMo).
+  /// Renvoie { enabled, operators: [{id,label}], depositMin, depositMax, withdrawMin, withdrawMax }.
+  static Future<Map<String, dynamic>> sebpayInfo() {
+    return _call('sebpayInfo', <String, dynamic>{});
+  }
+
+  /// Recharge automatique : le joueur valide sur son téléphone.
+  /// [operator] = 'orange' ou 'mtn'. Renvoie { id, status, providerLink }.
+  static Future<Map<String, dynamic>> sebpayDeposit({
+    required int amount,
+    required String phone,
+    required String operator,
+  }) {
+    return _call('sebpayDeposit', <String, dynamic>{
+      'amount': amount,
+      'phone': phone,
+      'operator': operator,
+    });
+  }
+
+  /// État d'une recharge automatique (crédite le solde si SebPay a confirmé).
+  static Future<Map<String, dynamic>> sebpayDepositStatus(String id) {
+    return _call('sebpayDepositStatus', <String, dynamic>{'id': id});
+  }
+
+  /// Retrait automatique : le solde est débité, SebPay envoie l'argent.
+  static Future<Map<String, dynamic>> sebpayWithdraw({
+    required int amount,
+    required String phone,
+    required String operator,
+  }) {
+    return _call('sebpayWithdrawRequest', <String, dynamic>{
+      'amount': amount,
+      'phone': phone,
+      'operator': operator,
+    });
+  }
+
+  /// Mes recharges et retraits automatiques : { deposits, withdrawals, balance }.
+  static Future<Map<String, dynamic>> sebpayMine() {
+    return _call('sebpayMine', <String, dynamic>{});
   }
 
   /// Recharge / retrait manuels par code marchand Orange Money.
