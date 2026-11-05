@@ -570,7 +570,10 @@ class _DiceTableState extends State<_DiceTable>
             if (widget.stake > 0 && w.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                tie
+                tie && w.length == widget.scores.length
+                    ? tr('Égalité : mises remboursées, aucune commission.',
+                        'Draw: stakes refunded, no commission.')
+                    : tie
                     ? tr('Cagnotte partagée : ${Wallet.format(share)} chacun',
                         'Pot shared: ${Wallet.format(share)} each')
                     : tr('Gain : ${Wallet.format(share)}',
