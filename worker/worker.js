@@ -705,6 +705,7 @@ function winnersFor(col, d, uids) {
   if (col === 'songo') return songoWinners(d, uids);
   return ludoWinners(d, uids);
 }
+
 // ======================================================================
 // Les fonctions (mêmes noms que les anciennes Cloud Functions)
 // ======================================================================
@@ -818,6 +819,10 @@ async function payStake({ uid, data, env }) {
   const gameId = idOf(data);
   const announce = await runTx(env, async (tx) => {
     const g = await locate(tx, gameId);
+    if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    const d = g.data;
+
+    const players = playersOf(d);
     if (!players.some((p) => p.uid === uid)) {
       throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
     }
@@ -860,6 +865,53 @@ async function payStake({ uid, data, env }) {
     if (d.hostUid === uid && d.private !== true && players.length === 1 && paid.length === 0) {
       return {
         col: g.col,
+        host: typeof d.hostName === 'string' ? d.hostName : '',
+        stake,
+      };
+    }
+    return null;
+  });
+  if (announce) await pushNewGame(env, uid, announce);
+  return { ok: true };
+}
+
+// ======================================================================
+// Notifications push (version web) : « Nouvelle partie »
+// ======================================================================
+
+const GAME_LABELS = { games: 'Ludo', deuxdes: 'Deux dés', songo: 'Songô', damier: 'Damier' };
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', te.encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Le joueur active (enabled = true) ou coupe (false) les notifications
+ *  sur cet appareil. data : { token, enabled } */
+async function setPush({ uid, data, env }) {
+  const token = typeof data.token === 'string' ? data.token.trim() : '';
+  if (token.length < 20 || token.length > 4096) {
+    throw new HttpError('invalid-argument', 'Jeton de notification invalide.');
+  }
+  const id = (await sha256Hex(token)).slice(0, 40);
+  await runTx(env, async (tx) => {
+    if (data.enabled === false) {
+      tx.delete(`pushTokens/${id}`);
+    } else {
+      tx.write(`pushTokens/${id}`, { set: { uid, token }, serverTime: ['createdAt'] });
+    }
+  });
+  return { ok: true };
+}
+
+/** Envoie « Nouvelle partie » à tous les appareils inscrits, sauf au créateur. */
+async function pushNewGame(env, hostUid, info) {
+  try {
+    const docs = await queryDocs(env, 'pushTokens', undefined, 300);
+    const targets = docs.filter((x) => x.uid !== hostUid && typeof x.token === 'string');
+    if (!targets.length) return;
+    const access = await accessToken(env, 'https://www.googleapis.com/auth/firebase.messaging');
+    const label = GAME_LABELS[info.col] || 'Katika';
     const who = info.host || 'Un joueur';
     const title = `🎲 Nouvelle partie de ${label}`;
     const body = info.stake > 0
@@ -902,6 +954,135 @@ function capFeeOf(d) {
 /** Capture payante (Ludo en ligne) : le montant fixé à la création de la
  *  partie passe du solde du joueur capturé à celui du joueur qui capture
  *  (au plus ce que le joueur capturé possède). Chaque capture n'est payée
+ *  qu'une fois (eventId) et leur nombre est plafonné par le nombre de coups
+ *  joués dans la partie. */
+async function captureFee({ uid, data, env }) {
+  const gameId = idOf(data);
+  const capturer = typeof data.capturerUid === 'string' ? data.capturerUid : '';
+  const victim = typeof data.victimUid === 'string' ? data.victimUid : '';
+  const eventId = typeof data.eventId === 'string' ? data.eventId : '';
+  if (!gameId || !capturer || !victim || capturer === victim || !/^[A-Za-z0-9]{6,48}$/.test(eventId)) {
+    throw new HttpError('invalid-argument', 'Capture invalide.');
+  }
+  return runTx(env, async (tx) => {
+    // Partie en ligne (games) ou en présentiel (localGames).
+    let g = await locate(tx, gameId);
+    let local = false;
+    if (!g) {
+      const ld = await tx.get(`localGames/${gameId}`);
+      if (ld) {
+        g = { path: `localGames/${gameId}`, data: ld, col: 'localGames' };
+        local = true;
+      }
+    }
+    if (!g || (!local && g.col !== 'games')) {
+      throw new HttpError('not-found', "Cette partie n'existe plus.");
+    }
+    const d = g.data;
+    if (local && (d.hostUid !== uid || d.settled === true)) {
+      throw new HttpError('permission-denied', 'Seul le joueur principal peut déclarer une capture.');
+    }
+    const uids = Array.isArray(d.uids) ? d.uids : [];
+    if (!uids.includes(uid) || !uids.includes(capturer) || !uids.includes(victim)) {
+      throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
+    }
+    if (d.status !== 'playing') {
+      throw new HttpError('failed-precondition', "La partie n'est pas en cours.");
+    }
+    const fee = capFeeOf(d);
+    if (fee <= 0) return { amount: 0 };
+
+    const evPath = `${g.path}/captures/${eventId}`;
+    const done = await tx.get(evPath);
+    if (done) return { amount: intOr(done.amount, 0), eliminated: done.eliminated === true };
+
+    // Plafond : un coup capturant = au moins 2 mises à jour de la partie.
+    const metaPath = `${g.path}/captures/meta`;
+    const meta = await tx.get(metaPath);
+    const count = intOr(meta && meta.count, 0);
+    const cap = local ? 300 : Math.floor(intOr(d.rev, 0) / 2) + 2;
+    if (count + 1 > cap) {
+      throw new HttpError('failed-precondition', 'Trop de captures pour cette partie.');
+    }
+
+    const v = await tx.get(`users/${victim}`);
+    const c = await tx.get(`users/${capturer}`);
+    if (!c) throw new HttpError('not-found', 'Compte introuvable.');
+    const amount = Math.max(0, Math.min(fee, balanceOf(v)));
+    // Le capturé n'a pas assez pour payer toute la capture : il perd la partie.
+    const eliminated = balanceOf(v) < fee;
+
+    tx.write(evPath, {
+      create: true,
+      set: { amount, capturer, victim, eliminated },
+      serverTime: ['createdAt'],
+    });
+    tx.write(metaPath, { incr: { count: 1 } });
+    if (amount > 0) {
+      tx.write(`users/${victim}`, { incr: { balance: -amount } });
+      tx.write(`users/${capturer}`, { incr: { balance: amount } });
+    }
+    return { amount, eliminated };
+  });
+}
+
+/** Le créateur lance la partie quand il le veut, dès 2 joueurs, même si la
+ *  salle n'est pas pleine (4 places, 1 seul joueur arrivé : il lance à 2).
+ *  Tous les joueurs présents doivent avoir validé leur mise. Le nombre de
+ *  places devient le nombre de joueurs réellement présents. */
+async function startGame({ uid, data, env }) {
+  const gameId = idOf(data);
+  return runTx(env, async (tx) => {
+    const g = await locate(tx, gameId);
+    if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    const d = g.data;
+    if (d.hostUid !== uid) {
+      throw new HttpError('permission-denied', 'Seul le créateur peut lancer la partie.');
+    }
+    if (d.status === 'playing') return { started: true };
+    if (d.status !== 'waiting') {
+      throw new HttpError('failed-precondition', 'Cette partie ne peut plus être lancée.');
+    }
+    const players = playersOf(d);
+    const paid = Array.isArray(d.paid) ? d.paid : [];
+    if (players.length < 2) {
+      throw new HttpError('failed-precondition', 'Il faut au moins 2 joueurs pour lancer la partie.');
+    }
+    const unpaid = players.filter((p) => !paid.includes(p.uid));
+    if (unpaid.length > 0) {
+      throw new HttpError(
+        'failed-precondition',
+        `${unpaid.map((p) => p.name || 'Un joueur').join(', ')} n'a pas encore validé sa mise.`,
+      );
+    }
+    const set = { status: 'playing', maxPlayers: players.length };
+    if (g.col === 'games' && d.teamMode === true) {
+      const partners = Array.isArray(d.partners) ? d.partners : [];
+      const ready = players.length === 4 && partners.length === 4 && partners.every((p) => p !== -1);
+      if (!ready) {
+        if (players.length < 4) set.teamMode = false;
+        else throw new HttpError('failed-precondition', 'Forme les binômes avant de lancer la partie.');
+      }
+    }
+    tx.write(g.path, { set, serverTime: ['startedAt'] });
+    return { started: true, players: players.length };
+  });
+}
+
+/** Quitte une salle d'attente : mise remboursée. L'hôte annule la partie et
+ *  tout le monde est remboursé. */
+async function leaveGame({ uid, data, env }) {
+  const gameId = idOf(data);
+  await runTx(env, async (tx) => {
+    const g = await locate(tx, gameId);
+    if (!g) return;
+    const d = g.data;
+    if (d.status !== 'waiting') return; // en cours : on abandonne dans le jeu
+
+    const players = playersOf(d);
+    const paid = Array.isArray(d.paid) ? d.paid : [];
+    const stake = Math.max(0, intOr(d.stake, 0));
+    const isHost = d.hostUid === uid;
     if (!isHost && !players.some((p) => p.uid === uid)) return;
 
     if (isHost) {
@@ -945,6 +1126,165 @@ function recordStats(tx, participants, winners, stake, pot, percent, jackpot) {
       : 0;
   for (const u of all) {
     const isWin = win.has(u);
+    tx.write(`users/${u}`, {
+      incr: {
+        statPlayed: 1,
+        statStaked: stake > 0 ? stake : 0,
+        ...(isWin
+          ? { statWon: 1, statWonAmt: prizeShare }
+          : { statLost: 1, statLostAmt: stake > 0 ? stake : 0 }),
+      },
+    });
+  }
+}
+
+/** Administrateur : ajoute aux statistiques des joueurs les parties EN LIGNE
+ *  terminées avant la date `before` (ISO) et pas encore comptées. À relancer
+ *  tant que `remaining` > 0. Les parties en présentiel ne peuvent pas être
+ *  reprises (leurs gagnants n'avaient pas été enregistrés). Chaque partie
+ *  traitée reçoit le marqueur statsBackfilled : aucun double comptage. */
+async function adminBackfillStats({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const before = typeof data.before === 'string' ? data.before : '';
+  if (!before || Number.isNaN(Date.parse(before))) {
+    throw new HttpError('invalid-argument', 'Date invalide.');
+  }
+  const maxGames = Math.min(400, Math.max(40, intOr(data.max, 200)));
+
+  const todo = [];
+  for (const col of ONLINE_COLLECTIONS) {
+    const list = await queryDocs(env, col, eqFilter('settled', true), 1000);
+    for (const g of list) {
+      if (g.statsBackfilled === true || g.refunded === true) continue;
+      if (typeof g.createdAt !== 'string' || g.createdAt >= before) continue;
+      todo.push({ path: `${col}/${g.id}`, col });
+    }
+  }
+
+  const batch = todo.slice(0, maxGames);
+  let counted = 0;
+  for (let i = 0; i < batch.length; i += 40) {
+    const chunk = batch.slice(i, i + 40);
+    counted += await runTx(env, async (tx) => {
+      let n = 0;
+      for (const item of chunk) {
+        const g = await tx.get(item.path);
+        if (!g || g.settled !== true || g.statsBackfilled === true || g.refunded === true) continue;
+        const uids = playersOf(g).map((p) => p.uid);
+        const paid = Array.isArray(g.paid) ? g.paid : [];
+        const stake = Math.max(0, intOr(g.stake, 0));
+        const pot = Math.max(0, intOr(g.pot, 0));
+        let winners = winnersFor(item.col, g, uids);
+        if (stake > 0) winners = winners.filter((u) => paid.includes(u));
+        if (winners.length > 0) {
+          recordStats(tx, paid.length ? paid : uids, winners, stake, pot, COMMISSION_PERCENT, intOr(g.jackpot, 0));
+          n++;
+        }
+        tx.write(item.path, { set: { statsBackfilled: true } });
+      }
+      return n;
+    });
+  }
+  return { counted, processed: batch.length, remaining: Math.max(0, todo.length - batch.length) };
+}
+
+/** Administrateur : tous les joueurs inscrits avec leurs statistiques. */
+async function adminPlayers({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const limit = Math.min(2000, Math.max(50, intOr(data.limit, 1000)));
+  const res = await fsCall(env, 'runQuery', {
+    structuredQuery: { from: [{ collectionId: 'users' }], limit },
+  });
+  const players = (Array.isArray(res) ? res : [])
+    .filter((r) => r.document)
+    .map((r) => {
+      const id = r.document.name.split('/').pop();
+      const u = fieldsToObj(r.document.fields || {});
+      const played = intOr(u.statPlayed, 0);
+      const won = intOr(u.statWon, 0);
+      return {
+        uid: id,
+        pseudo: typeof u.pseudo === 'string' ? u.pseudo : '',
+        balance: balanceOf(u),
+        createdAt: typeof u.createdAt === 'string' ? u.createdAt : null,
+        played,
+        won,
+        lost: intOr(u.statLost, 0),
+        staked: intOr(u.statStaked, 0),
+        wonAmt: intOr(u.statWonAmt, 0),
+        lostAmt: intOr(u.statLostAmt, 0),
+        winRate: played > 0 ? Math.floor((won * 1000) / played) / 10 : 0,
+        partner: u.partner === true,
+      };
+    })
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return { players, total: players.length };
+}
+
+async function settleGame({ uid, data, env }) {
+  const gameId = idOf(data);
+  return runTx(env, async (tx) => {
+    const g = await locate(tx, gameId);
+    if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    const d = g.data;
+
+    const uids = playersOf(d).map((p) => p.uid);
+    if (!uids.includes(uid)) {
+      throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
+    }
+    if (d.settled === true) return { jackpot: intOr(d.jackpot, 0) };
+    if (d.over !== true) {
+      throw new HttpError('failed-precondition', "La partie n'est pas terminée.");
+    }
+
+    const stake = Math.max(0, intOr(d.stake, 0));
+    const pot = Math.max(0, intOr(d.pot, 0));
+    const paid = Array.isArray(d.paid) ? d.paid : [];
+
+    let winners = winnersFor(g.col, d, uids);
+    if (stake > 0) winners = winners.filter((u) => paid.includes(u));
+
+    // Aucun gagnant, ou égalité entre tous les joueurs : chacun récupère sa
+    // mise en entier, sans aucune commission.
+    const allTie = stake > 0 && paid.length >= 2 && winners.length === paid.length;
+    if (winners.length === 0 || allTie) {
+      refund(tx, paid, stake);
+      tx.write(g.path, {
+        set: {
+          settled: true,
+          jackpot: 0,
+          status: 'finished',
+          commission: 0,
+          refunded: true,
+          referralPaid: 0,
+          partnerPaid: 0,
+        },
+      });
+      return { jackpot: 0 };
+    }
+
+    const { jackpot, referral, partner, house } = await payOut(tx, {
+      stake,
+      pot,
+      winners,
+      participants: paid,
+      gameId,
+      mode: 'online',
+    });
+    recordStats(tx, paid.length ? paid : uids, winners, stake, pot, COMMISSION_PERCENT, jackpot);
+    await houseAdd(tx, house);
+    const commission = stake > 0 && pot > 0 ? pot - prizeOf(pot) : 0;
+    tx.write(g.path, {
+      set: {
+        settled: true,
+        jackpot,
+        status: 'finished',
+        commission,
+        referralPaid: referral,
+        partnerPaid: partner,
+      },
+    });
+    return { jackpot };
   });
 }
 
@@ -988,6 +1328,77 @@ async function startLocalGame({ uid: hostUid, data, env }) {
       for (const u of uids) tx.write(`users/${u}`, { incr: { balance: -stake } });
     }
     tx.write(`localGames/${id}`, {
+      create: true,
+      set: {
+        hostUid,
+        uids,
+        names,
+        game,
+        stake,
+        capturePay,
+        pot: stake * uids.length,
+        status: 'playing',
+        settled: false,
+        jackpot: 0,
+      },
+      serverTime: ['createdAt'],
+    });
+  });
+  return { gameId: id, id, localId: id };
+}
+
+/** Fin d'une partie en présentiel : verse la cagnotte aux gagnants désignés
+ *  (commission de 5 %), règle les paris (Duel / Défi 7) avec les scores
+ *  envoyés par l'appli et renvoie le jackpot éventuel + le résumé des paris.
+ *  Les commissions (partie + paris) et la part des parrains sont enregistrées
+ *  pour le tableau de bord. */
+async function settleLocalGame({ uid, data, env }) {
+  const gameId = idOf(data);
+  const raw = data.winners || data.winnerUids || data.uids;
+  const asked = Array.isArray(raw) ? raw.map(String) : [];
+  const scores = Array.isArray(data.scores)
+    ? data.scores.map((x) => (typeof x === 'number' && Number.isFinite(x) ? x : null))
+    : [];
+  if (!gameId) throw new HttpError('invalid-argument', 'Partie inconnue.');
+
+  return runTx(env, async (tx) => {
+    const path = `localGames/${gameId}`;
+    const d = await tx.get(path);
+    if (!d) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    if (d.hostUid !== uid) {
+      throw new HttpError('permission-denied', 'Seul le joueur principal peut clore la partie.');
+    }
+    if (d.settled === true) {
+      return {
+        jackpot: intOr(d.jackpot, 0),
+        bets: Array.isArray(d.betsSummary) ? d.betsSummary : [],
+      };
+    }
+
+    const players = Array.isArray(d.uids) ? d.uids : [];
+    const winners = [...new Set(asked)].filter((u) => players.includes(u));
+    if (winners.length === 0) {
+      throw new HttpError('invalid-argument', 'Aucun gagnant valide.');
+    }
+
+    const stake = Math.max(0, intOr(d.stake, 0));
+    const pot = Math.max(0, intOr(d.pot, 0));
+    const bets = await loadLocalBets(tx, gameId);
+    // Égalité entre tous les joueurs : les mises sont rendues, sans commission.
+    const allTie = stake > 0 && players.length >= 2 && winners.length === players.length;
+    let jackpot = 0;
+    let referral = 0;
+    let partner = 0;
+    let house = 0;
+    if (allTie) {
+      refund(tx, players, stake);
+    } else {
+      const r = await payOut(tx, {
+        stake,
+        pot,
+        winners,
+        percent: COMMISSION_LOCAL_PERCENT,
+        participants: players,
         gameId,
         mode: 'local',
       });
