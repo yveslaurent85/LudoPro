@@ -102,6 +102,25 @@ class DamierEngine {
     return b;
   }
 
+  /// Plateau de départ avec handicap : [n] pions retirés au joueur [seat]
+  /// (en commençant par le fond de son camp). seat < 0 ou n <= 0 : aucun.
+  static List<int> initialH(int seat, int n) {
+    final b = initial();
+    if (seat < 0 || n <= 0) return b;
+    int left = min(n, 19);
+    final rows = seat == 0 ? [9, 8, 7, 6] : [0, 1, 2, 3];
+    for (final r in rows) {
+      for (int c = 0; c < 10 && left > 0; c++) {
+        final p = b[r * 10 + c];
+        if (p != 0 && owner(p) == seat) {
+          b[r * 10 + c] = 0;
+          left--;
+        }
+      }
+    }
+    return b;
+  }
+
   /// Toutes les rafles possibles pour la pièce en [from].
   static List<DMove> _captures(List<int> board, int from) {
     final piece = board[from];
@@ -242,7 +261,8 @@ class DamierEngine {
 }
 
 class DamierGame {
-  DamierGame() : board = DamierEngine.initial() {
+  DamierGame({int hSeat = -1, int hN = 0})
+      : board = DamierEngine.initialH(hSeat, hN) {
     hist = [DamierEngine.hash(board, 0)];
   }
 
@@ -877,29 +897,40 @@ String _dFmtClock(int ms) {
   return '$m:${r < 10 ? '0' : ''}$r';
 }
 
-/// Choix du temps : 1 à 10 minutes par joueur, bonus de 0 à 5 s par coup.
+/// Choix du temps : 1 à 10 minutes pour chaque joueur (temps différents
+/// possibles), bonus de 0 à 5 s par coup.
 Widget _dClockPicker({
   required int timeMin,
+  required int timeOpp,
   required int incSec,
   required ValueChanged<int> onMin,
+  required ValueChanged<int> onOpp,
   required ValueChanged<int> onInc,
+  String labelMe = '',
+  String labelOpp = '',
 }) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _dLabel(tr('⏱️ Temps par joueur', '⏱️ Time per player')),
-      Wrap(
+  final me = labelMe.isEmpty ? tr('Mon temps', 'My time') : labelMe;
+  final opp =
+      labelOpp.isEmpty ? tr("Temps de l'adversaire", "Opponent's time") : labelOpp;
+  Widget minutes(int cur, ValueChanged<int> on) => Wrap(
         spacing: 8,
         children: [
           for (int m = 1; m <= 10; m++)
             ChoiceChip(
               label: Text('$m min'),
-              selected: timeMin == m,
+              selected: cur == m,
               selectedColor: _dGold,
-              onSelected: (_) => onMin(m),
+              onSelected: (_) => on(m),
             ),
         ],
-      ),
+      );
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _dLabel('⏱️ $me'),
+      minutes(timeMin, onMin),
+      _dLabel('⏱️ $opp'),
+      minutes(timeOpp, onOpp),
       _dLabel(tr('➕ Bonus après chaque coup', '➕ Bonus after each move')),
       Wrap(
         spacing: 8,
@@ -915,6 +946,170 @@ Widget _dClockPicker({
       ),
     ],
   );
+}
+
+/// Fréquences possibles de la règle du nul : [numérateur, dénominateur].
+const List<List<int>> _kDrawFreqs = [
+  [1, 1],
+  [1, 2],
+  [1, 3],
+  [1, 4],
+  [2, 3],
+];
+
+String _dFreqText(int nn, int dd) {
+  if (dd <= 1) return tr('à chaque nul', 'on every draw');
+  return tr('tirage au sort : $nn chance${nn > 1 ? 's' : ''} sur $dd',
+      'random draw: $nn chance${nn > 1 ? 's' : ''} in $dd');
+}
+
+/// Handicap (pions en moins) et règle du nul, choisis par le créateur.
+Widget _dRulesPicker({
+  required int hSeat,
+  required int hN,
+  required int drawSeat,
+  required int drawNum,
+  required int drawDen,
+  required ValueChanged<int> onHSeat,
+  required ValueChanged<int> onHN,
+  required ValueChanged<int> onDrawSeat,
+  required void Function(int, int) onFreq,
+  String labelMe = '',
+  String labelOpp = '',
+}) {
+  final me = labelMe.isEmpty ? tr('Moi', 'Me') : labelMe;
+  final opp = labelOpp.isEmpty ? tr('Mon adversaire', 'My opponent') : labelOpp;
+  Widget seatChips(int cur, String none, ValueChanged<int> on) => Wrap(
+        spacing: 8,
+        children: [
+          ChoiceChip(
+            label: Text(none),
+            selected: cur < 0,
+            selectedColor: _dGold,
+            onSelected: (_) => on(-1),
+          ),
+          ChoiceChip(
+            label: Text(me),
+            selected: cur == 0,
+            selectedColor: _dGold,
+            onSelected: (_) => on(0),
+          ),
+          ChoiceChip(
+            label: Text(opp),
+            selected: cur == 1,
+            selectedColor: _dGold,
+            onSelected: (_) => on(1),
+          ),
+        ],
+      );
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _dLabel(tr('🎁 Handicap : qui joue avec des pions en moins ?',
+          '🎁 Handicap: who plays with fewer pieces?')),
+      seatChips(hSeat, tr('Personne', 'Nobody'), onHSeat),
+      if (hSeat >= 0) ...[
+        _dLabel(tr('Nombre de pions en moins', 'Number of pieces fewer')),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (int n = 1; n <= 8; n++)
+              ChoiceChip(
+                label: Text('−$n'),
+                selected: hN == n,
+                selectedColor: _dGold,
+                onSelected: (_) => onHN(n),
+              ),
+          ],
+        ),
+      ],
+      _dLabel(tr('🤝 En cas de nul, qui gagne ?',
+          '🤝 On a draw, who wins?')),
+      seatChips(drawSeat, tr('Personne (mises rendues)', 'Nobody (stakes refunded)'),
+          onDrawSeat),
+      if (drawSeat >= 0) ...[
+        _dLabel(tr('Fréquence', 'Frequency')),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final f in _kDrawFreqs)
+              ChoiceChip(
+                label: Text(f[1] == 1
+                    ? tr('Tous les nuls', 'Every draw')
+                    : '${f[0]}/${f[1]}'),
+                selected: drawNum == f[0] && drawDen == f[1],
+                selectedColor: _dGold,
+                onSelected: (_) => onFreq(f[0], f[1]),
+              ),
+          ],
+        ),
+      ],
+    ],
+  );
+}
+
+/// Résumé des règles d'une partie en ligne (une ligne par règle).
+String _dRulesLine(Map<String, dynamic> d, {List<String>? names}) {
+  final parts = <String>[];
+  final host = '${d['hostName'] ?? tr('Créateur', 'Host')}';
+  final opp = tr("l'adversaire", 'the opponent');
+  String who(int s) => s == 0
+      ? host
+      : ((names != null && names.length > 1 && names[1] != '?')
+          ? names[1]
+          : opp);
+  final t0 = (d['timeMin'] as num?)?.toInt();
+  final t1 = (d['timeMinOpp'] as num?)?.toInt() ?? t0;
+  if (t0 != null) {
+    parts.add(t0 == t1
+        ? '⏱️ $t0 min'
+        : '⏱️ ${who(0)} $t0 min · ${who(1)} $t1 min');
+  }
+  final hs = (d['hSeat'] as num?)?.toInt() ?? -1;
+  final hn = (d['hN'] as num?)?.toInt() ?? 0;
+  if (hs >= 0 && hn > 0) {
+    parts.add(tr('🎁 ${who(hs)} joue avec $hn pion${hn > 1 ? 's' : ''} de moins',
+        '🎁 ${who(hs)} plays with $hn fewer piece${hn > 1 ? 's' : ''}'));
+  }
+  final ds = (d['drawSeat'] as num?)?.toInt() ?? -1;
+  if (ds >= 0) {
+    final fn = (d['drawNum'] as num?)?.toInt() ?? 1;
+    final fd = (d['drawDen'] as num?)?.toInt() ?? 1;
+    parts.add(tr('🤝 En cas de nul, ${who(ds)} gagne (${_dFreqText(fn, fd)})',
+        '🤝 On a draw, ${who(ds)} wins (${_dFreqText(fn, fd)})'));
+  }
+  return parts.join('\n');
+}
+
+/// Vrai si la partie a des règles spéciales (handicap, nul, temps différents).
+bool _dSpecialRules(Map<String, dynamic> d) {
+  final t0 = (d['timeMin'] as num?)?.toInt();
+  final t1 = (d['timeMinOpp'] as num?)?.toInt() ?? t0;
+  final handicap = ((d['hSeat'] as num?)?.toInt() ?? -1) >= 0 &&
+      ((d['hN'] as num?)?.toInt() ?? 0) > 0;
+  final drawRule = ((d['drawSeat'] as num?)?.toInt() ?? -1) >= 0;
+  return handicap || drawRule || t0 != t1;
+}
+
+/// Phrase sur le résultat de la règle du nul (null = pas de règle).
+String? _dDrawNote(Map<String, dynamic> d, List<String> names, bool draw) {
+  final ds = (d['drawSeat'] as num?)?.toInt() ?? -1;
+  if (ds < 0 || ds > 1) return null;
+  final fn = (d['drawNum'] as num?)?.toInt() ?? 1;
+  final fd = (d['drawDen'] as num?)?.toInt() ?? 1;
+  final f = _dFreqText(fn, fd);
+  if (d['drawRolled'] == true) {
+    return d['drawWon'] == true
+        ? tr('🎲 Règle du nul ($f) : ${names[ds]} gagne.',
+            '🎲 Draw rule ($f): ${names[ds]} wins.')
+        : tr('🎲 Règle du nul ($f) : pas de chance, le nul reste un nul.',
+            '🎲 Draw rule ($f): no luck, the draw stands.');
+  }
+  if (draw) {
+    return tr('🎲 Règle du nul ($f) : tirage au sort en cours…',
+        '🎲 Draw rule ($f): drawing lots…');
+  }
+  return null;
 }
 
 Widget _dLabel(String s) => Padding(
@@ -1195,8 +1390,10 @@ class _DResultPanel extends StatelessWidget {
     this.timeout = false,
     this.jackpot = 0,
     this.extra,
+    this.drawNote,
   });
 
+  final String? drawNote;
   final List<String> names;
   final List<int> counts;
   final List<int> winners;
@@ -1259,6 +1456,11 @@ class _DResultPanel extends StatelessWidget {
           if (_reasonText.isNotEmpty)
             Text(_reasonText,
                 style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          if (drawNote != null)
+            Text(drawNote!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: _dGold, fontSize: 13, fontWeight: FontWeight.w800)),
           Text(
             '${names[0]} ${counts[0]}  –  ${counts[1]} ${names[1]}',
             style: const TextStyle(color: Colors.white, fontSize: 16),
@@ -1411,7 +1613,13 @@ class _DamierLocalSetup extends StatefulWidget {
 class _DamierLocalSetupState extends State<_DamierLocalSetup> {
   int stake = Wallet.minStake;
   int timeMin = 5;
+  int timeOpp = 5;
   int incSec = 2;
+  int hSeat = -1; // joueur qui a des pions en moins (-1 = personne)
+  int hN = 2;
+  int drawSeat = -1; // joueur qui gagne en cas de nul (-1 = personne)
+  int drawNum = 1;
+  int drawDen = 1;
   bool starting = false;
   final Map<int, PlayerAccount> accounts = {};
   final List<TextEditingController> ctrls =
@@ -1605,7 +1813,13 @@ class _DamierLocalSetupState extends State<_DamierLocalSetup> {
           localId: localId,
           uids: uids,
           timeMin: timeMin,
+          timeMinOpp: timeOpp,
           incSec: incSec,
+          hSeat: hSeat,
+          hN: hSeat >= 0 ? hN : 0,
+          drawSeat: drawSeat,
+          drawNum: drawNum,
+          drawDen: drawDen,
         ),
       ),
     );
@@ -1641,9 +1855,29 @@ class _DamierLocalSetupState extends State<_DamierLocalSetup> {
           ],
           _dClockPicker(
             timeMin: timeMin,
+            timeOpp: timeOpp,
             incSec: incSec,
+            labelMe: tr('Temps des blancs', 'White time'),
+            labelOpp: tr('Temps des noirs', 'Black time'),
             onMin: (v) => setState(() => timeMin = v),
+            onOpp: (v) => setState(() => timeOpp = v),
             onInc: (v) => setState(() => incSec = v),
+          ),
+          _dRulesPicker(
+            hSeat: hSeat,
+            hN: hN,
+            drawSeat: drawSeat,
+            drawNum: drawNum,
+            drawDen: drawDen,
+            labelMe: tr('Blancs', 'White'),
+            labelOpp: tr('Noirs', 'Black'),
+            onHSeat: (v) => setState(() => hSeat = v),
+            onHN: (v) => setState(() => hN = v),
+            onDrawSeat: (v) => setState(() => drawSeat = v),
+            onFreq: (n, d) => setState(() {
+              drawNum = n;
+              drawDen = d;
+            }),
           ),
           _dLabel(firebaseReady
               ? tr('Joueurs (chacun se connecte à son compte)',
@@ -1700,7 +1934,13 @@ class _DamierLocalGame extends StatefulWidget {
     this.localId,
     this.uids = const [],
     this.timeMin = 5,
+    this.timeMinOpp = 5,
     this.incSec = 2,
+    this.hSeat = -1,
+    this.hN = 0,
+    this.drawSeat = -1,
+    this.drawNum = 1,
+    this.drawDen = 1,
   });
 
   final List<String> names;
@@ -1708,28 +1948,57 @@ class _DamierLocalGame extends StatefulWidget {
   final String? localId;
   final List<String?> uids;
   final int timeMin;
+  final int timeMinOpp;
   final int incSec;
+  final int hSeat;
+  final int hN;
+  final int drawSeat;
+  final int drawNum;
+  final int drawDen;
 
   @override
   State<_DamierLocalGame> createState() => _DamierLocalGameState();
 }
 
 class _DamierLocalGameState extends State<_DamierLocalGame> {
-  DamierGame g = DamierGame();
+  late DamierGame g = DamierGame(hSeat: widget.hSeat, hN: widget.hN);
   bool _settled = false;
   int _tries = 0;
   int jackpot = 0;
   bool _flip = false;
   int _doneMove = 0;
-  final Map<int, List<int>> _countsAt = {
-    0: [20, 20],
+  late final Map<int, List<int>> _countsAt = {
+    0: [g.count(0), g.count(1)],
   };
+  bool _drawRolled = false;
+  bool _drawWon = false;
+
+  /// Règle du nul (présentiel) : tirage au sort sur place, une seule fois.
+  void _resolveDraw() {
+    if (_drawRolled || !g.over || g.winners.length != 2) return;
+    if (widget.drawSeat < 0 || widget.drawSeat > 1) return;
+    if (_lostBy >= 0) return;
+    _drawRolled = true;
+    final den = widget.drawDen < 1 ? 1 : widget.drawDen;
+    _drawWon = Random().nextInt(den) < widget.drawNum;
+    if (_drawWon) g.winners = [widget.drawSeat];
+  }
+
+  String? get _drawNote {
+    if (widget.drawSeat < 0 || !_drawRolled) return null;
+    final f = _dFreqText(widget.drawNum, widget.drawDen);
+    return _drawWon
+        ? tr('🎲 Règle du nul ($f) : ${widget.names[widget.drawSeat]} gagne.',
+            '🎲 Draw rule ($f): ${widget.names[widget.drawSeat]} wins.')
+        : tr('🎲 Règle du nul ($f) : pas de chance, le nul reste un nul.',
+            '🎲 Draw rule ($f): no luck, the draw stands.');
+  }
 
   bool get _busy => g.moveN != _doneMove;
   bool get _overShown => g.over && !_busy;
 
   // --- Horloges (temps par joueur + bonus par coup) -----------------------
-  late final List<int> _clock = [widget.timeMin * 60000, widget.timeMin * 60000];
+  late final List<int> _clock = [widget.timeMin * 60000, widget.timeMinOpp * 60000];
   DateTime _turnStart = DateTime.now();
   Timer? _ticker;
   int _lostBy = -1;
@@ -1798,6 +2067,7 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
   void _settledMove(int m) {
     if (!mounted) return;
     _turnStart = DateTime.now();
+    if (g.over && g.moveN == m) _resolveDraw();
     setState(() => _doneMove = m);
     if (g.over && g.moveN == m) _settle();
   }
@@ -1978,6 +2248,7 @@ class _DamierLocalGameState extends State<_DamierLocalGame> {
                         reason: g.reason,
                         forfeit: _lostBy,
                         timeout: _timedOut,
+                        drawNote: _drawNote,
                         jackpot: jackpot,
                         extra: Padding(
                           padding: const EdgeInsets.only(top: 10),
@@ -2015,8 +2286,14 @@ class _DamierHub extends StatefulWidget {
 
 class _DamierHubState extends State<_DamierHub> {
   int stake = Wallet.minStake;
-  int timeMin = 5; // temps de réflexion de chaque joueur (minutes)
+  int timeMin = 5; // mon temps de réflexion (minutes)
+  int timeOpp = 5; // temps de l'adversaire (minutes)
   int incSec = 2; // secondes ajoutées après chaque coup
+  int hSeat = -1; // qui joue avec des pions en moins (-1 personne, 0 moi, 1 adversaire)
+  int hN = 2; // nombre de pions en moins
+  int drawSeat = -1; // qui gagne en cas de nul (-1 personne)
+  int drawNum = 1; // fréquence du nul : drawNum / drawDen
+  int drawDen = 1;
   bool privateRoom = false;
   bool busy = false;
   String? error;
@@ -2071,7 +2348,7 @@ class _DamierHubState extends State<_DamierHub> {
         return;
       }
       final ref = _dRooms.doc();
-      final init = DamierGame();
+      final init = DamierGame(hSeat: hSeat, hN: hSeat >= 0 ? hN : 0);
       await ref.set({
         'hostUid': user.uid,
         'hostName': _dUserName(user),
@@ -2088,8 +2365,14 @@ class _DamierHubState extends State<_DamierHub> {
         'uids': [user.uid],
         'miss': [0, 0],
         'timeMin': timeMin,
+        'timeMinOpp': timeOpp,
         'incSec': incSec,
-        'clockMs': [timeMin * 60000, timeMin * 60000],
+        'clockMs': [timeMin * 60000, timeOpp * 60000],
+        'hSeat': hSeat,
+        'hN': hSeat >= 0 ? hN : 0,
+        'drawSeat': drawSeat,
+        'drawNum': drawNum,
+        'drawDen': drawDen,
         ...init.toDoc(),
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -2127,6 +2410,27 @@ class _DamierHubState extends State<_DamierHub> {
       final ref = _dRooms.doc(id);
       final pre = await ref.get();
       final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      final pd = pre.data();
+      if (pd != null && _dSpecialRules(pd) && !_dPlayersOf(pd).any((p) => p['uid'] == user.uid)) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(tr('Règles de cette partie', 'Rules of this game')),
+            content: Text(_dRulesLine(pd)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: Text(tr('Refuser', 'Decline')),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: Text(tr('Accepter et rejoindre', 'Accept and join')),
+              ),
+            ],
+          ),
+        );
+        if (ok != true || !mounted) return;
+      }
       if (pre.exists && need > 0 && await _myBalance() < need) {
         if (mounted) {
           setState(() => error = tr(
@@ -2337,7 +2641,8 @@ class _DamierHubState extends State<_DamierHub> {
               _tile(
                 tr("Partie de ${doc.data()['hostName']}",
                     "${doc.data()['hostName']}'s game"),
-                '${_dPlayersOf(doc.data()).length}/2${_dStakeText(doc.data())}',
+                '${_dPlayersOf(doc.data()).length}/2${_dStakeText(doc.data())}'
+                '${_dSpecialRules(doc.data()) ? '\n${_dRulesLine(doc.data()).replaceAll('\n', ' · ')}' : ''}',
                 tr('Rejoindre', 'Join'),
                 busy ? null : () => _join(doc.id),
               ),
@@ -2421,9 +2726,25 @@ class _DamierHubState extends State<_DamierHub> {
           ),
           _dClockPicker(
             timeMin: timeMin,
+            timeOpp: timeOpp,
             incSec: incSec,
             onMin: (v) => setState(() => timeMin = v),
+            onOpp: (v) => setState(() => timeOpp = v),
             onInc: (v) => setState(() => incSec = v),
+          ),
+          _dRulesPicker(
+            hSeat: hSeat,
+            hN: hN,
+            drawSeat: drawSeat,
+            drawNum: drawNum,
+            drawDen: drawDen,
+            onHSeat: (v) => setState(() => hSeat = v),
+            onHN: (v) => setState(() => hN = v),
+            onDrawSeat: (v) => setState(() => drawSeat = v),
+            onFreq: (n, d) => setState(() {
+              drawNum = n;
+              drawDen = d;
+            }),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -2901,6 +3222,28 @@ class _DamierRoomState extends State<_DamierRoom> {
               fontWeight: FontWeight.w800,
             ),
           ),
+          if (_dRulesLine(d, names: [
+            for (int i = 0; i < 2; i++)
+              i < players.length ? '${players[i]['name']}' : '?',
+          ]).isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: Colors.black26,
+                border: Border.all(color: _dGold, width: 1.2),
+              ),
+              child: Text(
+                _dRulesLine(d, names: [
+                  for (int i = 0; i < 2; i++)
+                    i < players.length ? '${players[i]['name']}' : '?',
+                ]),
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700, height: 1.5),
+              ),
+            ),
           if (!paid.contains(uid))
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -3265,6 +3608,7 @@ class _DamierRoomState extends State<_DamierRoom> {
                             reason: g.reason,
                             forfeit: forfeit,
                             timeout: d['timeout'] == true,
+                            drawNote: _dDrawNote(d, names, g.winners.length != 1),
                             jackpot: _jackpotShown,
                             extra: Padding(
                               padding: const EdgeInsets.only(top: 10),
