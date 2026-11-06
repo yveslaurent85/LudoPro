@@ -4,7 +4,6 @@ import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, ValueListenable;
 import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
@@ -681,12 +680,12 @@ class _SongoBoardViewState extends State<SongoBoardView> {
 /// Le Songô se joue en mode paysage (plateau plus grand) ; l'icône de
 /// rotation permet de revenir en portrait.
 class SongoOrient {
-  /// true = affichage paysage (plateau plus grand). Sur mobile le téléphone est
-  /// verrouillé en paysage ; sur le web (PWA), où le verrouillage n'existe pas,
-  /// l'écran de jeu est pivoté de 90° (voir [SongoRotateWrap]).
-  static final ValueNotifier<bool> landscapeN = ValueNotifier<bool>(true);
-  static bool get landscape => landscapeN.value;
-  static set landscape(bool v) => landscapeN.value = v;
+  /// Mode paysage voulu (toujours activé au lancement d'une partie). Sur le
+  /// PWA le navigateur refuse de verrouiller l'écran : dans ce cas le plateau
+  /// est tourné par l'appli elle-même (voir _SShell).
+  static final ValueNotifier<bool> mode = ValueNotifier<bool>(true);
+  static bool get landscape => mode.value;
+  static set landscape(bool v) => mode.value = v;
 
   static void apply() {
     try {
@@ -703,56 +702,27 @@ class SongoOrient {
   }
 }
 
-/// Sur le web, quand le téléphone est tenu en portrait, pivote l'écran de jeu
-/// de 90° pour obtenir la vue paysage (le joueur tourne simplement son
-/// téléphone). Dès que le téléphone passe en paysage, l'écran n'est plus pivoté.
-class SongoRotateWrap extends StatelessWidget {
-  const SongoRotateWrap({super.key, required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: SongoOrient.landscapeN,
-      builder: (context, land, _) {
-        final mq = MediaQuery.of(context);
-        final portrait = mq.size.height > mq.size.width;
-        if (!(kIsWeb && land && portrait)) return child;
-        final p = mq.padding;
-        return RotatedBox(
-          quarterTurns: 1,
-          child: MediaQuery(
-            data: mq.copyWith(
-              size: Size(mq.size.height, mq.size.width),
-              padding: EdgeInsets.fromLTRB(p.bottom, p.left, p.top, p.right),
-              viewPadding: EdgeInsets.zero,
-              viewInsets: EdgeInsets.zero,
-            ),
-            child: child,
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _RotateToggle extends StatelessWidget {
+class _RotateToggle extends StatefulWidget {
   const _RotateToggle();
 
   @override
+  State<_RotateToggle> createState() => _RotateToggleState();
+}
+
+class _RotateToggleState extends State<_RotateToggle> {
+  @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: SongoOrient.landscapeN,
-      builder: (context, land, _) => IconButton(
-        tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
-        onPressed: () {
-          SongoOrient.landscape = !land;
-          SongoOrient.apply();
-        },
-        icon: Icon(
-          land ? Icons.stay_current_portrait : Icons.stay_current_landscape,
-          color: Colors.white,
-        ),
+    return IconButton(
+      tooltip: tr('Pivoter l\'écran', 'Rotate the screen'),
+      onPressed: () {
+        setState(() => SongoOrient.landscape = !SongoOrient.landscape);
+        SongoOrient.apply();
+      },
+      icon: Icon(
+        SongoOrient.landscape
+            ? Icons.stay_current_portrait
+            : Icons.stay_current_landscape,
+        color: Colors.white,
       ),
     );
   }
@@ -854,20 +824,46 @@ class _ScoreBar extends StatelessWidget {
 }
 
 class _SShell extends StatelessWidget {
-  const _SShell({
-    required this.title,
-    required this.child,
-    this.trailing,
-    this.rotate = false,
-  });
+  const _SShell({required this.title, required this.child, this.trailing});
   final String title;
-  final bool rotate;
   final Widget child;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    final page = Scaffold(
+    // Le verrouillage de l'écran ne marche pas sur le PWA : si le mode paysage
+    // est voulu mais que l'écran reste en portrait, on tourne l'écran de jeu
+    // de 90° (il suffit alors de tourner le téléphone). Dès que l'écran passe
+    // en paysage (verrouillage réussi ou téléphone tourné), plus de rotation.
+    return ValueListenableBuilder<bool>(
+      valueListenable: SongoOrient.mode,
+      builder: (context, wantLandscape, _) {
+        final portrait =
+            MediaQuery.of(context).orientation == Orientation.portrait;
+        final inner = _scaffold(context);
+        if (!(wantLandscape && portrait)) return inner;
+        return Container(
+          decoration: _bg,
+          child: SafeArea(
+            child: RotatedBox(
+              quarterTurns: 1,
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                removeBottom: true,
+                removeLeft: true,
+                removeRight: true,
+                child: inner,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _scaffold(BuildContext context) {
+    return Scaffold(
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -903,7 +899,6 @@ class _SShell extends StatelessWidget {
         ),
       ),
     );
-    return rotate ? SongoRotateWrap(child: page) : page;
   }
 }
 
@@ -1490,6 +1485,7 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
   @override
   void initState() {
     super.initState();
+    SongoOrient.landscape = true; // rotation systématique au lancement
     SongoOrient.apply();
   }
 
@@ -1562,7 +1558,6 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
       },
       child: _SShell(
         title: 'Songô',
-        rotate: true,
         trailing: _gameActions(context),
         child: Stack(
           children: [
@@ -2499,7 +2494,10 @@ class _SongoRoomState extends State<_SongoRoom> {
         if (!_oriented) {
           _oriented = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) SongoOrient.apply();
+            if (mounted) {
+              SongoOrient.landscape = true; // rotation systématique
+              SongoOrient.apply();
+            }
           });
         }
         final g = SongoGame.fromDoc(d);
@@ -2562,7 +2560,6 @@ class _SongoRoomState extends State<_SongoRoom> {
           },
           child: _SShell(
             title: 'Songô',
-            rotate: true,
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
