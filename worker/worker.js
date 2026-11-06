@@ -26,8 +26,8 @@ const MIN_STAKE = 100; // mise minimale
 const MAX_STAKE = 250000; // mise maximale
 const MIN_CAPTURE = 100; // capture payante : montant minimum par pion
 const MAX_CAPTURE = 5000; // et maximum
-const COMMISSION_PERCENT = 6; // en ligne : part gardée par Katika sur la cagnotte (0-100)
-const COMMISSION_LOCAL_PERCENT = 6; // présentiel (Ludo, Deux dés et Songô)
+const COMMISSION_PERCENT = 5; // en ligne : part gardée par Katika sur la cagnotte (0-100)
+const COMMISSION_LOCAL_PERCENT = 5; // présentiel (Ludo, Deux dés et Songô)
 const TRANSFER_MIN = 25; // transfert de compte à compte
 const TRANSFER_MAX = 250000;
 const JACKPOT_ENABLED = false; // jackpot désactivé : toute la commission reste à Katika
@@ -389,7 +389,7 @@ function newId() {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
 
-/** Gain du gagnant : la cagnotte moins la commission (6 % en ligne et en présentiel). */
+/** Gain du gagnant : la cagnotte moins la commission (5 % en ligne et en présentiel). */
 function prizeOf(pot, percent = COMMISSION_PERCENT) {
   // percent peut avoir une décimale (ex. 7,5 %) : on calcule en dixièmes.
   return Math.floor((pot * (1000 - Math.round(percent * 10))) / 1000);
@@ -1382,7 +1382,7 @@ async function startLocalGame({ uid: hostUid, data, env }) {
 }
 
 /** Fin d'une partie en présentiel : verse la cagnotte aux gagnants désignés
- *  (commission de 6 %), règle les paris (Duel / Défi 7) avec les scores
+ *  (commission de 5 %), règle les paris (Duel / Défi 7) avec les scores
  *  envoyés par l'appli et renvoie le jackpot éventuel + le résumé des paris.
  *  Les commissions (partie + paris) et la part des parrains sont enregistrées
  *  pour le tableau de bord. */
@@ -1754,7 +1754,7 @@ async function sideBetSync({ uid, data, env }) {
 }
 
 // ======================================================================
-// Paris en présentiel (Deux dés, un seul téléphone) — commission 6 %
+// Paris en présentiel (Deux dés, un seul téléphone) — commission 5 %
 // ======================================================================
 // localGames/{id}/bets/{betId}      le pari
 // localGames/{id}/betMeta/index     { ids: [...] }
