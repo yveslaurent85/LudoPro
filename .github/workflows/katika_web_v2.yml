@@ -1,4 +1,3 @@
-
 name: Katika Web V2
 
 on:
@@ -35,7 +34,7 @@ jobs:
         run: flutter create . --platforms=web --project-name katika
 
       - name: Compiler Katika Web
-        run: flutter build web --release --base-href /katikagames-web/jouer/
+        run: flutter build web --release --base-href /jouer/
 
       - name: Sauvegarder les fichiers compilés
         uses: actions/upload-artifact@v4
@@ -47,37 +46,31 @@ jobs:
         if: env.SITE_TOKEN != ''
         run: |
           git clone https://x-access-token:${SITE_TOKEN}@github.com/yveslaurent85/katikagames-web.git site
-
           cd site
-
           git config user.name "katika-bot"
           git config user.email "bot@katika.local"
 
-          mkdir -p jouer
-
-          cp -r ../build/web/. jouer/
-
-          touch .nojekyll
-
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "Le site est déjà à jour."
-            exit 0
-          fi
-
-          git commit -m "Mise à jour de Katika Web"
-
+          # À chaque tentative on repart de l'état actuel du site et on recopie
+          # la version compilée : aucun conflit possible (le dossier jouer est
+          # entièrement régénéré).
           for attempt in 1 2 3 4 5; do
             echo "Tentative de publication $attempt"
 
             git fetch origin main
+            git reset --hard origin/main
 
-            if ! git rebase origin/main; then
-              echo "Conflit pendant le rebase."
-              git rebase --abort
-              exit 1
+            rm -rf jouer
+            mkdir -p jouer
+            cp -r ../build/web/. jouer/
+            touch .nojekyll
+
+            git add -A
+            if git diff --cached --quiet; then
+              echo "Le site est déjà à jour."
+              exit 0
             fi
+
+            git commit -m "Mise à jour de Katika Web"
 
             if git push origin HEAD:main; then
               echo "Publication de Katika réussie !"
