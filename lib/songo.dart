@@ -275,42 +275,245 @@ class SongoSound {
   static void pick() => play('songo_pick.wav', volume: 0.9);
 }
 
-/// Dessine les graines d'une case (dans une ellipse).
-class _SeedPainter extends CustomPainter {
-  _SeedPainter(this.n, this.salt);
+/// Nombre pseudo-aléatoire stable (toujours le même pour un même [n]).
+double _h(int n) {
+  final x = sin(n * 12.9898 + 78.233) * 43758.5453;
+  return x - x.floorToDouble();
+}
+
+/// Bois du plateau : dégradé chaud, veines, bord taillé et frise en zigzag
+/// gravée entre les deux rangées de cases.
+class _WoodPainter extends CustomPainter {
+  _WoodPainter(this.band);
+  final Rect band;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final r = RRect.fromRectAndRadius(rect, const Radius.circular(22));
+    canvas.save();
+    canvas.clipRRect(r);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFC48F55),
+            Color(0xFF9A6636),
+            Color(0xFFB87F47),
+            Color(0xFF8C5A2E),
+          ],
+          stops: [0, 0.35, 0.7, 1],
+        ).createShader(rect),
+    );
+    final grain = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    for (int i = 0; i < 46; i++) {
+      final y = size.height * _h(i * 3 + 1);
+      final amp = 2 + 5 * _h(i * 3 + 2);
+      final ph = _h(i * 3 + 3) * 6.28;
+      final len = 40 + 30 * _h(i);
+      grain.color =
+          i % 3 != 0 ? const Color(0x22301808) : const Color(0x18FFE2B0);
+      grain.strokeWidth = 0.8 + 1.6 * _h(i + 90);
+      final path = Path()..moveTo(0, y);
+      for (double x = 0; x <= size.width; x += 14) {
+        path.lineTo(x, y + sin(x / len + ph) * amp);
+      }
+      canvas.drawPath(path, grain);
+    }
+    canvas.restore();
+    canvas.drawRRect(
+      r.deflate(1.5),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..color = const Color(0xFF4E2F14),
+    );
+    canvas.drawRRect(
+      r.deflate(5),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = const Color(0x66FFE2B0),
+    );
+    // Frise en zigzag gravée entre les deux rangées.
+    if (band.width > 20 && band.height > 4) {
+      final cy = band.center.dy;
+      final amp = band.height * 0.36;
+      final step = band.height * 1.1;
+      final path = Path()..moveTo(band.left, cy);
+      var up = true;
+      for (double x = band.left + step; x < band.right; x += step) {
+        path.lineTo(x, cy + (up ? -amp : amp));
+        up = !up;
+      }
+      path.lineTo(band.right, cy);
+      canvas.drawPath(
+        path.shift(const Offset(0, 1.6)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = const Color(0x55FFE2B0),
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4
+          ..strokeJoin = StrokeJoin.round
+          ..color = const Color(0xCC3E230E),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WoodPainter old) => old.band != band;
+}
+
+/// Creux taillé dans le bois : lèvre claire en haut à gauche, ombre en bas à
+/// droite, fond sombre en dégradé.
+class _HolePainter extends CustomPainter {
+  _HolePainter({this.hot = false, this.flash = false});
+  final bool hot;
+  final bool flash;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final m = size.shortestSide;
+    final rr = RRect.fromRectAndRadius(rect, Radius.circular(m * 0.46));
+    canvas.drawRRect(
+      rr,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFDBA86C), Color(0xFF6B431F)],
+        ).createShader(rect),
+    );
+    final inner = rr.deflate(m * 0.05);
+    canvas.drawRRect(
+      inner,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(0, -0.25),
+          radius: 0.95,
+          colors: flash
+              ? const [Color(0xFF9B2C2C), Color(0xFF5A1717), Color(0xFF2B0C0C)]
+              : hot
+                  ? const [Color(0xFF8E5C2B), Color(0xFF4A2A10), Color(0xFF26140A)]
+                  : const [Color(0xFF7A4B22), Color(0xFF47270F), Color(0xFF2B190A)],
+          stops: const [0, 0.65, 1],
+        ).createShader(inner.outerRect),
+    );
+    canvas.save();
+    canvas.clipRRect(inner);
+    canvas.drawRRect(
+      inner.shift(Offset(0, m * 0.05)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = m * 0.12
+        ..color = const Color(0x66000000)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, m * 0.07),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_HolePainter old) => old.hot != hot || old.flash != flash;
+}
+
+/// Graines (cailloux) d'une case ou d'un magasin, disposées au hasard mais
+/// de façon stable.
+class _PebblePainter extends CustomPainter {
+  _PebblePainter(
+    this.n,
+    this.salt, {
+    this.rx = 0.33,
+    this.ry = 0.33,
+    this.rad = 0.115,
+    this.maxShow = 30,
+  });
   final int n;
   final int salt;
+  final double rx;
+  final double ry;
+  final double rad;
+  final int maxShow;
+
+  static const _pal = [
+    Color(0xFFC8B79A),
+    Color(0xFF9C8A72),
+    Color(0xFFB4A185),
+    Color(0xFF7A6B5A),
+    Color(0xFFD2C2A6),
+    Color(0xFF8E7C66),
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
     if (n <= 0) return;
     final c = size.center(Offset.zero);
-    final rx = size.width * 0.34;
-    final ry = size.height * 0.34;
-    final r = min(size.width, size.height) * 0.12;
-    final show = min(n, 30);
-    final light = Paint()..color = const Color(0xFFFFE9A8);
-    final dark = Paint()..color = const Color(0xFFC9801F);
-    final edge = Paint()
-      ..color = Colors.black38
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
+    final ax = size.width * rx;
+    final ay = size.height * ry;
+    final r = size.shortestSide * rad;
+    final show = min(n, maxShow);
     for (int i = 0; i < show; i++) {
       final a = (i + salt) * 2.399963;
       final k = sqrt((i + 0.5) / show);
-      final o = c + Offset(cos(a) * rx * k, sin(a) * ry * k);
-      canvas.drawCircle(o, r, i.isEven ? light : dark);
-      canvas.drawCircle(o, r, edge);
+      final o = c + Offset(cos(a) * ax * k, sin(a) * ay * k);
+      final pw = r * (1.0 + 0.35 * _h(salt * 31 + i));
+      final ph = pw * (0.72 + 0.2 * _h(salt * 17 + i));
+      final rot = _h(salt * 13 + i) * pi;
+      final col = _pal[(i * 7 + salt) % _pal.length];
+      final rect = Rect.fromCenter(center: Offset.zero, width: pw * 2, height: ph * 2);
+      canvas.save();
+      canvas.translate(o.dx, o.dy);
+      canvas.rotate(rot);
+      canvas.drawOval(
+        rect.shift(Offset(r * 0.16, r * 0.26)),
+        Paint()..color = const Color(0x77000000),
+      );
+      canvas.drawOval(
+        rect,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-0.35, -0.4),
+            radius: 0.95,
+            colors: [
+              Color.lerp(col, Colors.white, 0.35)!,
+              col,
+              Color.lerp(col, Colors.black, 0.45)!,
+            ],
+            stops: const [0, 0.5, 1],
+          ).createShader(rect),
+      );
+      canvas.restore();
     }
   }
 
   @override
-  bool shouldRepaint(_SeedPainter old) => old.n != n;
+  bool shouldRepaint(_PebblePainter old) => old.n != n || old.salt != salt;
 }
 
-/// Plateau en deux rangées horizontales (ta rangée en bas, celle de
-/// l'adversaire en haut) qui remplit tout l'écran. Les graines sont semées une à une, avec
-/// animation et sons.
+/// Graines envoyées d'une case capturée vers le magasin du joueur.
+class _Flight {
+  _Flight(this.id, this.from, this.to, this.count, this.owner, this.ms);
+  final int id;
+  final Offset from;
+  final Offset to;
+  final int count;
+  final int owner;
+  final int ms;
+}
+
+/// Plateau en bois à deux rangées de 7 cases (ta rangée en bas, celle de
+/// l'adversaire en haut) et un magasin à chaque bout où partent les graines
+/// capturées. Les graines sont semées une à une, avec animation et sons.
 class SongoBoardView extends StatefulWidget {
   const SongoBoardView({
     super.key,
@@ -323,6 +526,7 @@ class SongoBoardView extends StatefulWidget {
     required this.onSettled,
     this.over = false,
     this.names = const ['', ''],
+    this.scores = const [0, 0],
   });
 
   final List<int> board;
@@ -340,6 +544,9 @@ class SongoBoardView extends StatefulWidget {
   final ValueChanged<int> onSettled;
   final bool over;
   final List<String> names;
+
+  /// Graines capturées par chaque joueur (affichées dans les magasins).
+  final List<int> scores;
 
   @override
   State<SongoBoardView> createState() => _SongoBoardViewState();
@@ -360,7 +567,15 @@ class _SongoBoardViewState extends State<SongoBoardView> {
   int _glow = -1;
   Set<int> _flash = {};
   final Map<int, Offset> _centers = {};
+  final List<Offset> _storeC = [Offset.zero, Offset.zero];
+  final List<_Flight> _flights = [];
+  int _flightId = 0;
+  List<int> _stores = [0, 0];
   final Sfx _sfx = Sfx();
+
+  /// Magasins : pendant l'animation, ceux qu'on remplit graine après graine ;
+  /// sinon, les scores du jeu.
+  List<int> get _storeView => _running ? _stores : widget.scores;
 
   @override
   void initState() {
@@ -369,6 +584,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
     // lues trop tard, après l'arrivée du premier coup.
     _shown = List<int>.from(widget.board);
     _doneMove = widget.moveN;
+    _stores = List<int>.from(widget.scores);
   }
 
   @override
@@ -399,6 +615,7 @@ class _SongoBoardViewState extends State<SongoBoardView> {
 
   Future<void> _run() async {
     _running = true;
+    _stores = List<int>.from(widget.scores);
     while (_alive && _doneMove != widget.moveN) {
       final target = List<int>.from(widget.board);
       final mv = widget.moveN;
@@ -423,7 +640,10 @@ class _SongoBoardViewState extends State<SongoBoardView> {
   }
 
   Future<void> _play(int from, List<int> target) async {
+    final startBoard = List<int>.from(_shown);
     final seeds = _shown[from];
+    final p = SongoEngine.owns(0, from) ? 0 : 1;
+    final sim = SongoEngine.sow(startBoard, p, from);
     final start = _centers[from] ?? Offset.zero;
     SongoSound.pick();
     setState(() {
@@ -465,16 +685,73 @@ class _SongoBoardViewState extends State<SongoBoardView> {
     }
     await _wait(300);
     if (!_alive) return;
-    final diff = <int>{
+    final afterSow = List<int>.from(_shown);
+
+    // 1) Captures : les graines de chaque case prise partent dans le magasin
+    //    du joueur qui a joué.
+    final caps = <int>[
       for (int k = 0; k < 14; k++)
-        if (_shown[k] != target[k]) k,
-    };
-    if (diff.isNotEmpty) {
-      setState(() => _flash = diff);
+        if (afterSow[k] > sim.board[k]) k,
+    ];
+    if (caps.isNotEmpty) {
+      caps.sort((a, b) => b.compareTo(a));
+      setState(() => _flash = caps.toSet());
       _sfx.capture();
-      await _wait(650);
-      if (!_alive) return;
+      await _wait(550);
+      for (final k in caps) {
+        if (!_alive) return;
+        final cnt = afterSow[k] - sim.board[k];
+        final fl = _Flight(++_flightId, _centers[k] ?? start, _storeC[p], cnt, p, 560);
+        setState(() {
+          _shown[k] = sim.board[k];
+          _flash = {..._flash}..remove(k);
+          _flights.add(fl);
+        });
+        SongoSound.pick();
+        await _wait(fl.ms);
+        if (!_alive) return;
+        setState(() {
+          _flights.remove(fl);
+          _stores[p] += cnt;
+        });
+        SongoSound.drop(k);
+        await _wait(80);
+      }
     }
+
+    // 2) Fin de partie : les graines restantes vont au magasin de leur camp.
+    final sweep = <_Flight>[
+      for (int k = 0; k < 14; k++)
+        if (sim.board[k] > target[k])
+          _Flight(
+            ++_flightId,
+            _centers[k] ?? start,
+            _storeC[SongoEngine.owns(0, k) ? 0 : 1],
+            sim.board[k] - target[k],
+            SongoEngine.owns(0, k) ? 0 : 1,
+            800,
+          ),
+    ];
+    if (sweep.isNotEmpty && _alive) {
+      setState(() {
+        for (int k = 0; k < 14; k++) {
+          if (sim.board[k] > target[k]) _shown[k] = target[k];
+        }
+        _flights.addAll(sweep);
+      });
+      _sfx.capture();
+      await _wait(820);
+      if (!_alive) return;
+      setState(() {
+        for (final f in sweep) {
+          _flights.remove(f);
+          _stores[f.owner] += f.count;
+        }
+      });
+      await _wait(200);
+    }
+
+    if (!_alive) return;
     setState(() {
       _shown = target;
       _flash = {};
@@ -484,19 +761,42 @@ class _SongoBoardViewState extends State<SongoBoardView> {
     });
   }
 
+  Widget _chipBox(String text, double chip) {
+    return Container(
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const RadialGradient(
+          center: Alignment(-0.35, -0.4),
+          colors: [Color(0xFFF1E4C8), Color(0xFFC8B79A), Color(0xFF8E7C66)],
+        ),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8)],
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: const Color(0xFF3E2410),
+          fontWeight: FontWeight.w900,
+          fontSize: chip * 0.5,
+        ),
+      ),
+    );
+  }
+
   Widget _pit(int idx, Offset topLeft, double w, double h) {
     final mine = SongoEngine.owns(widget.viewer, idx);
     final owner = mine ? widget.viewer : 1 - widget.viewer;
     final canTap = !_running && widget.legal.contains(idx);
     final flash = _flash.contains(idx);
     final glow = idx == _glow;
-    final border = flash
+    final ring = flash
         ? const Color(0xFFFF5252)
         : canTap
             ? _gold
             : glow
                 ? Colors.white
-                : _seatColor[owner].withOpacity(0.5);
+                : _seatColor[owner].withOpacity(0.35);
     final m = min(w, h);
     return Positioned(
       left: topLeft.dx,
@@ -506,58 +806,101 @@ class _SongoBoardViewState extends State<SongoBoardView> {
       child: GestureDetector(
         onTap: canTap ? () => widget.onPit(idx) : null,
         child: AnimatedScale(
-          scale: glow && _running ? 1.1 : 1.0,
+          scale: glow && _running ? 1.08 : 1.0,
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOut,
           child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(m * 0.5),
-            gradient: RadialGradient(
-              colors: [
-                flash
-                    ? const Color(0xFF9B2C2C)
-                    : canTap
-                        ? const Color(0xFF8A5A2B)
-                        : const Color(0xFF6B4423),
-                const Color(0xFF301A0B),
+            duration: const Duration(milliseconds: 160),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(m * 0.5),
+              border: Border.all(
+                color: ring,
+                width: canTap || glow || flash ? 4 : 2,
+              ),
+              boxShadow: [
+                if (canTap)
+                  BoxShadow(color: _gold.withOpacity(0.55), blurRadius: 14),
               ],
             ),
-            border: Border.all(
-              color: border,
-              width: canTap || glow || flash ? 4 : 2,
-            ),
-            boxShadow: [
-              if (canTap)
-                BoxShadow(
-                  color: _gold.withOpacity(0.5),
-                  blurRadius: 14,
-                ),
-            ],
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: CustomPaint(painter: _SeedPainter(_shown[idx], idx)),
-              ),
-              Positioned(
-                right: m * 0.12,
-                bottom: m * 0.04,
-                child: Text(
-                  '${_shown[idx]}',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: max(16.0, min(34.0, m * 0.32)),
-                    fontWeight: FontWeight.w900,
-                    shadows: const [
-                      Shadow(color: Colors.black, blurRadius: 5),
-                    ],
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _HolePainter(hot: canTap, flash: flash),
                   ),
                 ),
-              ),
-            ],
+                Positioned.fill(
+                  child: CustomPaint(painter: _PebblePainter(_shown[idx], idx)),
+                ),
+                Positioned(
+                  right: m * 0.14,
+                  bottom: m * 0.06,
+                  child: Text(
+                    '${_shown[idx]}',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: max(15.0, min(30.0, m * 0.30)),
+                      fontWeight: FontWeight.w900,
+                      shadows: const [
+                        Shadow(color: Colors.black, blurRadius: 5),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Magasin d'un joueur : grand creux au bout du plateau, rempli par les
+  /// graines qu'il a capturées.
+  Widget _store(int owner, Rect r) {
+    final n = _storeView[owner];
+    final m = r.shortestSide;
+    return Positioned(
+      left: r.left,
+      top: r.top,
+      width: r.width,
+      height: r.height,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(m * 0.46),
+          border: Border.all(color: _seatColor[owner].withOpacity(0.55), width: 2),
+        ),
+        child: Stack(
+          children: [
+            Positioned.fill(child: CustomPaint(painter: _HolePainter())),
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _PebblePainter(
+                  n,
+                  40 + owner,
+                  rx: 0.34,
+                  ry: 0.42,
+                  rad: 0.10,
+                  maxShow: 48,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: m * 0.08,
+              child: Text(
+                '$n',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: max(16.0, min(34.0, m * 0.34)),
+                  fontWeight: FontWeight.w900,
+                  shadows: const [Shadow(color: Colors.black, blurRadius: 6)],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -573,15 +916,19 @@ class _SongoBoardViewState extends State<SongoBoardView> {
         const nameH = 22.0;
         final W = c.maxWidth;
         final H = c.maxHeight;
-        final pw = (W - pad * 8) / 7;
-        final ph = (H - nameH * 2 - pad * 3) / 2;
+        final pw = (W - pad * 10) / 8.9;
+        final sw = pw * 0.95;
+        final gap = (H * 0.07).clamp(12.0, 26.0).toDouble();
+        final ph = (H - nameH * 2 - pad * 2 - gap) / 2;
         final topY = nameH + pad;
-        final botY = nameH + pad * 2 + ph;
+        final botY = topY + ph + gap;
+        final x0 = pad + sw + pad;
+        final rowW = pw * 7 + pad * 6;
         final children = <Widget>[];
         // Rangée du haut : l'adversaire (de gauche à droite : 0 -> 6).
         // Rangée du bas : toi (de gauche à droite : 6 -> 0).
         for (int k = 0; k < 7; k++) {
-          final x = pad + k * (pw + pad);
+          final x = x0 + k * (pw + pad);
           final ti = SongoEngine.base(opp) + k;
           final bi = SongoEngine.base(v) + (6 - k);
           _centers[ti] = Offset(x + pw / 2, topY + ph / 2);
@@ -589,87 +936,100 @@ class _SongoBoardViewState extends State<SongoBoardView> {
           children.add(_pit(ti, Offset(x, topY), pw, ph));
           children.add(_pit(bi, Offset(x, botY), pw, ph));
         }
+        // Magasins : celui de l'adversaire à gauche, le tien à droite.
+        final sh = ph * 2 + gap;
+        final leftStore = Rect.fromLTWH(pad, topY, sw, sh);
+        final rightStore = Rect.fromLTWH(x0 + rowW + pad, topY, sw, sh);
+        _storeC[opp] = leftStore.center;
+        _storeC[v] = rightStore.center;
         final double chip = (min(pw, ph) * 0.4).clamp(30.0, 46.0).toDouble();
-        return Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            color: const Color(0xFF2A1708),
-            border: Border.all(color: const Color(0xFFB8741A), width: 3),
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 3,
-                child: Text(
-                  widget.names[opp],
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _seatColor[opp],
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: CustomPaint(
+            painter: _WoodPainter(Rect.fromLTWH(x0, topY + ph, rowW, gap)),
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 3,
+                  child: Text(
+                    widget.names[opp],
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      shadows: [
+                        Shadow(color: _seatColor[opp], blurRadius: 6),
+                        const Shadow(color: Colors.black, blurRadius: 3),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 3,
-                child: Text(
-                  widget.names[v],
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _seatColor[v],
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 3,
+                  child: Text(
+                    widget.names[v],
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      shadows: [
+                        Shadow(color: _seatColor[v], blurRadius: 6),
+                        const Shadow(color: Colors.black, blurRadius: 3),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              ...children,
-              if (_flyOn)
-                TweenAnimationBuilder<double>(
-                  key: ValueKey(_stepKey),
-                  tween: Tween<double>(begin: 0, end: 1),
-                  duration: Duration(milliseconds: _stepMs),
-                  curve: Curves.easeInOut,
-                  builder: (context, t, _) {
-                    final o = Offset.lerp(_from, _to, t)!;
-                    final lift = sin(pi * t) * chip * 0.9;
-                    return Positioned(
-                      left: o.dx - chip / 2,
-                      top: o.dy - chip / 2 - 6 - lift,
-                      width: chip,
-                      height: chip,
-                      child: IgnorePointer(
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _gold,
-                            border: Border.all(color: Colors.white, width: 2),
-                            boxShadow: const [
-                              BoxShadow(color: Colors.black54, blurRadius: 8),
-                            ],
-                          ),
-                          child: Text(
-                            '$_hand',
-                            style: TextStyle(
-                              color: const Color(0xFF3E2410),
-                              fontWeight: FontWeight.w900,
-                              fontSize: chip * 0.5,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-            ],
+                _store(opp, leftStore),
+                _store(v, rightStore),
+                ...children,
+                for (final f in _flights)
+                  TweenAnimationBuilder<double>(
+                    key: ValueKey(f.id),
+                    tween: Tween<double>(begin: 0, end: 1),
+                    duration: Duration(milliseconds: f.ms),
+                    curve: Curves.easeInOut,
+                    builder: (context, t, _) {
+                      final o = Offset.lerp(f.from, f.to, t)!;
+                      final lift = sin(pi * t) * chip * 0.9;
+                      return Positioned(
+                        left: o.dx - chip / 2,
+                        top: o.dy - chip / 2 - lift,
+                        width: chip,
+                        height: chip,
+                        child: IgnorePointer(child: _chipBox('${f.count}', chip)),
+                      );
+                    },
+                  ),
+                if (_flyOn)
+                  TweenAnimationBuilder<double>(
+                    key: ValueKey(_stepKey),
+                    tween: Tween<double>(begin: 0, end: 1),
+                    duration: Duration(milliseconds: _stepMs),
+                    curve: Curves.easeInOut,
+                    builder: (context, t, _) {
+                      final o = Offset.lerp(_from, _to, t)!;
+                      final lift = sin(pi * t) * chip * 0.9;
+                      return Positioned(
+                        left: o.dx - chip / 2,
+                        top: o.dy - chip / 2 - 6 - lift,
+                        width: chip,
+                        height: chip,
+                        child: IgnorePointer(child: _chipBox('$_hand', chip)),
+                      );
+                    },
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -1586,6 +1946,7 @@ class _SongoLocalGameState extends State<_SongoLocalGame> {
                       onSettled: _settledMove,
                       over: g.over,
                       names: widget.names,
+                      scores: shownScores,
                     ),
                   ),
                 ),
@@ -2602,6 +2963,7 @@ class _SongoRoomState extends State<_SongoRoom> {
                           onSettled: _settledMove,
                           over: over,
                           names: names,
+                          scores: shownScores,
                         ),
                       ),
                     ),
