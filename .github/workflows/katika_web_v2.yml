@@ -9,7 +9,9 @@ on:
 concurrency:
   group: katika-web-publication
   cancel-in-progress: false
-
+concurrency:
+  group: katika-web
+  cancel-in-progress: true
 jobs:
   web:
     runs-on: ubuntu-latest
