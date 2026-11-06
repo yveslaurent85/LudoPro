@@ -59,14 +59,14 @@ class Wallet {
 
   /// Commission de l'application sur la cagnotte en ligne (doit être la même
   /// que COMMISSION_PERCENT dans worker.js).
-  static const int commissionPercent = 6;
+  static const int commissionPercent = 5;
 
   /// Commission en présentiel, sur tous les jeux (Ludo, Deux dés, Songô). Doit
   /// être la même que COMMISSION_LOCAL_PERCENT dans worker.js.
-  static const int commissionLocalPercent = 6;
+  static const int commissionLocalPercent = 5;
 
   /// Gain du gagnant pour une cagnotte donnée (après commission).
-  /// [local] = true : partie en présentiel (commission de 6 %).
+  /// [local] = true : partie en présentiel (commission de 5 %).
   static int prize(int pot, {bool local = false}) {
     // La commission peut avoir une décimale (ex. 7,5 %) : calcul en dixièmes.
     final tenths =
