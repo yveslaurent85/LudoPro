@@ -2141,8 +2141,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     _pushState();
   }
 
-  /// Face aléatoire : chaque chiffre (1 à 6) a exactement la même chance
-  /// de sortir. Seul un léger coup de pouce aux captures est conservé.
+  /// Face aléatoire : chaque chiffre de 1 à 6 a la même chance de sortir
+  /// (le 6 n'est plus favorisé).
   int _randomFace() {
     // Les captures sont un peu plus fréquentes : quand une face permet de
     // capturer, elle a 12 % de chances de plus de sortir (120 pour mille).
