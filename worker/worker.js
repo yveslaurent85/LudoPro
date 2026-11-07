@@ -2110,7 +2110,7 @@ async function adminHouseWithdraw({ uid, env }) {
           : { withdrawn1: Math.max(0, intOr(h.withdrawn1, 0)) + amount }),
       },
     });
-return { amount, balance: balanceOf(me) + amount };
+    return { amount, balance: balanceOf(me) + amount };
   });
 }
 
@@ -3166,7 +3166,7 @@ async function settleSebpayDeposit(env, id) {
   if (res.status === 'mismatch') {
     await notifyAdmin(env, `⚠️ Recharge SebPay à vérifier : demandé ${res.amount}, reçu ${res.paid}. Référence D${id}.`);
   }
-return { status: res.status };
+  return { status: res.status };
 }
 
 /** L'appli demande où en est sa recharge. */
@@ -4047,6 +4047,410 @@ async function myTournMatches(env, uid, ids) {
     .sort((a, b) => b.startedMs - a.startedMs);
 }
 
+// ======================================================================
+// Damier « DEUX BUTS SORT » : salle ouverte à tous, file d'attente, matchs misés
+// ======================================================================
+// Règles : un joueur sort s'il perd 2 matchs, ou s'il perd 1 match et fait 1 nul.
+// Deux joueurs qui s'affrontent rejouent ensemble tant qu'aucun ne sort ; si
+// après 2 matchs aucun n'est sorti : match de barrage (le perdant sort ; nul =
+// les deux sortent). Le gagnant reste et affronte le suivant de la file
+// (ordre d'arrivée). Chaque match est misé (gagnant : 2 mises − 5 %, nul :
+// mises rendues, via settleGame).
+//   dbRooms/{id}          : la salle + l'état de la table
+//   dbPlayers/{rid}_{uid} : un joueur dans la salle (fautes, rang d'arrivée)
+
+const DB_LOCK_MS = 25000;
+
+function dbInitialBoard() {
+  const b = new Array(100).fill(0);
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 10; c++) {
+      if ((r + c) % 2 !== 1) continue;
+      if (r < 4) b[r * 10 + c] = -1;
+      else if (r >= 6) b[r * 10 + c] = 1;
+    }
+  }
+  return b;
+}
+
+function dbHash(board, cur) {
+  let h = 7;
+  for (const p of board) h = (h * 31 + p + 2) & 0x7fffffff;
+  return (h * 2 + cur) & 0x7fffffff;
+}
+
+function dbRid(data) {
+  const rid = idStr(data.rid);
+  if (!rid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  return rid;
+}
+
+function dbOut(p) {
+  return intOr(p.losses, 0) >= 2 || (intOr(p.losses, 0) >= 1 && intOr(p.draws, 0) >= 1);
+}
+
+/** Crée une salle (n'importe quel joueur connecté). */
+async function dbCreate({ uid, data, env }) {
+  const stake = intOr(data.stake, 0);
+  if (stake < MIN_STAKE || stake > MAX_STAKE) {
+    throw new HttpError('invalid-argument', `Mise entre ${MIN_STAKE} et ${MAX_STAKE} FCFA.`);
+  }
+  const timeMin = Math.min(30, Math.max(2, intOr(data.timeMin, 10)));
+  const id = newId();
+  const me = await readDoc(env, `users/${uid}`);
+  if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+  await runTx(env, async (tx) => {
+    tx.write(`dbRooms/${id}`, {
+      create: true,
+      set: {
+        title: String(data.title || 'DEUX BUTS SORT').slice(0, 40),
+        hostUid: uid,
+        hostName: tournName(me),
+        stake,
+        timeMin,
+        status: 'open',
+        seq: 0,
+        pair: [],
+        matchNo: 0,
+        gameId: '',
+        lockMs: 0,
+      },
+      serverTime: ['createdAt'],
+    });
+  });
+  return { id };
+}
+
+/** Rejoindre la salle (ou y revenir après être sorti). */
+async function dbJoin({ uid, data, env }) {
+  const rid = dbRid(data);
+  const res = await runTx(env, async (tx) => {
+    const r = await tx.get(`dbRooms/${rid}`);
+    if (!r || r.status !== 'open') throw new HttpError('failed-precondition', 'Cette salle est fermée.');
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const old = await tx.get(`dbPlayers/${rid}_${uid}`);
+    if (old && (old.state === 'waiting' || old.state === 'table' || old.state === 'playing')) {
+      throw new HttpError('failed-precondition', 'Tu es déjà dans la salle.');
+    }
+    if (balanceOf(me) < intOr(r.stake, 0)) {
+      throw new HttpError('failed-precondition', `Il faut au moins ${r.stake} FCFA pour jouer un match.`);
+    }
+    const seq = intOr(r.seq, 0) + 1;
+    tx.write(`dbRooms/${rid}`, { set: { seq } });
+    tx.write(`dbPlayers/${rid}_${uid}`, {
+      set: {
+        rid,
+        uid,
+        name: tournName(me),
+        seq,
+        state: 'waiting',
+        losses: 0,
+        draws: 0,
+        wins: 0,
+      },
+    });
+    return { seq };
+  });
+  await dbDrive(env, rid);
+  return res;
+}
+
+/** Quitter la salle (impossible pendant un match). */
+async function dbLeave({ uid, data, env }) {
+  const rid = dbRid(data);
+  await runTx(env, async (tx) => {
+    const p = await tx.get(`dbPlayers/${rid}_${uid}`);
+    if (!p || p.state === 'out' || p.state === 'left') return;
+    if (p.state === 'playing') {
+      throw new HttpError('failed-precondition', 'Termine ton match en cours avant de quitter.');
+    }
+    tx.write(`dbPlayers/${rid}_${uid}`, { set: { state: 'left' } });
+    if (p.state === 'table') {
+      const r = await tx.get(`dbRooms/${rid}`);
+      if (r) {
+        const pair = (Array.isArray(r.pair) ? r.pair : []).filter((u) => u !== uid);
+        tx.write(`dbRooms/${rid}`, { set: { pair, matchNo: 0 } });
+      }
+    }
+  });
+  await dbDrive(env, rid);
+  return { left: true };
+}
+
+/** Le créateur (ou l'admin) ferme la salle : plus de nouveau match. */
+async function dbClose({ uid, data, env }) {
+  const rid = dbRid(data);
+  await runTx(env, async (tx) => {
+    const r = await tx.get(`dbRooms/${rid}`);
+    if (!r) throw new HttpError('not-found', 'Salle introuvable.');
+    if (r.hostUid !== uid && !adminIds(env).includes(uid)) {
+      throw new HttpError('permission-denied', 'Seul le créateur peut fermer la salle.');
+    }
+    tx.write(`dbRooms/${rid}`, { set: { status: 'closed' } });
+  });
+  return { closed: true };
+}
+
+/** Prend le verrou de la salle (un seul « moteur » à la fois). */
+async function dbLock(env, rid) {
+  return runTx(env, async (tx) => {
+    const r = await tx.get(`dbRooms/${rid}`);
+    if (!r) return null;
+    if (Date.now() - intOr(r.lockMs, 0) < DB_LOCK_MS) return null;
+    tx.write(`dbRooms/${rid}`, { set: { lockMs: Date.now() } });
+    return r;
+  });
+}
+
+async function dbUnlock(env, rid, set) {
+  await runTx(env, async (tx) => {
+    tx.write(`dbRooms/${rid}`, { set: { ...(set || {}), lockMs: 0 } });
+  });
+}
+
+/** Fait avancer la salle : règle le match fini, désigne les sortants, lance le suivant. */
+async function dbDrive(env, rid) {
+  const room = await dbLock(env, rid);
+  if (!room) return;
+  let set = {};
+  try {
+    const players = await queryDocs(env, 'dbPlayers', eqFilter('rid', rid), 300);
+    const byUid = new Map(players.map((p) => [p.uid, p]));
+    let pair = Array.isArray(room.pair) ? room.pair.slice() : [];
+    let matchNo = intOr(room.matchNo, 0);
+    let gameId = room.gameId || '';
+    const patch = new Map(); // uid -> champs à écrire
+
+    const upd = (uid, f) => {
+      patch.set(uid, { ...(patch.get(uid) || {}), ...f });
+      Object.assign(byUid.get(uid), f);
+    };
+
+    // 1) Un match est en cours : est-il fini ?
+    if (gameId) {
+      const g = await readDoc(env, `damier/${gameId}`);
+      if (g && g.over === true) {
+        const uids = (Array.isArray(g.players) ? g.players : []).map((p) => p.uid);
+        if (g.settled !== true && uids.length === 2) {
+          try {
+            await settleGame({ uid: uids[0], data: { gameId }, env });
+          } catch (e) {
+            console.error('db settle', e);
+          }
+        }
+        const w = damierWinners(g, uids);
+        const [a, b] = uids;
+        const forcedOut = new Set();
+        if (w.length === 1) {
+          const win = w[0];
+          const lose = win === a ? b : a;
+          upd(win, { wins: intOr(byUid.get(win).wins, 0) + 1 });
+          upd(lose, { losses: intOr(byUid.get(lose).losses, 0) + 1 });
+          if (matchNo >= 3) forcedOut.add(lose);
+        } else {
+          for (const u of uids) upd(u, { draws: intOr(byUid.get(u).draws, 0) + 1 });
+          if (matchNo >= 3) uids.forEach((u) => forcedOut.add(u));
+        }
+        const outs = uids.filter((u) => forcedOut.has(u) || dbOut(byUid.get(u)));
+        for (const u of outs) upd(u, { state: 'out' });
+        for (const u of uids) if (!outs.includes(u)) upd(u, { state: 'table' });
+        gameId = '';
+        if (outs.length === 0) {
+          pair = [b, a]; // même duo, on inverse les couleurs
+          matchNo += 1;
+        } else {
+          pair = uids.filter((u) => !outs.includes(u));
+          matchNo = 0;
+        }
+      } else if (!g) {
+        gameId = '';
+        matchNo = 0;
+        pair = [];
+      } else {
+        // Match toujours en cours. S'il traîne bien au-delà des horloges
+        // (joueurs absents), on le déclare nul : mises rendues au prochain passage.
+        const limit = (intOr(room.timeMin, 10) * 2 + 8) * 60000;
+        if (intOr(g.startedMs, 0) > 0 && Date.now() - intOr(g.startedMs, 0) > limit) {
+          await runTx(env, async (tx) => {
+            tx.write(`damier/${gameId}`, {
+              set: { over: true, winners: [0, 1], status: 'finished', reason: 'timeout' },
+            });
+          });
+        }
+        await dbUnlock(env, rid, {});
+        await dbFlush(env, rid, patch);
+        return;
+      }
+    }
+
+    // 2) Pas de match : compléter la table avec la file d'attente.
+    if (!gameId && room.status === 'open') {
+      pair = pair.filter((u) => byUid.has(u) && byUid.get(u).state === 'table');
+      const queue = players
+        .filter((p) => p.state === 'waiting')
+        .sort((x, y) => intOr(x.seq, 0) - intOr(y.seq, 0));
+      const stake = intOr(room.stake, 0);
+      let guard = 0;
+      while (pair.length < 2 && queue.length > 0 && guard++ < 300) {
+        const nx = queue.shift();
+        const u = await readDoc(env, `users/${nx.uid}`);
+        if (!u || balanceOf(u) < stake) {
+          upd(nx.uid, { state: 'out', note: 'solde' });
+          continue;
+        }
+        upd(nx.uid, { state: 'table' });
+        pair.push(nx.uid);
+      }
+      // Le joueur resté à table doit aussi pouvoir payer.
+      if (pair.length === 2) {
+        const bal = await Promise.all(pair.map((u) => readDoc(env, `users/${u}`)));
+        const lowIdx = bal.findIndex((x) => !x || balanceOf(x) < stake);
+        if (lowIdx >= 0) {
+          upd(pair[lowIdx], { state: 'out', note: 'solde' });
+          pair.splice(lowIdx, 1);
+          matchNo = 0;
+        }
+      }
+      if (pair.length === 2) {
+        const start = await dbStartMatch(env, rid, room, pair, byUid, matchNo === 0 ? 1 : matchNo);
+        if (start) {
+          gameId = start;
+          if (matchNo === 0) matchNo = 1;
+          for (const u of pair) upd(u, { state: 'playing' });
+        } else {
+          for (const u of pair) upd(u, { state: 'out', note: 'solde' });
+          pair = [];
+          matchNo = 0;
+        }
+      } else {
+        matchNo = 0;
+      }
+    }
+    set = { pair, matchNo, gameId };
+    await dbFlush(env, rid, patch);
+  } catch (e) {
+    console.error('dbDrive', e);
+  }
+  await dbUnlock(env, rid, set);
+}
+
+async function dbFlush(env, rid, patch) {
+  for (const [uid, f] of patch) {
+    await runTx(env, async (tx) => {
+      tx.write(`dbPlayers/${rid}_${uid}`, { set: f });
+    });
+  }
+}
+
+/** Débite les 2 mises et crée la partie de Damier. Renvoie l'identifiant, ou '' si un solde manque. */
+async function dbStartMatch(env, rid, room, pair, byUid, matchNo) {
+  const stake = intOr(room.stake, 0);
+  const gid = newId();
+  const timeMs = intOr(room.timeMin, 10) * 60000;
+  const names = pair.map((u) => byUid.get(u).name || 'Joueur');
+  const board = dbInitialBoard();
+  try {
+    await runTx(env, async (tx) => {
+      const us = [];
+      for (const u of pair) {
+        const d = await tx.get(`users/${u}`);
+        if (!d || balanceOf(d) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+        us.push(d);
+      }
+      for (const u of pair) tx.write(`users/${u}`, { incr: { balance: -stake } });
+      tx.write(`damier/${gid}`, {
+        create: true,
+        set: {
+          hostUid: pair[0],
+          hostName: names[0],
+          maxPlayers: 2,
+          private: true,
+          stake,
+          paid: [pair[0], pair[1]],
+          pot: stake * 2,
+          code: tournCode(),
+          status: 'playing',
+          players: pair.map((u, i) => ({ uid: u, name: names[i] })),
+          uids: pair.slice(),
+          miss: [0, 0],
+          timeMin: intOr(room.timeMin, 10),
+          timeMinOpp: intOr(room.timeMin, 10),
+          incSec: 0,
+          clockMs: [timeMs, timeMs],
+          hSeat: -1,
+          hN: 0,
+          drawSeat: -1,
+          drawNum: 1,
+          drawDen: 2,
+          board,
+          cur: 0,
+          moveN: 0,
+          over: false,
+          winners: [],
+          lastFrom: -1,
+          lastPath: [],
+          lastCaps: [],
+          quiet: 0,
+          hist: [dbHash(board, 0)],
+          reason: '',
+          dbRoomId: rid,
+          barrage: matchNo >= 3,
+          startedMs: Date.now(),
+        },
+        serverTime: ['createdAt', 'startedAt'],
+      });
+    });
+  } catch (e) {
+    if (e instanceof HttpError) return '';
+    throw e;
+  }
+  return gid;
+}
+
+/** Liste des salles ouvertes (et la mienne) ; fait avancer chaque salle au passage. */
+async function dbList({ uid, data, env }) {
+  await accessToken(env);
+  const rid = data && data.rid ? idStr(data.rid) : '';
+  let rooms = await queryDocs(env, 'dbRooms', eqFilter('status', 'open'), 20);
+  if (rid && !rooms.find((r) => r.id === rid)) {
+    const one = await readDoc(env, `dbRooms/${rid}`);
+    if (one) rooms.push({ id: rid, ...one });
+  }
+  const out = [];
+  for (const r of rooms) {
+    if (r.status === 'open' && (rid ? r.id === rid : true)) await dbDrive(env, r.id);
+    const room = (await readDoc(env, `dbRooms/${r.id}`)) || r;
+    const players = await queryDocs(env, 'dbPlayers', eqFilter('rid', r.id), 300);
+    const act = players.filter((p) => p.state === 'waiting' || p.state === 'table' || p.state === 'playing');
+    const pub = (p) => ({
+      uid: p.uid,
+      name: p.name || '',
+      seq: intOr(p.seq, 0),
+      state: p.state,
+      losses: intOr(p.losses, 0),
+      draws: intOr(p.draws, 0),
+      wins: intOr(p.wins, 0),
+    });
+    const me = players.find((p) => p.uid === uid);
+    out.push({
+      id: r.id,
+      title: room.title || 'DEUX BUTS SORT',
+      hostUid: room.hostUid,
+      hostName: room.hostName || '',
+      stake: intOr(room.stake, 0),
+      timeMin: intOr(room.timeMin, 10),
+      status: room.status,
+      matchNo: intOr(room.matchNo, 0),
+      gameId: room.gameId || '',
+      pair: Array.isArray(room.pair) ? room.pair : [],
+      players: act.sort((a, b) => intOr(a.seq, 0) - intOr(b.seq, 0)).map(pub),
+      me: me ? pub(me) : null,
+    });
+  }
+  return { rooms: out, now: Date.now() };
+}
+
 /** Annule un tournoi et rembourse tous les inscrits payés (reprise possible si interrompu). */
 async function cancelTournament(env, tid, why) {
   let announce = false;
@@ -4165,6 +4569,11 @@ const HANDLERS = {
   adminTournamentCancel,
   adminTournamentEntries,
   adminTournamentStart,
+  dbCreate,
+  dbJoin,
+  dbLeave,
+  dbClose,
+  dbList,
 };
 
 const CORS = {
@@ -4219,3 +4628,4 @@ export default {
     }
   },
 };
+
