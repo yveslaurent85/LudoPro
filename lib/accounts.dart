@@ -421,6 +421,41 @@ class Wallet {
     return _call('sebpayMine', <String, dynamic>{});
   }
 
+  // ---------------------------------------------------------------- Tournois
+  static Future<Map<String, dynamic>> tournamentList() =>
+      _call('tournamentList', <String, dynamic>{});
+
+  static Future<Map<String, dynamic>> tournamentRegister(String tid) =>
+      _call('tournamentRegister', <String, dynamic>{'tid': tid});
+
+  static Future<Map<String, dynamic>> tournamentTeamCreate(String tid, String teamName) =>
+      _call('tournamentTeamCreate', <String, dynamic>{'tid': tid, 'teamName': teamName});
+
+  static Future<Map<String, dynamic>> tournamentTeamJoin(String code) =>
+      _call('tournamentTeamJoin', <String, dynamic>{'code': code});
+
+  static Future<Map<String, dynamic>> tournamentLeave(String tid) =>
+      _call('tournamentLeave', <String, dynamic>{'tid': tid});
+
+  static Future<Map<String, dynamic>> adminTournamentCreate({
+    required String type,
+    required int startAt,
+    required int regDeadline,
+    bool test = false,
+  }) =>
+      _call('adminTournamentCreate', <String, dynamic>{
+        'test': test,
+        'type': type,
+        'startAt': startAt,
+        'regDeadline': regDeadline,
+      });
+
+  static Future<Map<String, dynamic>> adminTournamentCancel(String tid) =>
+      _call('adminTournamentCancel', <String, dynamic>{'tid': tid});
+
+  static Future<Map<String, dynamic>> adminTournamentEntries(String tid) =>
+      _call('adminTournamentEntries', <String, dynamic>{'tid': tid});
+
   /// Recharge / retrait manuels par code marchand Orange Money.
   /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
   static Future<Map<String, dynamic>> manualInfo() {
