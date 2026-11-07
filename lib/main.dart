@@ -14,6 +14,7 @@ import 'admin_dashboard.dart';
 import 'base_logos.dart';
 import 'deposit_screen.dart';
 import 'transfer_screen.dart';
+import 'tournaments_screen.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
@@ -469,6 +470,9 @@ class HomeScreen extends StatelessWidget {
                 item(Icons.payments_outlined, 'Retrait',
                     const Color(0xFF1E6BFF),
                     () => go((_) => const WithdrawScreen())),
+                item(Icons.emoji_events, tr('Tournois', 'Tournaments'),
+                    const Color(0xFFF57C00),
+                    () => go((_) => const TournamentsScreen())),
                 item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
                   Navigator.of(sheetCtx).pop();
                   openWhatsAppGroup(context);
@@ -1809,7 +1813,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Ce joueur a fini tous ses pions (utilisé en mode équipe seulement :
   /// son binôme continue de jouer, on saute son tour).
   bool _finishedAll(int c) =>
-      widget.partners != null && players[c].pawns.every((x) => x == 56);
+      (widget.partners != null || finishTarget > 1) &&
+      players[c].pawns.every((x) => x == 56);
 
   /// Il ne reste qu'un camp en jeu (un joueur, ou deux binômes).
   bool get _oneSideLeft {
@@ -2406,6 +2411,13 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
       final w = (d['winner'] as num?)?.toInt() ?? -1;
       winnerOverride = w >= 0 ? w : null;
+      finishTarget = (d['finishTarget'] as num?)?.toInt() ?? finishTarget;
+      final fo = d['finishOrder'];
+      if (fo is List) {
+        finishOrder
+          ..clear()
+          ..addAll(fo.map((e) => (e as num).toInt()));
+      }
       message = (d['msg'] as String?) ?? message;
       gameOver = d['over'] == true;
       if (((d['rev'] as num?) ?? 0) > 0) gameStarted = true;
@@ -2590,6 +2602,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'msg': message,
         'over': gameOver,
         'forfeited': forfeited.toList(),
+        'finishOrder': finishOrder.toList(),
         'auto': autoCounts,
         'winner': winnerOverride ?? -1,
         'writer': o.uid,
@@ -2661,6 +2674,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool isRolling = false;
   bool isMoving = false;
   bool gameOver = false;
+  // Tournoi Mondly : la partie s'arrête quand finishTarget joueurs ont rentré
+  // tous leurs pions (1 = règle normale). finishOrder = ordre d'arrivée.
+  int finishTarget = 1;
+  final List<int> finishOrder = [];
   bool soundOn = true;
   bool forcedCapture = true; // capture obligatoire
   bool autoPlay = true; // coup unique joué automatiquement
@@ -3101,7 +3118,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     // Victoire : dès qu'un joueur a tous ses pions arrivés, la partie
     // s'arrête ; en équipe, son équipe (lui et son binôme) gagne.
     final selfDone = player.pawns.every((p) => p == 56);
-    final won = selfDone;
+    if (selfDone && !finishOrder.contains(playerIndex)) {
+      finishOrder.add(playerIndex);
+    }
+    final won = selfDone &&
+        (finishTarget <= 1 || finishOrder.length >= finishTarget);
 
     if (won) {
       sfx.win();
@@ -3122,7 +3143,9 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
       if (won) {
         gameOver = true;
-        message = '🏆 ${teamLabel(playerIndex)} remporte la partie !';
+        message = finishTarget > 1
+            ? '🏆 Qualifiés : ${finishOrder.map(nameOf).join(' et ')} !'
+            : '🏆 ${teamLabel(playerIndex)} remporte la partie !';
       } else if (selfDone) {
         // Il a fini, son binôme continue : on passe la main.
         _advanceTurn();
@@ -3170,6 +3193,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         finishThrows[i] = 0;
       }
       forfeited.clear();
+      finishOrder.clear();
       winnerOverride = null;
       arrivalColor = null;
       gameStarted = false;
