@@ -484,11 +484,13 @@ class Wallet {
     required int amount,
     required String phone,
     required String txRef,
+    String operator = 'orange',
   }) async {
     await _call('manualDepositRequest', <String, dynamic>{
       'amount': amount,
       'phone': phone,
       'txRef': txRef,
+      'operator': operator,
     });
   }
 
