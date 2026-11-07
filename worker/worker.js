@@ -2110,7 +2110,7 @@ async function adminHouseWithdraw({ uid, env }) {
           : { withdrawn1: Math.max(0, intOr(h.withdrawn1, 0)) + amount }),
       },
     });
-    return { amount, balance: balanceOf(me) + amount };
+return { amount, balance: balanceOf(me) + amount };
   });
 }
 
@@ -3166,7 +3166,7 @@ async function settleSebpayDeposit(env, id) {
   if (res.status === 'mismatch') {
     await notifyAdmin(env, `⚠️ Recharge SebPay à vérifier : demandé ${res.amount}, reçu ${res.paid}. Référence D${id}.`);
   }
-  return { status: res.status };
+return { status: res.status };
 }
 
 /** L'appli demande où en est sa recharge. */
@@ -3358,6 +3358,760 @@ async function sebpayWebhook(request, env) {
 // Point d'entrée
 // ======================================================================
 
+// ======================================================================
+// Tournois (étape 1 : création, inscription payée, équipes, départ, annulation)
+// ======================================================================
+// Collections (accès réservé au serveur) :
+//   tournaments/{id}            : l'événement
+//   tournamentEntries/{tid_uid} : une inscription payée par joueur
+//   tournamentTeams/{id}        : les duos du tournoi « Katika Tournament »
+
+const TOURN_TEMPLATES = {
+  katika: {
+    title: 'Katika Tournament',
+    fee: 2500,
+    capacity: 64,
+    teamSize: 2,
+    prizes: [100000, 70000, 42000, 35000],
+  },
+  mondly: {
+    title: 'Katika Mondly',
+    fee: 2000,
+    capacity: 32,
+    teamSize: 1,
+    prizes: [34500, 24000, 15050, 11000],
+  },
+};
+
+function tournName(u) {
+  return String((u && (u.pseudo || u.promoCode)) || 'Joueur').slice(0, 30);
+}
+
+function tournCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+}
+
+function tournTid(data) {
+  const tid = idStr(data.tid);
+  if (!tid) throw new HttpError('invalid-argument', 'Tournoi inconnu.');
+  return tid;
+}
+
+/** Vérifie que le tournoi accepte encore des inscriptions. */
+function tournOpenCheck(t, type) {
+  if (!t) throw new HttpError('not-found', 'Tournoi introuvable.');
+  if (t.status !== 'open') {
+    throw new HttpError('failed-precondition', "Les inscriptions ne sont plus ouvertes.");
+  }
+  if (Date.now() >= intOr(t.regDeadline, 0)) {
+    throw new HttpError('failed-precondition', "La date limite d'inscription est dépassée.");
+  }
+  if (type && t.type !== type) {
+    throw new HttpError('failed-precondition', 'Ce tournoi ne fonctionne pas ainsi.');
+  }
+}
+
+/** Administrateur : crée un tournoi à partir d'un modèle (katika ou mondly). */
+async function adminTournamentCreate({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const tpl = TOURN_TEMPLATES[String(data.type || '')];
+  if (!tpl) throw new HttpError('invalid-argument', 'Type de tournoi inconnu.');
+  const startAt = intOr(data.startAt, 0);
+  const regDeadline = intOr(data.regDeadline, 0);
+  const now = Date.now();
+  if (startAt <= now) throw new HttpError('invalid-argument', 'La date de début doit être dans le futur.');
+  if (regDeadline <= now || regDeadline > startAt) {
+    throw new HttpError('invalid-argument', "La clôture des inscriptions doit être entre maintenant et le début.");
+  }
+  let fee = Math.max(100, intOr(data.fee, tpl.fee));
+  let capacity = tpl.capacity;
+  let prizes = tpl.prizes;
+  let title = String(data.title || tpl.title).slice(0, 60);
+  if (data.test === true) {
+    // Tournoi d'essai : 4 joueurs, 100 FCFA, gains = total des inscriptions.
+    fee = 100;
+    capacity = 4;
+    prizes = String(data.type) === 'katika' ? [250, 150, 0, 0] : [200, 100, 50, 50];
+    title += ' (TEST)';
+  }
+  const id = newId();
+  await runTx(env, async (tx) => {
+    tx.write(`tournaments/${id}`, {
+      create: true,
+      set: {
+        type: String(data.type),
+        title,
+        fee,
+        capacity,
+        teamSize: tpl.teamSize,
+        prizes,
+        startAt,
+        regDeadline,
+        status: 'open',
+        taken: 0,
+        paid: 0,
+      },
+      serverTime: ['createdAt'],
+    });
+  });
+  return { id };
+}
+
+/** Liste des tournois + mes inscriptions. Clôture au passage les inscriptions échues. */
+async function tournamentList({ uid, env }) {
+  await accessToken(env);
+  const now = Date.now();
+  const open = await queryDocs(env, 'tournaments', eqFilter('status', 'open'), 30);
+  for (const t of open) {
+    if (intOr(t.regDeadline, 0) <= now) {
+      try {
+        await cancelTournament(env, t.id, 'deadline');
+      } catch (e) {
+        console.error('tournoi echeance', e);
+      }
+    }
+  }
+  for (const st of ['ready', 'running']) {
+    const docs = await queryDocs(env, 'tournaments', eqFilter('status', st), 30);
+    for (const t of docs) {
+      try {
+        if (st === 'ready') await startTournament(env, t.id, false);
+        else await advanceTournament(env, t.id);
+      } catch (e) {
+        console.error('tournoi avance', e);
+      }
+    }
+  }
+  const out = [];
+  for (const st of ['open', 'ready', 'running', 'finished', 'cancelled']) {
+    const docs = await queryDocs(env, 'tournaments', eqFilter('status', st), st === 'open' || st === 'ready' || st === 'running' ? 30 : 8);
+    for (const t of docs) out.push(t);
+  }
+  const live = (t) => t.status === 'open' || t.status === 'ready' || t.status === 'running';
+  out.sort((a, b) => {
+    if (live(a) !== live(b)) return live(a) ? -1 : 1;
+    return live(a) ? intOr(a.startAt, 0) - intOr(b.startAt, 0) : intOr(b.startAt, 0) - intOr(a.startAt, 0);
+  });
+  const ids = new Set(out.map((t) => t.id));
+  const mineAll = await queryDocs(env, 'tournamentEntries', eqFilter('uid', uid), 100);
+  const mine = [];
+  for (const e of mineAll) {
+    if (e.status !== 'paid' || !ids.has(e.tid)) continue;
+    let team = null;
+    if (e.teamId) {
+      const tm = await readDoc(env, `tournamentTeams/${e.teamId}`);
+      if (tm && tm.status !== 'cancelled') {
+        const leader = tm.leaderUid === uid;
+        team = {
+          id: e.teamId,
+          name: tm.name || '',
+          status: tm.status,
+          leader,
+          names: Array.isArray(tm.names) ? tm.names : [],
+          code: leader && tm.status === 'pending' ? tm.inviteCode : '',
+        };
+      }
+    }
+    mine.push({ tid: e.tid, team });
+  }
+  const tournaments = out.map((t) => ({
+    id: t.id,
+    type: t.type,
+    title: t.title,
+    fee: intOr(t.fee, 0),
+    capacity: intOr(t.capacity, 0),
+    teamSize: intOr(t.teamSize, 1),
+    prizes: Array.isArray(t.prizes) ? t.prizes : [],
+    startAt: intOr(t.startAt, 0),
+    regDeadline: intOr(t.regDeadline, 0),
+    status: t.status,
+    taken: intOr(t.taken, 0),
+    paid: intOr(t.paid, 0),
+    rounds: intOr(t.rounds, 0),
+    placings: Array.isArray(t.placings) ? t.placings : [],
+  }));
+  const matchesMine = await myTournMatches(env, uid, ids);
+  return { tournaments, mine, matches: matchesMine, now, admin: adminIds(env).includes(uid) };
+}
+
+/** Écrit l'inscription payée d'un joueur (appelé dans une transaction). */
+function tournPay(tx, t, tid, uid, me, teamId) {
+  const fee = intOr(t.fee, 0);
+  if (balanceOf(me) < fee) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+  tx.write(`users/${uid}`, { incr: { balance: -fee } });
+  tx.write(`tournamentEntries/${tid}_${uid}`, {
+    set: { tid, uid, name: tournName(me), teamId: teamId || '', status: 'paid', fee },
+    serverTime: ['createdAt'],
+  });
+}
+
+/** Inscription individuelle (Katika Mondly). */
+async function tournamentRegister({ uid, data, env }) {
+  const tid = tournTid(data);
+  return runTx(env, async (tx) => {
+    const t = await tx.get(`tournaments/${tid}`);
+    tournOpenCheck(t, 'mondly');
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const old = await tx.get(`tournamentEntries/${tid}_${uid}`);
+    if (old && old.status === 'paid') throw new HttpError('failed-precondition', 'Tu es déjà inscrit.');
+    if (intOr(t.taken, 0) >= intOr(t.capacity, 0)) {
+      throw new HttpError('failed-precondition', 'Le tournoi est complet.');
+    }
+    tournPay(tx, t, tid, uid, me, '');
+    const paid = intOr(t.paid, 0) + 1;
+    const set = {};
+    if (paid >= intOr(t.capacity, 0)) set.status = 'ready';
+    tx.write(`tournaments/${tid}`, { incr: { taken: 1, paid: 1 }, set });
+    return { balance: balanceOf(me) - intOr(t.fee, 0) };
+  });
+}
+
+/** Katika Tournament : le chef d'équipe crée le duo, paie, et reçoit un code à donner à son partenaire. */
+async function tournamentTeamCreate({ uid, data, env }) {
+  const tid = tournTid(data);
+  const code = tournCode();
+  const teamId = newId();
+  return runTx(env, async (tx) => {
+    const t = await tx.get(`tournaments/${tid}`);
+    tournOpenCheck(t, 'katika');
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const old = await tx.get(`tournamentEntries/${tid}_${uid}`);
+    if (old && old.status === 'paid') throw new HttpError('failed-precondition', 'Tu es déjà inscrit.');
+    if (intOr(t.taken, 0) + 2 > intOr(t.capacity, 0)) {
+      throw new HttpError('failed-precondition', 'Plus de place pour une équipe.');
+    }
+    tournPay(tx, t, tid, uid, me, teamId);
+    const nm = tournName(me);
+    tx.write(`tournamentTeams/${teamId}`, {
+      create: true,
+      set: {
+        tid,
+        name: String(data.teamName || `Équipe ${nm}`).trim().slice(0, 30),
+        leaderUid: uid,
+        members: [uid],
+        names: [nm],
+        paid: 1,
+        inviteCode: code,
+        status: 'pending',
+      },
+      serverTime: ['createdAt'],
+    });
+    tx.write(`tournaments/${tid}`, { incr: { taken: 2, paid: 1 } });
+    return { teamId, code, balance: balanceOf(me) - intOr(t.fee, 0) };
+  });
+}
+
+/** Le partenaire rejoint le duo avec le code et paie sa part. */
+async function tournamentTeamJoin({ uid, data, env }) {
+  const code = String(data.code || '').trim().toUpperCase().slice(0, 12);
+  if (!code) throw new HttpError('invalid-argument', "Entre le code d'équipe.");
+  const found = await queryDocs(env, 'tournamentTeams', eqFilter('inviteCode', code), 5);
+  const team0 = found.find((x) => x.status === 'pending');
+  if (!team0) throw new HttpError('not-found', 'Code inconnu ou équipe déjà complète.');
+  const tid = team0.tid;
+  const teamId = team0.id;
+  return runTx(env, async (tx) => {
+    const t = await tx.get(`tournaments/${tid}`);
+    tournOpenCheck(t, 'katika');
+    const team = await tx.get(`tournamentTeams/${teamId}`);
+    if (!team || team.status !== 'pending') {
+      throw new HttpError('failed-precondition', 'Équipe déjà complète ou annulée.');
+    }
+    if (team.leaderUid === uid) {
+      throw new HttpError('invalid-argument', 'Tu es déjà le chef de cette équipe.');
+    }
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const old = await tx.get(`tournamentEntries/${tid}_${uid}`);
+    if (old && old.status === 'paid') throw new HttpError('failed-precondition', 'Tu es déjà inscrit à ce tournoi.');
+    tournPay(tx, t, tid, uid, me, teamId);
+    tx.write(`tournamentTeams/${teamId}`, {
+      set: {
+        members: [team.leaderUid, uid],
+        names: [...(Array.isArray(team.names) ? team.names : []), tournName(me)],
+        paid: 2,
+        status: 'complete',
+      },
+    });
+    const paid = intOr(t.paid, 0) + 1;
+    const set = {};
+    if (paid >= intOr(t.capacity, 0)) set.status = 'ready';
+    tx.write(`tournaments/${tid}`, { incr: { paid: 1 }, set });
+    return { tid, balance: balanceOf(me) - intOr(t.fee, 0) };
+  });
+}
+
+/** Désinscription (avant la date limite) : remboursement intégral. */
+async function tournamentLeave({ uid, data, env }) {
+  const tid = tournTid(data);
+  return runTx(env, async (tx) => {
+    const t = await tx.get(`tournaments/${tid}`);
+    if (!t) throw new HttpError('not-found', 'Tournoi introuvable.');
+    if (!(t.status === 'open' || t.status === 'ready') || Date.now() >= intOr(t.regDeadline, 0)) {
+      throw new HttpError('failed-precondition', 'Tu ne peux plus te désinscrire.');
+    }
+    const me = await tx.get(`users/${uid}`);
+    const en = await tx.get(`tournamentEntries/${tid}_${uid}`);
+    if (!me || !en || en.status !== 'paid') {
+      throw new HttpError('failed-precondition', "Tu n'es pas inscrit.");
+    }
+    const fee = intOr(en.fee, intOr(t.fee, 0));
+    const refund = (u, e, who) => {
+      tx.write(`users/${who}`, { incr: { balance: fee } });
+      tx.write(`tournamentEntries/${tid}_${who}`, { set: { status: 'refunded' } });
+    };
+    let dTaken = -1;
+    let dPaid = -1;
+    if (!en.teamId) {
+      refund(me, en, uid);
+    } else {
+      const team = await tx.get(`tournamentTeams/${en.teamId}`);
+      if (!team) throw new HttpError('not-found', 'Équipe introuvable.');
+      if (team.leaderUid === uid) {
+        refund(me, en, uid);
+        dTaken = -2;
+        if (team.status === 'complete') {
+          const other = (team.members || []).find((m) => m !== uid);
+          const oe = other ? await tx.get(`tournamentEntries/${tid}_${other}`) : null;
+          if (oe && oe.status === 'paid') {
+            tx.write(`users/${other}`, { incr: { balance: fee } });
+            tx.write(`tournamentEntries/${tid}_${other}`, { set: { status: 'refunded' } });
+            dPaid = -2;
+          }
+        }
+        tx.write(`tournamentTeams/${en.teamId}`, { set: { status: 'cancelled' } });
+      } else {
+        refund(me, en, uid);
+        dTaken = 0;
+        tx.write(`tournamentTeams/${en.teamId}`, {
+          set: {
+            members: [team.leaderUid],
+            names: [(Array.isArray(team.names) && team.names[0]) || ''],
+            paid: 1,
+            status: 'pending',
+          },
+        });
+      }
+    }
+    const set = t.status === 'ready' ? { status: 'open' } : {};
+    tx.write(`tournaments/${tid}`, { incr: { taken: dTaken, paid: dPaid }, set });
+    return { refunded: fee, balance: balanceOf(me) + fee };
+  });
+}
+
+// ======================================================================
+// Tournois, étape 2 : tableau, parties Ludo automatiques, résultats, gains
+// ======================================================================
+// tournamentMatches/{id} : une table (Mondly : 4 joueurs) ou un match
+//   (Katika : 2 équipes de 2). Chaque match crée une partie Ludo dans « games »
+//   (sans mise : les frais d'inscription forment la cagnotte du tournoi).
+
+const MATCH_MAX_MS = 60 * 60 * 1000; // au-delà : le serveur tranche à la progression
+
+function cryptoShuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function arrayContainsFilter(field, value) {
+  return {
+    fieldFilter: { field: { fieldPath: field }, op: 'ARRAY_CONTAINS', value: toFs(value) },
+  };
+}
+
+function pawnsProgress(g, c) {
+  const p = g['p' + c];
+  return Array.isArray(p) ? p.reduce((s, x) => s + Math.max(0, intOr(x, 0)), 0) : 0;
+}
+
+function pawnsAllHome(g, c) {
+  const p = g['p' + c];
+  return Array.isArray(p) && p.length > 0 && p.every((x) => x === 56);
+}
+
+/** Document « games » d'une table : 4 places, sans mise, salle privée. */
+function tournGameDoc(t, tid, mid, seats, teamMode) {
+  const pawns = () => [-1, -1, -1, -1];
+  return {
+    hostUid: seats[0].uid,
+    hostName: seats[0].name,
+    maxPlayers: 4,
+    pawnCount: 4,
+    doorSafe: true,
+    starSafe: true,
+    startOut: false,
+    startDoor: false,
+    autoSecs: 10,
+    private: true,
+    teamMode,
+    capturePay: 0,
+    stake: 0,
+    paid: [],
+    pot: 0,
+    partners: teamMode ? [2, 3, 0, 1] : [-1, -1, -1, -1],
+    invites: [],
+    code: tournCode(),
+    status: 'playing',
+    players: seats.map((s) => ({ uid: s.uid, name: s.name })),
+    uids: seats.map((s) => s.uid),
+    p0: pawns(),
+    p1: pawns(),
+    p2: pawns(),
+    p3: pawns(),
+    cur: 0,
+    hasRolled: false,
+    dice: 1,
+    lastRoll: [1, 1, 1, 1],
+    msg: 'Touche ton dé ou glisse-le pour le lancer !',
+    over: false,
+    writer: '',
+    rev: 0,
+    tournamentId: tid,
+    matchId: mid,
+    finishTarget: t.type === 'mondly' ? 2 : 1,
+    finishOrder: [],
+  };
+}
+
+/** Crée une table / un match et sa partie Ludo.
+ *  spec : { round, idx, kind, players:[{uid,name}×4] }  (Mondly)
+ *      ou { round, idx, kind, teams:[{id,name,uids,names}×2] } (Katika) */
+async function createTournMatch(env, t, tid, spec) {
+  const mid = newId();
+  const gid = newId();
+  let seats;
+  const base = { tid, round: spec.round, idx: spec.idx, kind: spec.kind, mode: t.type };
+  const mdoc = { ...base, gameId: gid, status: 'playing', startedMs: Date.now() };
+  if (t.type === 'katika') {
+    const [A, B] = spec.teams;
+    seats = [
+      { uid: A.uids[0], name: A.names[0] },
+      { uid: B.uids[0], name: B.names[0] },
+      { uid: A.uids[1], name: A.names[1] },
+      { uid: B.uids[1], name: B.names[1] },
+    ];
+    mdoc.teams = spec.teams;
+  } else {
+    seats = cryptoShuffle(spec.players);
+    mdoc.players = seats;
+  }
+  mdoc.uids = seats.map((s) => s.uid);
+  await runTx(env, async (tx) => {
+    tx.write(`games/${gid}`, {
+      create: true,
+      set: tournGameDoc(t, tid, mid, seats, t.type === 'katika'),
+      serverTime: ['createdAt', 'startedAt'],
+    });
+    tx.write(`tournamentMatches/${mid}`, { create: true, set: mdoc });
+  });
+  return { id: mid, ...mdoc };
+}
+
+/** Passe un tournoi « ready » en « running » et crée le premier tour. */
+async function startTournament(env, tid, force) {
+  let t = null;
+  await runTx(env, async (tx) => {
+    const cur = await tx.get(`tournaments/${tid}`);
+    if (!cur) throw new HttpError('not-found', 'Tournoi introuvable.');
+    if (cur.status !== 'ready') throw new HttpError('failed-precondition', "Le tournoi n'est pas complet.");
+    if (!force && Date.now() < intOr(cur.startAt, 0)) return;
+    const cap = intOr(cur.capacity, 0);
+    const first = cur.type === 'katika' ? cap / 2 : cap / 4;
+    const rounds = cur.type === 'katika' ? Math.log2(first) : Math.log2(first) + 1;
+    tx.write(`tournaments/${tid}`, {
+      set: { status: 'running', rounds, bracketBuilt: false },
+      serverTime: ['runningAt'],
+    });
+    t = { ...cur, status: 'running', rounds };
+  });
+  if (!t) return false;
+  await buildBracket(env, tid, t);
+  return true;
+}
+
+async function buildBracket(env, tid, t) {
+  const existing = await queryDocs(env, 'tournamentMatches', eqFilter('tid', tid), 5);
+  if (existing.length === 0) {
+    if (t.type === 'katika') {
+      const teams = (await queryDocs(env, 'tournamentTeams', eqFilter('tid', tid), 100))
+        .filter((x) => x.status === 'complete')
+        .map((x) => ({
+          id: x.id,
+          name: x.name || '',
+          uids: x.members,
+          names: x.names,
+        }));
+      const sh = cryptoShuffle(teams);
+      for (let i = 0; i + 1 < sh.length; i += 2) {
+        await createTournMatch(env, t, tid, { round: 1, idx: i / 2, kind: 'main', teams: [sh[i], sh[i + 1]] });
+      }
+    } else {
+      const ps = (await queryDocs(env, 'tournamentEntries', eqFilter('tid', tid), 300))
+        .filter((e) => e.status === 'paid')
+        .map((e) => ({ uid: e.uid, name: e.name || '' }));
+      const sh = cryptoShuffle(ps);
+      for (let i = 0; i + 3 < sh.length; i += 4) {
+        await createTournMatch(env, t, tid, { round: 1, idx: i / 4, kind: 'main', players: sh.slice(i, i + 4) });
+      }
+    }
+  }
+  await runTx(env, async (tx) => {
+    tx.write(`tournaments/${tid}`, { set: { bracketBuilt: true } });
+  });
+}
+
+/** Résultat Katika : numéro (0/1) de l'équipe gagnante. Les places 0 et 2 = équipe A, 1 et 3 = équipe B. */
+function katikaWinnerTeam(g) {
+  const forf = Array.isArray(g.forfeited) ? g.forfeited : [];
+  let w = intOr(g.winner, -1);
+  if (w < 0) {
+    const f = [0, 1, 2, 3].find((c) => !forf.includes(c) && pawnsAllHome(g, c));
+    w = f === undefined ? -1 : f;
+  }
+  if (w >= 0) return w % 2;
+  const sc = [0, 0];
+  for (const c of [0, 1, 2, 3]) if (!forf.includes(c)) sc[c % 2] += pawnsProgress(g, c);
+  if (sc[0] === sc[1]) return crypto.getRandomValues(new Uint8Array(1))[0] % 2;
+  return sc[0] > sc[1] ? 0 : 1;
+}
+
+/** Résultat Mondly : couleurs classées. Arrivés dans l'ordre, puis les autres selon leur progression. */
+function mondlyRanking(g) {
+  const forf = Array.isArray(g.forfeited) ? g.forfeited : [];
+  const fo = (Array.isArray(g.finishOrder) ? g.finishOrder : []).map((x) => intOr(x, -1));
+  const order = [];
+  for (const c of fo) if (c >= 0 && c < 4 && !order.includes(c) && pawnsAllHome(g, c)) order.push(c);
+  for (const c of [0, 1, 2, 3]) {
+    if (!order.includes(c) && !forf.includes(c) && pawnsAllHome(g, c)) order.push(c);
+  }
+  const rest = [0, 1, 2, 3]
+    .filter((c) => !order.includes(c))
+    .sort((a, b) => {
+      const sa = forf.includes(a) ? -1 : pawnsProgress(g, a);
+      const sb = forf.includes(b) ? -1 : pawnsProgress(g, b);
+      return sb - sa;
+    });
+  return [...order, ...rest];
+}
+
+/** Fait avancer un tournoi en cours : enregistre les parties finies, crée les matchs suivants, paie les gains. */
+async function advanceTournament(env, tid) {
+  const t = await readDoc(env, `tournaments/${tid}`);
+  if (!t || t.status !== 'running') return;
+  if (!t.bracketBuilt) {
+    await buildBracket(env, tid, t);
+  }
+  const matches = await queryDocs(env, 'tournamentMatches', eqFilter('tid', tid), 200);
+  const rounds = intOr(t.rounds, 1);
+  const now = Date.now();
+
+  for (const m of matches) {
+    if (m.status !== 'playing') continue;
+    const g = await readDoc(env, `games/${m.gameId}`);
+    if (!g) continue;
+    let over = g.over === true;
+    if (!over && now - intOr(m.startedMs, now) > MATCH_MAX_MS) {
+      over = true;
+      await runTx(env, async (tx) => {
+        tx.write(`games/${m.gameId}`, { set: { over: true, status: 'finished', msg: 'Temps écoulé : décision du serveur.' } });
+      });
+    }
+    if (!over) continue;
+    const res = { status: 'done' };
+    if (m.mode === 'katika') {
+      const wt = katikaWinnerTeam(g);
+      res.winnerTeam = wt;
+      res.advance = m.teams[wt].uids;
+    } else {
+      const rk = mondlyRanking(g).map((c) => m.players[c]);
+      res.ranking = rk;
+      res.advance = [rk[0].uid, rk[1].uid];
+    }
+    await runTx(env, async (tx) => {
+      tx.write(`tournamentMatches/${m.id}`, { set: res, serverTime: ['doneAt'] });
+    });
+    Object.assign(m, res);
+  }
+
+  const find = (round, idx, kind) => matches.find((x) => x.round === round && x.idx === idx && x.kind === kind);
+  const winnerTeam = (m) => m.teams[m.winnerTeam];
+  const loserTeam = (m) => m.teams[1 - m.winnerTeam];
+
+  for (let r = 1; r < rounds; r++) {
+    for (let j = 0; ; j++) {
+      const a = find(r, j * 2, 'main');
+      const b = find(r, j * 2 + 1, 'main');
+      if (!a || !b) break;
+      if (a.status !== 'done' || b.status !== 'done') continue;
+      if (find(r + 1, j, 'main')) continue;
+      let nm;
+      if (t.type === 'katika') {
+        nm = await createTournMatch(env, t, tid, { round: r + 1, idx: j, kind: 'main', teams: [winnerTeam(a), winnerTeam(b)] });
+      } else {
+        const ps = [...a.ranking.slice(0, 2), ...b.ranking.slice(0, 2)];
+        nm = await createTournMatch(env, t, tid, { round: r + 1, idx: j, kind: 'main', players: ps });
+      }
+      matches.push(nm);
+    }
+  }
+  // Katika : petite finale entre les deux perdants des demi-finales.
+  if (t.type === 'katika' && rounds >= 2 && !find(rounds, 0, 'third')) {
+    const s0 = find(rounds - 1, 0, 'main');
+    const s1 = find(rounds - 1, 1, 'main');
+    if (s0 && s1 && s0.status === 'done' && s1.status === 'done') {
+      const nm = await createTournMatch(env, t, tid, { round: rounds, idx: 0, kind: 'third', teams: [loserTeam(s0), loserTeam(s1)] });
+      matches.push(nm);
+    }
+  }
+
+  const fin = find(rounds, 0, 'main');
+  const third = find(rounds, 0, 'third');
+  if (fin && fin.status === 'done' && (t.type === 'mondly' || rounds === 1 || (third && third.status === 'done'))) {
+    await finishTournament(env, tid, t, fin, third);
+  }
+}
+
+/** Calcule le classement final et verse les gains (une seule fois). */
+async function finishTournament(env, tid, t, fin, third) {
+  const prizes = (Array.isArray(t.prizes) ? t.prizes : []).map((x) => intOr(x, 0));
+  const places = []; // { place, label, uids }
+  if (t.type === 'katika') {
+    places.push({ place: 1, label: fin.teams[fin.winnerTeam].name, uids: fin.teams[fin.winnerTeam].uids });
+    places.push({ place: 2, label: fin.teams[1 - fin.winnerTeam].name, uids: fin.teams[1 - fin.winnerTeam].uids });
+    if (third) {
+      places.push({ place: 3, label: third.teams[third.winnerTeam].name, uids: third.teams[third.winnerTeam].uids });
+      places.push({ place: 4, label: third.teams[1 - third.winnerTeam].name, uids: third.teams[1 - third.winnerTeam].uids });
+    }
+  } else {
+    fin.ranking.forEach((p, i) => places.push({ place: i + 1, label: p.name, uids: [p.uid] }));
+  }
+  let paid = false;
+  await runTx(env, async (tx) => {
+    const cur = await tx.get(`tournaments/${tid}`);
+    if (!cur || cur.status !== 'running') return;
+    for (const pl of places) {
+      const total = prizes[pl.place - 1] || 0;
+      if (total <= 0) continue;
+      const each = Math.floor(total / pl.uids.length);
+      for (const u of pl.uids) {
+        tx.write(`users/${u}`, { incr: { balance: each } });
+        tx.write(`tournamentPayouts/${newId()}`, {
+          create: true,
+          set: { tid, uid: u, place: pl.place, amount: each },
+          serverTime: ['createdAt'],
+        });
+      }
+    }
+    tx.write(`tournaments/${tid}`, {
+      set: { status: 'finished', placings: places.map((p) => ({ place: p.place, label: p.label, uids: p.uids })) },
+      serverTime: ['finishedAt'],
+    });
+    paid = true;
+  });
+  if (paid) {
+    await notifyAdmin(env, `Tournoi « ${t.title} » terminé. Vainqueur : ${places[0] ? places[0].label : '?'}. Gains versés.`).catch(() => {});
+  }
+}
+
+/** Administrateur : démarre tout de suite un tournoi complet (sans attendre l'heure prévue). */
+async function adminTournamentStart({ uid, data, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const ok = await startTournament(env, tournTid(data), true);
+  return { started: ok };
+}
+
+/** Mes tables (en cours et récentes) pour la liste des tournois. */
+async function myTournMatches(env, uid, ids) {
+  const list = await queryDocs(env, 'tournamentMatches', arrayContainsFilter('uids', uid), 60);
+  return list
+    .filter((m) => ids.has(m.tid))
+    .map((m) => ({
+      tid: m.tid,
+      id: m.id,
+      gameId: m.gameId,
+      round: intOr(m.round, 1),
+      kind: m.kind,
+      status: m.status,
+      advanced: Array.isArray(m.advance) && m.advance.includes(uid),
+      startedMs: intOr(m.startedMs, 0),
+    }))
+    .sort((a, b) => b.startedMs - a.startedMs);
+}
+
+/** Annule un tournoi et rembourse tous les inscrits payés (reprise possible si interrompu). */
+async function cancelTournament(env, tid, why) {
+  let announce = false;
+  await runTx(env, async (tx) => {
+    const t = await tx.get(`tournaments/${tid}`);
+    if (!t) throw new HttpError('not-found', 'Tournoi introuvable.');
+    if (t.status === 'cancelled') return;
+    if (t.status === 'running' || t.status === 'finished') {
+      throw new HttpError('failed-precondition', 'Ce tournoi a déjà commencé.');
+    }
+    if (why === 'deadline' && t.status !== 'open') return; // complet : il peut démarrer
+    tx.write(`tournaments/${tid}`, { set: { status: 'cancelled', cancelReason: why } });
+    announce = true;
+  });
+  const t2 = await readDoc(env, `tournaments/${tid}`);
+  if (!t2 || t2.status !== 'cancelled') return { refunded: 0 };
+  const entries = await queryDocs(env, 'tournamentEntries', eqFilter('tid', tid), 300);
+  let refunded = 0;
+  for (const e of entries) {
+    if (e.status !== 'paid') continue;
+    const ok = await runTx(env, async (tx) => {
+      const en = await tx.get(`tournamentEntries/${tid}_${e.uid}`);
+      if (!en || en.status !== 'paid') return false;
+      const fee = intOr(en.fee, intOr(t2.fee, 0));
+      tx.write(`users/${e.uid}`, { incr: { balance: fee } });
+      tx.write(`tournamentEntries/${tid}_${e.uid}`, { set: { status: 'refunded' } });
+      return true;
+    });
+    if (ok) refunded++;
+  }
+  const teams = await queryDocs(env, 'tournamentTeams', eqFilter('tid', tid), 100);
+  for (const tm of teams) {
+    if (tm.status === 'cancelled') continue;
+    await runTx(env, async (tx) => {
+      tx.write(`tournamentTeams/${tm.id}`, { set: { status: 'cancelled' } });
+    });
+  }
+  if (announce) {
+    await notifyAdmin(
+      env,
+      `Tournoi « ${t2.title} » annulé (${why === 'deadline' ? 'pas assez d\'inscrits' : 'décision admin'}) — ${refunded} joueur(s) remboursé(s).`,
+    ).catch(() => {});
+  }
+  return { refunded };
+}
+
+async function adminTournamentCancel({ uid, data, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  return cancelTournament(env, tournTid(data), 'admin');
+}
+
+/** Administrateur : liste des inscrits payés d'un tournoi. */
+async function adminTournamentEntries({ uid, data, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const tid = tournTid(data);
+  const list = await queryDocs(env, 'tournamentEntries', eqFilter('tid', tid), 300);
+  return {
+    entries: list
+      .filter((e) => e.status === 'paid')
+      .map((e) => ({ uid: e.uid, name: e.name || '', teamId: e.teamId || '' })),
+  };
+}
+
 const HANDLERS = {
   ensureWallet,
   applyPromo,
@@ -3402,6 +4156,15 @@ const HANDLERS = {
   partnerStats,
   partnerWithdraw,
   transfer,
+  adminTournamentCreate,
+  tournamentList,
+  tournamentRegister,
+  tournamentTeamCreate,
+  tournamentTeamJoin,
+  tournamentLeave,
+  adminTournamentCancel,
+  adminTournamentEntries,
+  adminTournamentStart,
 };
 
 const CORS = {
