@@ -27,6 +27,13 @@ class _DepositScreenState extends State<DepositScreen> {
 
   String code = '0529831';
   String ussdTemplate = '#150*47*0529831*{amount}*2#';
+  String mtnCode = '98152898';
+  String mtnTemplate = '*126*4*98152898*{amount}#';
+  String op = 'orange'; // opérateur choisi pour la recharge manuelle : orange | mtn
+
+  bool get _mtn => op == 'mtn';
+  String get _opName => _mtn ? 'MTN MoMo' : 'Orange Money';
+  String get _code => _mtn ? mtnCode : code;
   int minAmount = 100;
   int maxAmount = 250000;
 
@@ -69,6 +76,11 @@ class _DepositScreenState extends State<DepositScreen> {
         setState(() {
           code = '${info['code'] ?? code}';
           ussdTemplate = '${info['ussd'] ?? ussdTemplate}';
+          final m = info['mtn'];
+          if (m is Map) {
+            mtnCode = '${m['code'] ?? mtnCode}';
+            mtnTemplate = '${m['ussd'] ?? mtnTemplate}';
+          }
           minAmount = (info['depositMin'] as num?)?.toInt() ?? minAmount;
           maxAmount = (info['depositMax'] as num?)?.toInt() ?? maxAmount;
         });
@@ -96,8 +108,8 @@ class _DepositScreenState extends State<DepositScreen> {
 
   int get _amount => int.tryParse(amountCtrl.text.trim()) ?? 0;
 
-  String get _ussd =>
-      ussdTemplate.replaceAll('{amount}', _amount > 0 ? '$_amount' : 'MONTANT');
+  String get _ussd => (_mtn ? mtnTemplate : ussdTemplate)
+      .replaceAll('{amount}', _amount > 0 ? '$_amount' : 'MONTANT');
 
   Future<void> _dial() async {
     if (_amount < minAmount || _amount > maxAmount) {
@@ -141,8 +153,11 @@ class _DepositScreenState extends State<DepositScreen> {
       return;
     }
     if (!RegExp(r'^(237)?6\d{8}$').hasMatch(phone)) {
-      setState(() => error = tr('Numéro Orange invalide (ex : 690000000).',
-          'Invalid Orange number (e.g. 690000000).'));
+      setState(() => error = _mtn
+          ? tr('Numéro MTN invalide (ex : 670000000).',
+              'Invalid MTN number (e.g. 670000000).')
+          : tr('Numéro Orange invalide (ex : 690000000).',
+              'Invalid Orange number (e.g. 690000000).'));
       return;
     }
     if (ref.replaceAll(RegExp(r'[^A-Za-z0-9.]'), '').length < 6) {
@@ -157,7 +172,8 @@ class _DepositScreenState extends State<DepositScreen> {
       done = null;
     });
     try {
-      await Wallet.manualDeposit(amount: _amount, phone: phone, txRef: ref);
+      await Wallet.manualDeposit(
+          amount: _amount, phone: phone, txRef: ref, operator: op);
       if (!mounted) return;
       setState(() {
         done = tr(
@@ -282,8 +298,41 @@ class _DepositScreenState extends State<DepositScreen> {
           ),
         );
     return _card([
+      Row(
+        children: [
+          for (final o in const ['orange', 'mtn']) ...[
+            Expanded(
+              child: GestureDetector(
+                onTap: sending ? null : () => setState(() => op = o),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: op == o
+                        ? (o == 'mtn' ? const Color(0xFFFFCC00) : const Color(0xFFFF7900))
+                        : Colors.white12,
+                    border: Border.all(
+                        color: op == o ? Colors.white : Colors.white24, width: 1.5),
+                  ),
+                  child: Text(
+                    o == 'mtn' ? '🟡 MTN MoMo' : '🟠 Orange Money',
+                    style: TextStyle(
+                      color: op == o && o == 'mtn' ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (o == 'orange') const SizedBox(width: 8),
+          ],
+        ],
+      ),
+      const SizedBox(height: 12),
       Text(
-        tr('Recharger par Orange Money', 'Top up with Orange Money'),
+        tr('Recharger par $_opName', 'Top up with $_opName'),
         style: const TextStyle(
           color: Colors.white,
           fontSize: 16,
@@ -292,8 +341,8 @@ class _DepositScreenState extends State<DepositScreen> {
       ),
       const SizedBox(height: 4),
       Text(
-        tr('Orange Money uniquement. 1 FCFA = 1 jeton.',
-            'Orange Money only. 1 FCFA = 1 token.'),
+        tr('Choisis ton opérateur ci-dessus. 1 FCFA = 1 jeton.',
+            'Choose your operator above. 1 FCFA = 1 token.'),
         style: const TextStyle(color: Colors.white70, fontSize: 12),
       ),
       const SizedBox(height: 12),
@@ -391,7 +440,7 @@ class _DepositScreenState extends State<DepositScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              tr('Code marchand : $code', 'Merchant code: $code'),
+              tr('Code marchand $_opName : $_code', '$_opName merchant code: $_code'),
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
             const SizedBox(height: 10),
@@ -400,8 +449,9 @@ class _DepositScreenState extends State<DepositScreen> {
                 Expanded(
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7900),
-                      foregroundColor: Colors.white,
+                      backgroundColor:
+                          _mtn ? const Color(0xFFFFCC00) : const Color(0xFFFF7900),
+                      foregroundColor: _mtn ? Colors.black : Colors.white,
                     ),
                     onPressed: _dial,
                     icon: const Icon(Icons.phone),
@@ -419,13 +469,16 @@ class _DepositScreenState extends State<DepositScreen> {
           ],
         ),
       ),
-      _label(tr('Ton numéro Orange Money', 'Your Orange Money number')),
+      _label(tr('Ton numéro $_opName', 'Your $_opName number')),
       TextField(
         controller: phoneCtrl,
         enabled: !sending,
         keyboardType: TextInputType.phone,
         style: const TextStyle(color: Colors.white),
-        decoration: _dec(tr('Numéro (ex : 690000000)', 'Number (e.g. 690000000)'),
+        decoration: _dec(
+            _mtn
+                ? tr('Numéro (ex : 670000000)', 'Number (e.g. 670000000)')
+                : tr('Numéro (ex : 690000000)', 'Number (e.g. 690000000)'),
             Icons.phone_android),
       ),
       _label(tr('Identifiant de la transaction (SMS)',
