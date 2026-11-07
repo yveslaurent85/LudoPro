@@ -2326,7 +2326,6 @@ function requireAdmin(uid, env) {
     throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
   }
 }
-
 function eqFilter(field, value) {
   return {
     fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: toFs(value) },
@@ -2701,6 +2700,8 @@ async function campayWebhook(request, env) {
 const CAMPAY_ENABLED = false; // Campay désactivé : recharge uniquement par code marchand
 const OM_MERCHANT_CODE = '0529831'; // peut être remplacé par la variable OM_MERCHANT_CODE
 const OM_USSD_TEMPLATE = '#150*47*{code}*{amount}*2#'; // {amount} = montant saisi par le client
+const MTN_MERCHANT_CODE = '98152898'; // code marchand MTN MoMo (variable MTN_MERCHANT_CODE pour le changer)
+const MTN_USSD_TEMPLATE = '*126*4*{code}*{amount}#';
 const MANUAL_DEPOSIT_MIN = 100;
 const MANUAL_DEPOSIT_MAX = 250000;
 const MANUAL_WITHDRAW_MIN = 500;
@@ -2710,6 +2711,10 @@ const MANUAL_MAX_PENDING_WITHDRAWALS = 3;
 
 function merchantCode(env) {
   return String((env && env.OM_MERCHANT_CODE) || OM_MERCHANT_CODE);
+}
+
+function mtnMerchantCode(env) {
+  return String((env && env.MTN_MERCHANT_CODE) || MTN_MERCHANT_CODE);
 }
 
 function normTxRef(v) {
@@ -2723,6 +2728,7 @@ function manualPublic(d) {
     amount: intOr(d.amount, 0),
     phone: typeof d.phone === 'string' ? d.phone : '',
     txRef: typeof d.txRef === 'string' ? d.txRef : '',
+    operator: d.operator === 'mtn' ? 'mtn' : 'orange',
     status: typeof d.status === 'string' ? d.status : 'pending',
     createdAt: typeof d.createdAt === 'string' ? d.createdAt : null,
     closedAt: typeof d.closedAt === 'string' ? d.closedAt : null,
@@ -2736,6 +2742,10 @@ async function manualInfo({ env }) {
   return {
     code: merchantCode(env),
     ussd: OM_USSD_TEMPLATE.replace('{code}', merchantCode(env)),
+    mtn: {
+      code: mtnMerchantCode(env),
+      ussd: MTN_USSD_TEMPLATE.replace('{code}', mtnMerchantCode(env)),
+    },
     depositMin: MANUAL_DEPOSIT_MIN,
     depositMax: MANUAL_DEPOSIT_MAX,
     withdrawMin: MANUAL_WITHDRAW_MIN,
@@ -2790,8 +2800,14 @@ async function manualDepositRequest({ uid, data, env }) {
   if (amount < MANUAL_DEPOSIT_MIN || amount > MANUAL_DEPOSIT_MAX) {
     throw new HttpError('invalid-argument', `Montant entre ${MANUAL_DEPOSIT_MIN} et ${MANUAL_DEPOSIT_MAX} FCFA.`);
   }
+  const operator = data.operator === 'mtn' ? 'mtn' : 'orange';
   const phone = normPhone(data.phone);
-  if (!phone) throw new HttpError('invalid-argument', 'Numéro Orange invalide (ex : 690000000).');
+  if (!phone) {
+    throw new HttpError(
+      'invalid-argument',
+      operator === 'mtn' ? 'Numéro MTN invalide (ex : 670000000).' : 'Numéro Orange invalide (ex : 690000000).',
+    );
+  }
   const txRef = normTxRef(data.txRef);
   if (!txRef) {
     throw new HttpError('invalid-argument', "Entre l'identifiant de la transaction reçu par SMS (6 à 30 caractères).");
@@ -2809,13 +2825,13 @@ async function manualDepositRequest({ uid, data, env }) {
     tx.write(`manualRefs/${txRef}`, { create: true, set: { uid, depositId: id }, serverTime: ['createdAt'] });
     tx.write(`manualDeposits/${id}`, {
       create: true,
-      set: { uid, name: typeof me.pseudo === 'string' ? me.pseudo : '', amount, phone, txRef, status: 'pending' },
+      set: { uid, name: typeof me.pseudo === 'string' ? me.pseudo : '', amount, phone, txRef, operator, status: 'pending' },
       serverTime: ['createdAt'],
     });
   });
   await notifyAdmin(
     env,
-    `⬇️ Recharge à confirmer\n${amount} FCFA · ${phone}\nTransaction : ${txRef}\nOuvre Katika > Admin > Recharges et retraits.`
+    `⬇️ Recharge à confirmer (${operator === 'mtn' ? 'MTN MoMo' : 'Orange Money'})\n${amount} FCFA · ${phone}\nTransaction : ${txRef}\nOuvre Katika > Admin > Recharges et retraits.`
   );
   return { id };
 }
@@ -2991,13 +3007,17 @@ async function sebpayCall(env, method, path, body) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
-    const res = await fetch(SEBPAY_BASE + path, {
+    // SebPay n'accepte que des adresses IP fixes : si SEBPAY_RELAY_URL est défini,
+    // l'appel passe par le serveur relais (IP fixe) qui le transmet à SebPay.
+    const relay = String(env.SEBPAY_RELAY_URL || '').replace(/\/+$/, '');
+    const res = await fetch((relay || SEBPAY_BASE) + path, {
       method,
       headers: {
         'X-Public-Key': env.SEBPAY_PUBLIC_KEY,
         'X-Secret-Key': env.SEBPAY_SECRET_KEY,
         'Content-Type': 'application/json',
         Accept: 'application/json',
+        ...(relay ? { 'X-Relay-Key': String(env.SEBPAY_RELAY_KEY || '') } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
@@ -4628,4 +4648,6 @@ export default {
     }
   },
 };
+
+
 
