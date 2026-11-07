@@ -3634,3 +3634,15 @@ class _DamierRoomState extends State<_DamierRoom> {
     );
   }
 }
+
+/// Ouvre une partie de Damier déjà créée (salle « Deux buts sort »).
+class DamierRoomPage extends StatelessWidget {
+  const DamierRoomPage({super.key, required this.roomId, this.spectate = false});
+
+  final String roomId;
+  final bool spectate;
+
+  @override
+  Widget build(BuildContext context) =>
+      _DamierRoom(roomId: roomId, spectate: spectate);
+}
