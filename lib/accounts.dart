@@ -456,6 +456,22 @@ class Wallet {
   static Future<Map<String, dynamic>> adminTournamentEntries(String tid) =>
       _call('adminTournamentEntries', <String, dynamic>{'tid': tid});
 
+  // -------------------------------------------------- Damier « Deux buts sort »
+  static Future<Map<String, dynamic>> dbList([String? rid]) =>
+      _call('dbList', <String, dynamic>{if (rid != null) 'rid': rid});
+
+  static Future<Map<String, dynamic>> dbCreate({required int stake, required int timeMin}) =>
+      _call('dbCreate', <String, dynamic>{'stake': stake, 'timeMin': timeMin});
+
+  static Future<Map<String, dynamic>> dbJoin(String rid) =>
+      _call('dbJoin', <String, dynamic>{'rid': rid});
+
+  static Future<Map<String, dynamic>> dbLeave(String rid) =>
+      _call('dbLeave', <String, dynamic>{'rid': rid});
+
+  static Future<Map<String, dynamic>> dbClose(String rid) =>
+      _call('dbClose', <String, dynamic>{'rid': rid});
+
   /// Recharge / retrait manuels par code marchand Orange Money.
   /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
   static Future<Map<String, dynamic>> manualInfo() {
