@@ -171,7 +171,7 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '📱 ${r['phone']}   ·   ${_date(r['createdAt'])}',
+            '${r['operator'] == 'mtn' ? '🟡 MTN' : '🟠 Orange'}  📱 ${r['phone']}   ·   ${_date(r['createdAt'])}',
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           if (isDep)
