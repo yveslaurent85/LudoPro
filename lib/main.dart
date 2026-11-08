@@ -15,7 +15,6 @@ import 'base_logos.dart';
 import 'deposit_screen.dart';
 import 'transfer_screen.dart';
 import 'tournaments_screen.dart';
-import 'deux_buts_screen.dart';
 import 'pileface_screen.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
@@ -465,6 +464,18 @@ class HomeScreen extends StatelessWidget {
                           ],
                         ),
                 ),
+                item(Icons.sports_esports, tr('Jeux', 'Games'),
+                    const Color(0xFFE5262B), () {
+                  Navigator.of(sheetCtx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _GamesPage(
+                        onLocal: () => _openLocal(context),
+                        requireLogin: _requireLogin,
+                      ),
+                    ),
+                  );
+                }),
                 item(Icons.add_card, 'Recharge', const Color(0xFF22B14C),
                     () => go((_) => const DepositScreen())),
                 item(Icons.swap_horiz, 'Transférer de l\'argent',
@@ -475,12 +486,6 @@ class HomeScreen extends StatelessWidget {
                 item(Icons.emoji_events, tr('Tournois', 'Tournaments'),
                     const Color(0xFFF57C00),
                     () => go((_) => const TournamentsScreen())),
-                item(Icons.monetization_on, tr('Pile ou Face', 'Heads or Tails'),
-                    const Color(0xFFF9A825),
-                    () => go((_) => const PileFaceScreen())),
-                item(Icons.grid_on, tr('Damier • Deux buts sort', 'Checkers • Two strikes'),
-                    const Color(0xFF6D4C41),
-                    () => go((_) => const DeuxButsScreen())),
                 item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
                   Navigator.of(sheetCtx).pop();
                   openWhatsAppGroup(context);
@@ -528,6 +533,173 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  /// Bandeau « solde » avec recharge / retrait rapides (ou invitation à se connecter).
+  Widget _walletStrip(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snap) {
+        final user = snap.data ?? FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          return Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              color: Colors.white.withOpacity(0.12),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.account_circle, color: Colors.white, size: 34),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    tr('Connecte-toi pour jouer en ligne, déposer et gagner.',
+                        'Sign in to play online, deposit and win.'),
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFC21A),
+                    foregroundColor: const Color(0xFF1A1200),
+                  ),
+                  onPressed: () => _requireLogin(
+                    context,
+                    (c) => _GamesPage(
+                      onLocal: () => _openLocal(context),
+                      requireLogin: _requireLogin,
+                    ),
+                  ),
+                  child: Text(
+                    tr('Connexion', 'Sign in'),
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: Colors.black.withOpacity(0.24),
+            border: Border.all(color: const Color(0xFFFFC21A), width: 1.5),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tr('Mon solde', 'My balance'),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    StreamBuilder<int>(
+                      stream: Wallet.watch(user.uid),
+                      builder: (context, s) => Text(
+                        Wallet.format(s.data ?? 0),
+                        style: const TextStyle(
+                          color: Color(0xFFFFE082),
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF22B14C),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const DepositScreen()),
+                ),
+                icon: const Icon(Icons.add_card, size: 18),
+                label: Text(
+                  tr('Recharge', 'Deposit'),
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                ),
+              ),
+              const SizedBox(width: 6),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const WithdrawScreen()),
+                ),
+                child: Text(
+                  tr('Retrait', 'Withdraw'),
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Bandeau des tournois.
+  Widget _tournamentBanner(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _requireLogin(context, (_) => const TournamentsScreen()),
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 18),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF7B1FA2), Color(0xFFC2185B)],
+          ),
+          border: Border.all(color: Colors.white38, width: 1.5),
+          boxShadow: const [
+            BoxShadow(color: Color(0x55000000), blurRadius: 10, offset: Offset(0, 5)),
+          ],
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.emoji_events, color: Color(0xFFFFE082), size: 38),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr('Tournois Katika', 'Katika Tournaments'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    tr('Katika Tournament · Katika Mondly — inscris-toi et gagne gros !',
+                        'Katika Tournament · Katika Mondly — sign up and win big!'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -536,8 +708,8 @@ class HomeScreen extends StatelessWidget {
         height: double.infinity,
         decoration: _appBackground,
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
             child: Column(
               children: [
                 const UpdateChecker(),
@@ -565,7 +737,7 @@ class HomeScreen extends StatelessWidget {
                       const LanguageSwitcher(),
                     ],
                   ),
-                const Spacer(flex: 2),
+                const SizedBox(height: 6),
                 // Appui long sur la couronne : tableau de bord administrateur
                 // (le serveur refuse tout compte qui n'est pas administrateur).
                 GestureDetector(
@@ -574,33 +746,33 @@ class HomeScreen extends StatelessWidget {
                       builder: (_) => const AdminDashboard(),
                     ),
                   ),
-                  child: const Text('👑', style: TextStyle(fontSize: 44)),
+                  child: const Text('👑', style: TextStyle(fontSize: 36)),
                 ),
                 RichText(
                   text: TextSpan(
                     children: [
                       TextSpan(
                         text: 'Kati',
-                        style: _logoStyle(Colors.white, 52),
+                        style: _logoStyle(Colors.white, 46),
                       ),
                       TextSpan(
                         text: 'ka',
-                        style: _logoStyle(const Color(0xFFFFC21A), 52),
+                        style: _logoStyle(const Color(0xFFFFC21A), 46),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 const Text(
                   'Dés et Ludo by CKY',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.2,
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(height: 16),
                 if (resumable)
                   _ModeCard(
                     color: const Color(0xFFE5262B),
@@ -610,65 +782,289 @@ class HomeScreen extends StatelessWidget {
                     onTap: () => Navigator.of(context).pop(),
                   )
                 else ...[
-                  _ModeCard(
-                    color: const Color(0xFF22B14C),
-                    icon: Icons.grid_view_rounded,
-                    image: 'assets/game_ludo.png',
-                    title: 'Ludo',
-                    subtitle: 'En présentiel ou en ligne',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => _LudoModePage(
-                          onLocal: () => _openLocal(context),
+                  if (firebaseReady) _walletStrip(context),
+                  _tournamentBanner(context),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 10, left: 2),
+                      child: Text(
+                        tr('Nos jeux', 'Our games'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  _ModeCard(
-                    color: const Color(0xFFFFA000),
-                    icon: Icons.casino,
-                    image: 'assets/game_deuxdes.png',
-                    title: 'Deux dés',
-                    subtitle: 'Lance deux dés',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => const DeuxDesPage(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _ModeCard(
-                    color: const Color(0xFF8D5A2B),
-                    icon: Icons.workspaces,
-                    image: 'assets/game_songo.png',
-                    title: 'Songô',
-                    subtitle: 'Jeu de graines · présentiel ou en ligne',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => const SongoPage(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _ModeCard(
-                    color: const Color(0xFF37474F),
-                    icon: Icons.grid_on,
-                    image: 'assets/game_damier.png',
-                    title: 'Damier',
-                    subtitle: 'Dames 10x10 · présentiel ou en ligne',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => const DamierPage(),
-                      ),
-                    ),
+                  _GamesGrid(
+                    onLocal: () => _openLocal(context),
+                    requireLogin: _requireLogin,
                   ),
                 ],
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
                 const WhatsAppGroupButton(),
-                const Spacer(flex: 2),
+                const SizedBox(height: 14),
+                Text(
+                  tr('Jouez avec modération · Réservé aux personnes majeures (18 ans et +)',
+                      'Play responsibly · Adults only (18+)'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tuile carrée d'un jeu (accueil et page « Jeux »).
+class _GameTile extends StatelessWidget {
+  const _GameTile({
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.icon,
+    required this.onTap,
+    this.image,
+    this.badge,
+  });
+
+  final String title;
+  final String subtitle;
+  final Color color;
+  final IconData icon;
+  final String? image;
+  final String? badge;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onTap == null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: disabled
+                ? [Colors.white.withOpacity(0.16), Colors.white.withOpacity(0.06)]
+                : [shade(color, 0.1), shade(color, -0.14)],
+          ),
+          border: Border.all(
+            color: disabled ? Colors.white24 : Colors.white54,
+            width: 2,
+          ),
+          boxShadow: disabled
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+        ),
+        child: Stack(
+          children: [
+            if (badge != null)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFC21A),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    badge!,
+                    style: const TextStyle(
+                      color: Color(0xFF1A1200),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+            Column(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: Container(
+                      width: 78,
+                      height: 78,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(disabled ? 0.08 : 0.2),
+                      ),
+                      child: image == null
+                          ? Icon(icon, color: Colors.white, size: 38)
+                          : Padding(
+                              padding: const EdgeInsets.all(9),
+                              child: Image.asset(
+                                image!,
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stack) =>
+                                    Icon(icon, color: Colors.white, size: 38),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Grille des jeux : 2 colonnes de tuiles carrées.
+class _GamesGrid extends StatelessWidget {
+  const _GamesGrid({required this.onLocal, required this.requireLogin});
+
+  final VoidCallback onLocal;
+  final void Function(BuildContext, Widget Function(BuildContext)) requireLogin;
+
+  void _push(BuildContext context, Widget page) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      mainAxisSpacing: 14,
+      crossAxisSpacing: 14,
+      childAspectRatio: 1,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        _GameTile(
+          color: const Color(0xFF22B14C),
+          icon: Icons.grid_view_rounded,
+          image: 'assets/game_ludo.png',
+          title: 'Ludo',
+          subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
+          onTap: () => _push(context, _LudoModePage(onLocal: onLocal)),
+        ),
+        _GameTile(
+          color: const Color(0xFFFFA000),
+          icon: Icons.casino,
+          image: 'assets/game_deuxdes.png',
+          title: tr('Deux dés', 'Two dice'),
+          subtitle: tr('Lance deux dés, défie les autres', 'Roll two dice, challenge others'),
+          onTap: () => _push(context, const DeuxDesPage()),
+        ),
+        _GameTile(
+          color: const Color(0xFF8D5A2B),
+          icon: Icons.workspaces,
+          image: 'assets/game_songo.png',
+          title: 'Songô',
+          subtitle: tr('Jeu de graines', 'Seed game'),
+          onTap: () => _push(context, const SongoPage()),
+        ),
+        _GameTile(
+          color: const Color(0xFF37474F),
+          icon: Icons.grid_on,
+          image: 'assets/game_damier.png',
+          title: 'Damier',
+          subtitle: tr('Présentiel, en ligne, Deux buts sort, tournoi',
+              'Local, online, Two strikes, tournament'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => _push(context, const DamierPage()),
+        ),
+        _GameTile(
+          color: const Color(0xFFF9A825),
+          icon: Icons.monetization_on,
+          title: tr('Pile ou Face', 'Heads or Tails'),
+          subtitle: tr('Duel à 2, 50 / 50', '1v1 duel, 50 / 50'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const PileFaceScreen()),
+        ),
+        _GameTile(
+          color: Colors.white,
+          icon: Icons.auto_awesome,
+          title: tr('Bientôt', 'Coming soon'),
+          subtitle: tr('De nouveaux jeux arrivent', 'New games on the way'),
+          onTap: null,
+        ),
+      ],
+    );
+  }
+}
+
+/// Page « Jeux » (ouverte depuis le menu).
+class _GamesPage extends StatelessWidget {
+  const _GamesPage({required this.onLocal, required this.requireLogin});
+
+  final VoidCallback onLocal;
+  final void Function(BuildContext, Widget Function(BuildContext)) requireLogin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 12, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    Text(
+                      tr('Jeux', 'Games'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                  child: _GamesGrid(onLocal: onLocal, requireLogin: requireLogin),
+                ),
+              ),
+            ],
           ),
         ),
       ),
