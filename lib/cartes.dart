@@ -134,6 +134,14 @@ class _CardView extends StatelessWidget {
 }
 
 
+/// Ouvre [page] seulement si le joueur est connecté ; sinon écran de connexion d'abord.
+void _pushLoggedIn(BuildContext context, Widget Function(BuildContext) page) {
+  final loggedIn = !firebaseReady || FirebaseAuth.instance.currentUser != null;
+  Navigator.of(context).push(MaterialPageRoute<void>(
+    builder: (c) => loggedIn ? page(c) : OnlineScreen(onSignedIn: page),
+  ));
+}
+
 /// Une carte qui apparaît (prise, distribuée) : elle grossit et se fond.
 class _PopIn extends StatelessWidget {
   const _PopIn({super.key, required this.child});
@@ -420,11 +428,11 @@ class CartesPage extends StatelessWidget {
                     const SizedBox(height: 14),
                     _card('TIAH', tr('Atteins 21 sans dépasser · 2 à 6 joueurs', 'Reach 21 without going over · 2-6 players'),
                         Icons.style, const Color(0xFFE5262B),
-                        () => _go(context, const _CardModePage(game: 'tiah')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'tiah')), badge: tr('NOUVEAU', 'NEW')),
                     const SizedBox(height: 14),
                     _card('BOUBAYAH', tr('Le plus gros total gagne · 2 à 6 joueurs', 'Highest total wins · 2-6 players'),
                         Icons.filter_5, const Color(0xFF7B1FA2),
-                        () => _go(context, const _CardModePage(game: 'boubayah')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'boubayah')), badge: tr('NOUVEAU', 'NEW')),
                     const SizedBox(height: 14),
                     _card('TCHEK GAMES', tr('En ligne uniquement · bientôt disponible', 'Online only · coming soon'),
                         Icons.location_on, const Color(0xFF0277BD),
@@ -565,23 +573,17 @@ class _CardModePage extends StatelessWidget {
                           tr('2 à 6 joueurs sur le même téléphone · mise ou gratuit',
                               '2-6 players on one phone · stake or free'),
                           const Color(0xFF22B14C),
-                          () => Navigator.of(context).push(MaterialPageRoute<void>(
-                            builder: (_) => tiah ? const TiahLocalPage() : const BoubayahLocalPage(),
-                          )),
+                          () => _pushLoggedIn(
+                            context,
+                            (_) => tiah ? const TiahLocalPage() : const BoubayahLocalPage(),
+                          ),
                         ),
                         tile(
                           Icons.public,
                           tr('En ligne', 'Online'),
                           tr('Chacun joue depuis son téléphone · mise ou gratuit', 'Everyone plays from their own phone · stake or free'),
                           const Color(0xFFE5262B),
-                          () {
-                            final loggedIn = !firebaseReady || FirebaseAuth.instance.currentUser != null;
-                            Navigator.of(context).push(MaterialPageRoute<void>(
-                              builder: (_) => loggedIn
-                                  ? CardsOnlineHub(game: game)
-                                  : OnlineScreen(onSignedIn: (c) => CardsOnlineHub(game: game)),
-                            ));
-                          },
+                          () => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game)),
                         ),
                       ],
                     ),
