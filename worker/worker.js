@@ -1331,10 +1331,10 @@ async function startLocalGame({ uid: hostUid, data, env }) {
     throw new HttpError('invalid-argument', 'Mise invalide.');
   }
   const game =
-    data.game === 'deuxdes' || data.game === 'ludo' || data.game === 'songo' || data.game === 'damier'
+    data.game === 'deuxdes' || data.game === 'ludo' || data.game === 'songo' || data.game === 'damier' || data.game === 'pileface' || data.game === 'tiah' || data.game === 'boubayah'
       ? data.game
       : 'unknown';
-  const maxLocal = game === 'deuxdes' ? 8 : game === 'songo' || game === 'damier' ? 2 : 4; // Deux dés : jusqu'à 8 joueurs
+  const maxLocal = game === 'deuxdes' ? 8 : game === 'songo' || game === 'damier' || game === 'pileface' ? 2 : game === 'tiah' || game === 'boubayah' ? 6 : 4; // Deux dés : jusqu'à 8 joueurs
   const tokens = Array.isArray(data.tokens) ? data.tokens : [];
   if (tokens.length < 2 || tokens.length > maxLocal) {
     throw new HttpError('invalid-argument', 'Nombre de joueurs invalide.');
@@ -2002,7 +2002,7 @@ async function adminStats({ uid, data, env }) {
     ...damier.map((d) => adminRow('damier', 'online', d)),
     ...local.map((d) =>
       adminRow(
-        d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : d.game === 'songo' ? 'songo' : d.game === 'damier' ? 'damier' : 'unknown',
+        d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : d.game === 'songo' ? 'songo' : d.game === 'damier' ? 'damier' : d.game === 'pileface' ? 'pileface' : d.game === 'tiah' ? 'tiah' : d.game === 'boubayah' ? 'boubayah' : 'unknown',
         'local',
         d,
       ),
