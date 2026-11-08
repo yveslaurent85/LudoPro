@@ -4,10 +4,12 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart' hide Text;
+import 'package:flutter/services.dart';
 
 import 'accounts.dart';
 import 'lang.dart';
 import 'main.dart' show firebaseReady, Sfx;
+import 'online_screen.dart';
 import 'stake_field.dart';
 
 // ======================================================================
@@ -126,6 +128,191 @@ class _CardView extends StatelessWidget {
           ),
           Center(child: Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.62))),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Une carte qui apparaît (prise, distribuée) : elle grossit et se fond.
+class _PopIn extends StatelessWidget {
+  const _PopIn({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutBack,
+      builder: (context, v, ch) => Opacity(
+        opacity: v.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(0, (1 - v) * -40),
+          child: Transform.scale(scale: 0.6 + 0.4 * v, child: ch),
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+// ----------------------------------------------------------------------
+// Animation de distribution : les cartes partent du paquet vers chaque joueur
+// ----------------------------------------------------------------------
+
+class _DealOverlay extends StatefulWidget {
+  const _DealOverlay({
+    required this.names,
+    required this.batches,
+    required this.labels,
+    required this.onDone,
+    this.sfx,
+  });
+
+  /// Joueurs, dans l'ordre de distribution.
+  final List<String> names;
+
+  /// Nombre de cartes données à chacun à chaque tour de table (ex. [2] ou [3, 2]).
+  final List<int> batches;
+  final List<String> labels;
+  final VoidCallback onDone;
+  final Sfx? sfx;
+
+  @override
+  State<_DealOverlay> createState() => _DealOverlayState();
+}
+
+class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderStateMixin {
+  static const int _gap = 150; // ms entre deux cartes
+  static const int _fly = 520; // durée d'un vol
+  late final AnimationController _c;
+  final List<List<int>> _deals = []; // [siège, lot]
+  late final int _totalMs;
+  bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (var b = 0; b < widget.batches.length; b++) {
+      for (var r = 0; r < widget.batches[b]; r++) {
+        for (var s = 0; s < widget.names.length; s++) {
+          _deals.add([s, b]);
+        }
+      }
+    }
+    _totalMs = _deals.length * _gap + _fly + 600;
+    _c = AnimationController(vsync: this, duration: Duration(milliseconds: _totalMs))
+      ..addStatusListener((st) {
+        if (st == AnimationStatus.completed) _finish();
+      })
+      ..forward();
+    for (var k = 0; k < _deals.length; k++) {
+      Future<void>.delayed(Duration(milliseconds: k * _gap + 60), () {
+        if (mounted && !_done) widget.sfx?.step();
+      });
+    }
+  }
+
+  void _finish() {
+    if (_done) return;
+    _done = true;
+    widget.onDone();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final n = widget.names.length;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _finish,
+      child: Container(
+        color: const Color(0xD9021A0E),
+        child: LayoutBuilder(builder: (context, box) {
+          final w = box.maxWidth;
+          final h = box.maxHeight;
+          final center = Offset(w / 2, h * 0.44);
+          final rx = w * 0.36;
+          final ry = h * 0.27;
+          Offset seatPos(int i) {
+            final a = pi / 2 + 2 * pi * i / n;
+            return Offset(center.dx + rx * cos(a), center.dy + ry * sin(a));
+          }
+
+          final elapsed = _c.value * _totalMs;
+          final cur = (elapsed / _gap).floor().clamp(0, _deals.length - 1);
+          final label = widget.labels[min(_deals[cur][1], widget.labels.length - 1)];
+          final children = <Widget>[];
+          // joueurs
+          for (var i = 0; i < n; i++) {
+            final p = seatPos(i);
+            children.add(Positioned(
+              left: p.dx - 40,
+              top: p.dy - 34,
+              width: 80,
+              child: Column(children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: _seatColors[i % 6],
+                  child: Text(widget.names[i].isEmpty ? '?' : widget.names[i].substring(0, 1).toUpperCase(),
+                      style: const TextStyle(color: Color(0xFF1A1200), fontWeight: FontWeight.w900)),
+                ),
+                Text(widget.names[i],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+              ]),
+            ));
+          }
+          // paquet
+          children.add(Positioned(
+            left: center.dx - 22,
+            top: center.dy - 31,
+            child: Stack(children: [
+              for (var k = 3; k >= 0; k--)
+                Transform.translate(offset: Offset(k * 1.5, -k * 1.5), child: const _CardView(card: null, up: false, w: 44)),
+            ]),
+          ));
+          // cartes en vol / arrivées
+          final seatCount = List.filled(n, 0);
+          for (var k = 0; k < _deals.length; k++) {
+            final seat = _deals[k][0];
+            final m = seatCount[seat]++;
+            final t = ((elapsed - k * _gap) / _fly).clamp(0.0, 1.0);
+            if (t <= 0) continue;
+            final e = Curves.easeOutCubic.transform(t);
+            final target = seatPos(seat) + Offset((m - 2) * 11.0, 46 + (m % 2) * 3.0);
+            final pos = Offset.lerp(center, target, e)!;
+            children.add(Positioned(
+              left: pos.dx - 17,
+              top: pos.dy - 24,
+              child: Transform.rotate(
+                angle: (1 - e) * (k.isEven ? 0.9 : -0.9),
+                child: _CardView(card: null, up: false, w: 34),
+              ),
+            ));
+          }
+          children.add(Positioned(
+            left: 0,
+            right: 0,
+            bottom: h * 0.08,
+            child: Column(children: [
+              Text(label,
+                  style: const TextStyle(color: _goldSoft, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1)),
+              const SizedBox(height: 4),
+              Text(tr('Touche pour passer', 'Tap to skip'),
+                  style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            ]),
+          ));
+          return Stack(children: children);
+        }),
       ),
     );
   }
@@ -385,9 +572,16 @@ class _CardModePage extends StatelessWidget {
                         tile(
                           Icons.public,
                           tr('En ligne', 'Online'),
-                          tr('Bientôt : chacun joue depuis son téléphone', 'Soon: everyone plays from their own phone'),
+                          tr('Chacun joue depuis son téléphone · mise ou gratuit', 'Everyone plays from their own phone · stake or free'),
                           const Color(0xFFE5262B),
-                          null,
+                          () {
+                            final loggedIn = !firebaseReady || FirebaseAuth.instance.currentUser != null;
+                            Navigator.of(context).push(MaterialPageRoute<void>(
+                              builder: (_) => loggedIn
+                                  ? CardsOnlineHub(game: game)
+                                  : OnlineScreen(onSignedIn: (c) => CardsOnlineHub(game: game)),
+                            ));
+                          },
                         ),
                       ],
                     ),
@@ -755,7 +949,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
   List<int> _order = []; // ordre de passage (sièges)
   int _cur = 0; // index dans _order
   int _phase = 0; // 0 passer le téléphone, 1 cartes ouvertes, 2 résultat
-  bool _drawing = false;
+  bool _dealing = false;
   bool _turnDone = false;
   int _taken = 0; // cartes prises dans le tour courant
   List<int> _winners = [];
@@ -784,32 +978,49 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     _winners = [];
     _jackpot = 0;
     _settleError = null;
+    _dealing = true;
   }
 
-  Future<void> _open() async {
-    final seat = _order[_cur];
+  /// Le joueur ouvre ses deux cartes ; les cartes du milieu deviennent visibles.
+  void _open() {
     setState(() {
       _phase = 1;
-      _drawing = true;
       _turnDone = false;
       _taken = 0;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    // Prise obligatoire tant que la carte du dessus ne fait pas dépasser 21.
-    while (mounted && _pile.isNotEmpty && _total(_hands[seat]) + _pile.last.v <= 21) {
-      setState(() {
-        _hands[seat].add(_pile.removeLast());
-        _taken++;
-      });
-      _sfx.land();
-      await Future<void>.delayed(const Duration(milliseconds: 750));
+    _checkEnd();
+  }
+
+  /// Le tour se termine tout seul à 21 ou quand plus aucune carte du milieu ne tient.
+  void _checkEnd() {
+    final seat = _order[_cur];
+    final tot = _total(_hands[seat]);
+    final fits = _pile.any((c) => tot + c.v <= 21);
+    if (tot == 21) _sfx.win();
+    if (tot >= 21 || !fits) setState(() => _turnDone = true);
+  }
+
+  /// Le joueur tape une carte du milieu : il la prend si elle ne le fait pas dépasser 21.
+  void _take(int i) {
+    if (_turnDone) return;
+    final seat = _order[_cur];
+    final c = _pile[i];
+    if (_total(_hands[seat]) + c.v > 21) {
+      _sfx.deny();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 1),
+          content: Text(tr('Cette carte te ferait dépasser 21.', 'This card would take you over 21.')),
+        ),
+      );
+      return;
     }
-    if (!mounted) return;
-    if (_total(_hands[seat]) == 21) _sfx.win();
     setState(() {
-      _drawing = false;
-      _turnDone = true;
+      _hands[seat].add(_pile.removeAt(i));
+      _taken++;
     });
+    _sfx.land();
+    _checkEnd();
   }
 
   Future<void> _next() async {
@@ -876,12 +1087,26 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
   }
 
   Widget _scaffold(Widget child) => Scaffold(
-        body: Container(
-          width: double.infinity,
-          height: double.infinity,
-          decoration: _felt,
-          child: SafeArea(child: child),
-        ),
+        body: Stack(children: [
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: _felt,
+            child: SafeArea(child: child),
+          ),
+          if (_dealing && _t != null)
+            Positioned.fill(
+              child: _DealOverlay(
+                names: [for (final s in _order) _t!.names[s]],
+                batches: const [2],
+                labels: [tr('Distribution…', 'Dealing…')],
+                sfx: _sfx,
+                onDone: () {
+                  if (mounted) setState(() => _dealing = false);
+                },
+              ),
+            ),
+        ]),
       );
 
   Widget _topBar() => Row(children: [
@@ -986,57 +1211,81 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
         ),
       ]));
     }
-    // phase 1 : cartes ouvertes
+    // phase 1 : cartes ouvertes + cartes du milieu à taper
     final hand = _hands[seat];
     final total = _total(hand);
     final bust = total > 21;
+    final mid = [for (var i = 0; i < _pile.length; i++) i]..sort((x, y) => _pile[x].v.compareTo(_pile[y].v));
     return _scaffold(Column(children: [
       _topBar(),
       Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: Text(name, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(name, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
       ),
       Expanded(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+          children: [
+            Center(
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var i = 0; i < hand.length; i++)
+                    _PopIn(
+                      key: ValueKey('$seat-${hand[i].v}-${hand[i].suit}'),
+                      child: _CardView(card: hand[i], w: 56),
+                    ),
+                ],
+              ),
+            ),
+            Center(
+              child: Text('$total',
+                  style: TextStyle(
+                      color: total == 21 ? _gold : (bust ? const Color(0xFFFF8A80) : Colors.white),
+                      fontSize: 54,
+                      fontWeight: FontWeight.w900)),
+            ),
+            if (total == 21)
+              const Center(
+                child: Text('TIAH !',
+                    style: TextStyle(color: _gold, fontSize: 30, fontWeight: FontWeight.w900, letterSpacing: 4)),
+              ),
+            if (bust)
+              Center(
+                child: Text(tr('Plus de 21 : pas de score', 'Over 21: no score'),
+                    style: const TextStyle(color: Color(0xFFFF8A80), fontWeight: FontWeight.w800)),
+              ),
+            const SizedBox(height: 8),
+            Text(
+              _turnDone
+                  ? tr('Ton tour est terminé.', 'Your turn is over.')
+                  : tr('Tape les cartes du milieu que tu veux prendre (sans dépasser 21) :',
+                      'Tap the middle cards you want (without going over 21):'),
+              style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 7,
+              runSpacing: 7,
               children: [
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (var i = 0; i < hand.length; i++)
-                      Opacity(opacity: i < 2 ? 1 : 0.95, child: _CardView(card: hand[i], w: 60)),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Text('$total',
-                    style: TextStyle(
-                        color: total == 21 ? _gold : (bust ? const Color(0xFFFF8A80) : Colors.white),
-                        fontSize: 64,
-                        fontWeight: FontWeight.w900)),
-                if (total == 21)
-                  const Text('TIAH !',
-                      style: TextStyle(color: _gold, fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: 4)),
-                if (bust)
-                  Text(tr('Plus de 21 : pas de score', 'Over 21: no score'),
-                      style: const TextStyle(color: Color(0xFFFF8A80), fontWeight: FontWeight.w800)),
-                if (_drawing)
-                  Text(tr('Prise des cartes du milieu…', 'Taking cards from the middle…'),
-                      style: const TextStyle(color: Colors.white70))
-                else if (_turnDone && _taken == 0 && !bust && total != 21)
-                  Text(tr('La carte suivante ferait dépasser 21.', 'The next card would go over 21.'),
-                      style: const TextStyle(color: Colors.white70)),
+                for (final i in mid)
+                  GestureDetector(
+                    onTap: () => _take(i),
+                    child: Opacity(
+                      opacity: !_turnDone && total + _pile[i].v <= 21 ? 1 : 0.4,
+                      child: _CardView(card: _pile[i], w: 44),
+                    ),
+                  ),
               ],
             ),
-          ),
+          ],
         ),
       ),
       Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
         child: SizedBox(
           width: double.infinity,
           height: 54,
@@ -1045,12 +1294,12 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               backgroundColor: const Color(0xFF22B14C),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
-            onPressed: _turnDone ? _next : null,
+            onPressed: _next,
             child: Text(
               _cur + 1 < _n
-                  ? tr('Cacher et passer le téléphone', 'Hide and pass the phone')
-                  : tr('Terminer la manche', 'End the round'),
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  ? tr('Terminer mon tour · passer le téléphone', 'End my turn · pass the phone')
+                  : tr('Terminer mon tour · fin de manche', 'End my turn · end the round'),
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
             ),
           ),
         ),
@@ -1220,6 +1469,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
   String? _settleError;
   final List<int> _wins = List.filled(6, 0);
   final List<String> _history = [];
+  bool _dealing = false;
 
   int get _n => _t!.n;
 
@@ -1251,6 +1501,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
         _bouba[(_dealer + 1 + i) % n].add(deck.removeLast());
       }
     }
+    _dealing = true;
     _revealed.clear();
     _peek.clear();
     _over = false;
@@ -1405,12 +1656,26 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
   @override
   Widget build(BuildContext context) {
     Widget wrap(Widget c) => Scaffold(
-          body: Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: _felt,
-            child: SafeArea(child: c),
-          ),
+          body: Stack(children: [
+            Container(
+              width: double.infinity,
+              height: double.infinity,
+              decoration: _felt,
+              child: SafeArea(child: c),
+            ),
+            if (_dealing && _t != null)
+              Positioned.fill(
+                child: _DealOverlay(
+                  names: [for (var k = 1; k <= _n; k++) _t!.names[(_dealer + k) % _n]],
+                  batches: const [3, 2],
+                  labels: [tr('Cartes ordinaires', 'Ordinary cards'), tr('Cartes BOUBAYAH', 'BOUBAYAH cards')],
+                  sfx: _sfx,
+                  onDone: () {
+                    if (mounted) setState(() => _dealing = false);
+                  },
+                ),
+              ),
+          ]),
         );
     if (_t == null) {
       return wrap(_CardsSetup(
@@ -1538,5 +1803,837 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
           ]),
         ),
     ]));
+  }
+}
+
+
+// ======================================================================
+// En ligne : salon (liste des salles) et salle de jeu
+// ======================================================================
+
+_Card _decode(int c) => _Card(c ~/ 4, c % 4);
+
+List<_Card> _cardsOf(dynamic l) =>
+    l is List ? [for (final x in l) _decode((x as num).toInt())] : <_Card>[];
+
+String? _firstOf(Iterable<String> i) => i.isEmpty ? null : i.first;
+
+String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : 'BOUBAYAH';
+
+class CardsOnlineHub extends StatefulWidget {
+  const CardsOnlineHub({super.key, required this.game});
+
+  final String game;
+
+  @override
+  State<CardsOnlineHub> createState() => _CardsOnlineHubState();
+}
+
+class _CardsOnlineHubState extends State<CardsOnlineHub> {
+  Timer? _timer;
+  List<Map<String, dynamic>> _open = [];
+  List<Map<String, dynamic>> _mine = [];
+  int _stake = 0;
+  int _max = 4;
+  bool _public = true;
+  bool _busy = false;
+  final _code = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _code.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> _list(dynamic l) =>
+      l is List ? [for (final x in l) Map<String, dynamic>.from(x as Map)] : [];
+
+  Future<void> _load() async {
+    try {
+      final r = await Wallet.cardsList(widget.game);
+      if (!mounted) return;
+      setState(() {
+        _open = _list(r['open']);
+        _mine = _list(r['mine']);
+      });
+    } catch (_) {}
+  }
+
+  void _snack(Object e) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+
+  Future<void> _enter(String id) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CardsOnlineRoom(gameId: id)));
+    if (mounted) _load();
+  }
+
+  Future<void> _create() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final v = await Wallet.cardsCreate(
+        game: widget.game,
+        stake: _stake,
+        maxPlayers: _max,
+        isPublic: _public,
+      );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await _enter(v['id'] as String);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        _snack(e);
+      }
+    }
+  }
+
+  Future<void> _join({String? id, String? code}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final v = await Wallet.cardsJoin(gameId: id, code: code);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await _enter(v['id'] as String);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        _snack(e);
+      }
+    }
+  }
+
+  Widget _roomTile(Map<String, dynamic> r, String action, VoidCallback f) {
+    final stake = (r['stake'] as num?)?.toInt() ?? 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${r['hostName'] ?? ''}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+            Text(
+              '${stake > 0 ? _fcfa(stake) : tr('Gratuit', 'Free')} · ${r['count']}/${r['maxPlayers']} ${tr('joueurs', 'players')}'
+              '${((r['round'] as num?)?.toInt() ?? 1) > 1 ? ' · ${tr('manche', 'round')} ${r['round']}' : ''}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ]),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: _gold, foregroundColor: const Color(0xFF1A1200)),
+          onPressed: _busy ? null : f,
+          child: Text(action, style: const TextStyle(fontWeight: FontWeight.w900)),
+        ),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _felt,
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+            children: [
+              Row(children: [
+                IconButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                ),
+                Expanded(
+                  child: Text('${_gameTitle(widget.game)} · ${tr('en ligne', 'online')}',
+                      style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w900)),
+                ),
+                if (uid != null)
+                  StreamBuilder<int>(
+                    stream: Wallet.watch(uid),
+                    builder: (context, s) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black26,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: _gold, width: 1.5),
+                      ),
+                      child: Text(Wallet.format(s.data ?? 0),
+                          style: const TextStyle(color: _gold, fontWeight: FontWeight.w800, fontSize: 12)),
+                    ),
+                  ),
+              ]),
+              if (_mine.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(tr('Mes parties en cours', 'My ongoing games'),
+                    style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                for (final r in _mine) _roomTile(r, tr('Reprendre', 'Resume'), () => _enter(r['id'] as String)),
+              ],
+              const SizedBox(height: 10),
+              Text(tr('Créer une salle', 'Create a room'),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              Text(tr('Mise de chaque joueur (0 = gratuit)', "Each player's stake (0 = free)"),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              StakeField(stake: _stake, players: _max, onChanged: (v) => setState(() => _stake = v)),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() => _stake = 0),
+                  child: Text(tr('Jouer gratuit', 'Play for free'),
+                      style: TextStyle(color: _stake == 0 ? _gold : Colors.white70, fontWeight: FontWeight.w800)),
+                ),
+              ),
+              Text(tr('Nombre de joueurs maximum', 'Maximum players'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              Wrap(spacing: 8, children: [
+                for (var k = 2; k <= 6; k++)
+                  ChoiceChip(
+                    label: Text('$k'),
+                    selected: _max == k,
+                    selectedColor: _gold,
+                    onSelected: (_) => setState(() => _max = k),
+                  ),
+              ]),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                activeColor: _gold,
+                title: Text(tr('Salle publique', 'Public room'), style: const TextStyle(color: Colors.white)),
+                subtitle: Text(
+                    tr('Sinon, on y entre avec le code seulement', 'Otherwise, join with the code only'),
+                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                value: _public,
+                onChanged: (v) => setState(() => _public = v),
+              ),
+              SizedBox(
+                height: 50,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE5262B),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: _busy ? null : _create,
+                  child: Text(
+                    _stake > 0
+                        ? tr('Créer · mise ${_fcfa(_stake)}', 'Create · stake ${_fcfa(_stake)}')
+                        : tr('Créer · salle gratuite', 'Create · free room'),
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(tr('Rejoindre avec un code', 'Join with a code'),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _code,
+                    maxLength: 6,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, letterSpacing: 3),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      isDense: true,
+                      hintText: 'CODE',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: _gold, foregroundColor: const Color(0xFF1A1200)),
+                  onPressed: _busy || _code.text.trim().length < 4 ? null : () => _join(code: _code.text.trim()),
+                  child: Text(tr('Rejoindre', 'Join'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ]),
+              const SizedBox(height: 18),
+              Text(tr('Salles ouvertes', 'Open rooms'),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              if (_open.isEmpty)
+                Text(tr('Aucune salle pour le moment : crée la tienne !', 'No room yet: create yours!'),
+                    style: const TextStyle(color: Colors.white60)),
+              for (final r in _open) _roomTile(r, tr('Rejoindre', 'Join'), () => _join(id: r['id'] as String)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Salle de jeu en ligne (TIAH ou BOUBAYAH) : le serveur est l'arbitre.
+class CardsOnlineRoom extends StatefulWidget {
+  const CardsOnlineRoom({super.key, required this.gameId});
+
+  final String gameId;
+
+  @override
+  State<CardsOnlineRoom> createState() => _CardsOnlineRoomState();
+}
+
+class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
+  final Sfx _sfx = Sfx();
+  Timer? _timer;
+  Map<String, dynamic>? _v;
+  DateTime _rx = DateTime.now();
+  bool _busy = false;
+  String? _err;
+  final Set<String> _announced = {};
+  String? _dealtFor;
+  final String _me = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _poll();
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _set(Map<String, dynamic> v) {
+    if (!mounted) return;
+    // « TIAH ! » / « FOMEKOU ! » : son dès qu'une main spéciale apparaît
+    final pl = v['players'] as List? ?? [];
+    for (final p in pl) {
+      final m = Map<String, dynamic>.from(p as Map);
+      final key = '${v['id']}-${m['uid']}';
+      final special = v['game'] == 'tiah' ? m['total'] == 21 : m['fomekou'] == true;
+      if (special && !_announced.contains(key)) {
+        _announced.add(key);
+        if (_v != null) _sfx.win();
+      }
+    }
+    // Distribution déjà passée si la manche est déjà entamée à l'arrivée
+    if (_v == null && (v['status'] != 'playing' || pl.any((p) => (p as Map)['opened'] == true))) {
+      _dealtFor = '${v['id']}';
+    }
+    setState(() {
+      _v = v;
+      _rx = DateTime.now();
+      _err = null;
+    });
+  }
+
+  Future<void> _poll() async {
+    if (_busy) return;
+    try {
+      _set(await Wallet.cardsGet(widget.gameId));
+    } catch (e) {
+      if (mounted && _v == null) setState(() => _err = Wallet.errorText(e));
+    }
+  }
+
+  Future<void> _do(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      _set(await f());
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _goNext(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final r = await f();
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => CardsOnlineRoom(gameId: r['id'] as String)),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+      }
+    }
+  }
+
+  Future<void> _leave() async {
+    final v = _v;
+    if (v != null && v['status'] == 'waiting') {
+      try {
+        await Wallet.cardsLeave(widget.gameId);
+      } catch (_) {}
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  Widget _shell(Widget child, {Widget? overlay}) => Scaffold(
+        body: Stack(children: [
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: _felt,
+            child: SafeArea(child: child),
+          ),
+          if (overlay != null) Positioned.fill(child: overlay),
+        ]),
+      );
+
+  Widget _bar(Map<String, dynamic> v) {
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    return Row(children: [
+      IconButton(
+        onPressed: () {
+          if (v['status'] == 'waiting') {
+            _leave();
+          } else {
+            Navigator.of(context).maybePop();
+          }
+        },
+        icon: const Icon(Icons.arrow_back, color: Colors.white),
+      ),
+      Expanded(
+        child: Text(
+          '${_gameTitle('${v['game']}')} · ${tr('manche', 'round')} ${v['round']}'
+          '${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+          style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
+        ),
+      ),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _v;
+    if (v == null) {
+      return _shell(Center(
+        child: _err != null
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(_err!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
+                  TextButton(onPressed: _poll, child: Text(tr('Réessayer', 'Retry'))),
+                ]),
+              )
+            : const CircularProgressIndicator(color: _gold),
+      ));
+    }
+    final status = '${v['status']}';
+    if (status == 'cancelled') {
+      return _shell(Center(child: Text(tr('Salle fermée', 'Room closed'), style: const TextStyle(color: Colors.white))));
+    }
+    if (status == 'waiting') return _shell(_lobby(v));
+    final id = '${v['id']}';
+    final needDeal = status == 'playing' && _dealtFor != id;
+    Widget? overlay;
+    if (needDeal) {
+      final plv = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+      final seq = [for (final u in (v['seq'] as List? ?? [])) '$u'];
+      final names = [
+        for (final u in seq) _firstOf(plv.where((p) => p['uid'] == u).map((p) => '${p['name']}')) ?? '?',
+      ];
+      final tiahGame = v['game'] == 'tiah';
+      overlay = _DealOverlay(
+        names: names.isEmpty ? [for (final p in plv) '${p['name']}'] : names,
+        batches: tiahGame ? const [2] : const [3, 2],
+        labels: tiahGame
+            ? [tr('Distribution…', 'Dealing…')]
+            : [tr('Cartes ordinaires', 'Ordinary cards'), tr('Cartes BOUBAYAH', 'BOUBAYAH cards')],
+        sfx: _sfx,
+        onDone: () {
+          if (mounted) setState(() => _dealtFor = id);
+        },
+      );
+    }
+    return _shell(_table(v), overlay: overlay);
+  }
+
+  // ---------------------------------------------------------------- salle d'attente
+
+  Widget _lobby(Map<String, dynamic> v) {
+    final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final max = (v['maxPlayers'] as num?)?.toInt() ?? 6;
+    final dealer = '${v['dealerUid']}';
+    final canStart = v['canStart'] == true;
+    final dealerName = _firstOf(players.where((p) => p['uid'] == dealer).map((p) => '${p['name']}'));
+    return Column(children: [
+      _bar(v),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
+              child: Column(children: [
+                Text(tr('Code de la salle', 'Room code'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: '${v['code']}'));
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(tr('Code copié', 'Code copied'))));
+                  },
+                  child: Text('${v['code']}',
+                      style: const TextStyle(color: _gold, fontSize: 36, fontWeight: FontWeight.w900, letterSpacing: 6)),
+                ),
+                Text(tr('Touche le code pour le copier et invite tes amis', 'Tap the code to copy it and invite friends'),
+                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                const SizedBox(height: 6),
+                Text(
+                  '${stake > 0 ? '${tr('Mise', 'Stake')} ${_fcfa(stake)} · ${tr('cagnotte', 'pot')} ${_fcfa((v['pot'] as num).toInt())}' : tr('Partie gratuite', 'Free game')}',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            Text('${tr('Joueurs', 'Players')} ${players.length}/$max',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            for (var i = 0; i < players.length; i++)
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
+                child: Row(children: [
+                  CircleAvatar(radius: 12, backgroundColor: _seatColors[i % 6]),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text('${players[i]['name']}${players[i]['uid'] == _me ? ' (${tr('toi', 'you')})' : ''}',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  ),
+                  if (players[i]['uid'] == dealer) const Text('🃏', style: TextStyle(fontSize: 18)),
+                ]),
+              ),
+            const SizedBox(height: 8),
+            if (players.length < 2)
+              Text(tr('En attente d\'autres joueurs…', 'Waiting for more players…'),
+                  textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+            if (players.length >= 2 && !canStart)
+              Text(
+                tr('${dealerName ?? 'Le distributeur'} lance la manche.', '${dealerName ?? 'The dealer'} starts the round.'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+        child: Column(children: [
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE5262B),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: canStart && !_busy ? () => _do(() => Wallet.cardsStart(widget.gameId)) : null,
+              child: Text(
+                tr('Lancer la manche (${players.length} joueurs)', 'Start the round (${players.length} players)'),
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _leave,
+            child: Text(tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
+                style: const TextStyle(color: Colors.white70)),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  // ---------------------------------------------------------------- table de jeu
+
+  int get _secLeft {
+    final v = _v!;
+    final ms = (v['turnLeftMs'] as num?)?.toInt() ?? 0;
+    final left = ms - DateTime.now().difference(_rx).inMilliseconds;
+    return left <= 0 ? 0 : (left / 1000).ceil();
+  }
+
+  Widget _table(Map<String, dynamic> v) {
+    final tiah = v['game'] == 'tiah';
+    final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+    final over = v['over'] == true;
+    final turn = '${v['turnUid']}';
+    final myTurn = !over && turn == _me;
+    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    String nameOf(String uid) => _firstOf(players.where((p) => p['uid'] == uid).map((p) => '${p['name']}')) ?? '?';
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final refund = over && winners.length == players.length;
+    final iWon = winners.contains(_me) && !refund;
+    final nextId = '${v['nextId']}';
+
+    return Column(children: [
+      _bar(v),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+          children: [
+            if (!over)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(
+                      myTurn
+                          ? tr('C\'est ton tour !', "It's your turn!")
+                          : tr('Au tour de ${nameOf(turn)}', "${nameOf(turn)}'s turn"),
+                      style: TextStyle(
+                          color: myTurn ? _gold : Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17),
+                    ),
+                  ),
+                  if (tiah)
+                    Text('🂠 ${v['pile']}', style: const TextStyle(color: Colors.white70)),
+                  const SizedBox(width: 10),
+                  Text('⏱ $_secLeft s', style: const TextStyle(color: Colors.white70)),
+                ]),
+              ),
+            if (tiah && !over) _middlePile(v, players, myTurn),
+            if (over)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  color: iWon ? const Color(0xFF1B8A3A) : (refund ? const Color(0xFF546E7A) : const Color(0xFF8E2A22)),
+                ),
+                child: Column(children: [
+                  if (v['fomekou'] == true)
+                    const Text('FOMEKOU !',
+                        style: TextStyle(color: _gold, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 4)),
+                  Text(
+                    refund
+                        ? tr('Égalité générale', 'General tie')
+                        : (iWon
+                            ? tr('Tu as gagné !', 'You won!')
+                            : (winners.length == 1
+                                ? tr('${nameOf(winners.first)} gagne', '${nameOf(winners.first)} wins')
+                                : tr('Victoire de ${winners.map(nameOf).join(', ')}',
+                                    'Won by ${winners.map(nameOf).join(', ')}'))),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w900),
+                  ),
+                  if (stake > 0 && (iWon || refund))
+                    Text(
+                      refund
+                          ? tr('Mise remboursée : ${_fcfa(stake)}', 'Stake refunded: ${_fcfa(stake)}')
+                          : tr('+ ${_fcfa((v['prize'] as num).toInt())} sur ton compte',
+                              '+ ${_fcfa((v['prize'] as num).toInt())} to your account'),
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  if (!tiah && '${v['nextDealerUid']}'.isNotEmpty)
+                    Text(tr('Prochain distributeur : ${nameOf('${v['nextDealerUid']}')}',
+                            'Next dealer: ${nameOf('${v['nextDealerUid']}')}'),
+                        style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            for (final p in players) _playerCard(v, p, turn, winners, over, tiah),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+        child: over
+            ? Column(children: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFE5262B),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    ),
+                    onPressed: _busy
+                        ? null
+                        : () => _goNext(() => nextId.isEmpty
+                            ? Wallet.cardsRematch(widget.gameId)
+                            : Wallet.cardsJoin(gameId: nextId)),
+                    child: Text(
+                      nextId.isEmpty
+                          ? tr('Manche suivante${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+                              'Next round${stake > 0 ? ' · ${_fcfa(stake)}' : ''}')
+                          : tr('Rejoindre la manche suivante${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+                              'Join the next round${stake > 0 ? ' · ${_fcfa(stake)}' : ''}'),
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  child: Text(tr('Quitter la table', 'Leave the table'), style: const TextStyle(color: Colors.white70)),
+                ),
+              ])
+            : SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF7B1FA2),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  ),
+                  onPressed: !myTurn || _busy
+                      ? null
+                      : (tiah && v['curOpen'] == true
+                          ? () => _do(() => Wallet.cardsStop(widget.gameId))
+                          : () => _do(() => Wallet.cardsOpen(widget.gameId))),
+                  child: Text(
+                    tiah
+                        ? (myTurn && v['curOpen'] == true
+                            ? tr('JE M\'ARRÊTE ICI', 'I STOP HERE')
+                            : tr('OUVRIR MES CARTES', 'OPEN MY CARDS'))
+                        : tr('OUVRIR MON BOUBAYAH', 'OPEN MY BOUBAYAH'),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+      ),
+    ]);
+  }
+
+  Widget _playerCard(Map<String, dynamic> v, Map<String, dynamic> p, String turn, List<String> winners, bool over, bool tiah) {
+    final uid = '${p['uid']}';
+    final mine = uid == _me;
+    final isTurn = !over && uid == turn;
+    final win = over && winners.contains(uid) && winners.length < (v['players'] as List).length;
+    final opened = p['opened'] == true;
+    final total = (p['total'] as num?)?.toInt();
+    final special = tiah ? total == 21 : p['fomekou'] == true;
+    final dealer = uid == '${v['dealerUid']}';
+    final idx = (v['players'] as List).indexWhere((x) => (x as Map)['uid'] == uid);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: win ? const Color(0x2E7CFFB0) : Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+            color: win ? const Color(0xFF7CFFB0) : (isTurn ? _gold : Colors.white24), width: isTurn || win ? 2 : 1.2),
+      ),
+      child: Column(children: [
+        Row(children: [
+          CircleAvatar(radius: 12, backgroundColor: _seatColors[idx % 6]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('${p['name']}${mine ? ' (${tr('toi', 'you')})' : ''}${dealer ? '  🃏' : ''}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          ),
+          if (total != null)
+            Text('$total',
+                style: TextStyle(color: special ? _gold : Colors.white, fontSize: 24, fontWeight: FontWeight.w900)),
+        ]),
+        const SizedBox(height: 8),
+        if (tiah) _tiahCards(p, opened || over) else _boubaCards(p, opened || over),
+        if (special)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(tiah ? 'TIAH !' : 'FOMEKOU !',
+                style: const TextStyle(color: _gold, fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 18)),
+          ),
+        if (tiah && total != null && total > 21)
+          Text(tr('dépasse 21', 'over 21'), style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12)),
+      ]),
+    );
+  }
+
+  /// Cartes ouvertes au milieu : le joueur dont c'est le tour touche celles qu'il veut prendre.
+  Widget _middlePile(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool myTurn) {
+    final cards = [for (final x in (v['pileCards'] as List? ?? [])) (x as num).toInt()];
+    final taking = myTurn && v['curOpen'] == true;
+    final me = players.where((p) => p['uid'] == _me).toList();
+    final myTotal = me.isEmpty ? 0 : ((me.first['total'] as num?)?.toInt() ?? 0);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          taking
+              ? tr('Touche les cartes du milieu à prendre (sans dépasser 21) :',
+                  'Tap the middle cards to take (without going over 21):')
+              : tr('Cartes du milieu (${cards.length})', 'Middle cards (${cards.length})'),
+          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
+          for (final code in cards)
+            GestureDetector(
+              onTap: !taking || _busy
+                  ? null
+                  : () {
+                      if (myTotal + code ~/ 4 > 21) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          duration: const Duration(seconds: 1),
+                          content: Text(tr('Cette carte te ferait dépasser 21.', 'This card would take you over 21.')),
+                        ));
+                        return;
+                      }
+                      _do(() => Wallet.cardsTake(widget.gameId, code));
+                    },
+              child: Opacity(
+                opacity: !taking || myTotal + code ~/ 4 <= 21 ? 1 : 0.4,
+                child: _CardView(card: _decode(code), w: 38),
+              ),
+            ),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _tiahCards(Map<String, dynamic> p, bool show) {
+    final cards = _cardsOf(p['cards']);
+    if (show && cards.isNotEmpty) {
+      return Wrap(spacing: 5, runSpacing: 5, children: [
+        for (final c in cards)
+          _PopIn(key: ValueKey('${p['uid']}-${c.v}-${c.suit}'), child: _CardView(card: c, w: 40)),
+      ]);
+    }
+    final n = (p['count'] as num?)?.toInt() ?? 2;
+    return Row(children: [for (var i = 0; i < n; i++) Padding(padding: const EdgeInsets.only(right: 5), child: _CardView(card: null, up: false, w: 40))]);
+  }
+
+  Widget _boubaCards(Map<String, dynamic> p, bool open) {
+    final plain = _cardsOf(p['plain']);
+    final bouba = _cardsOf(p['bouba']);
+    final mine = '${p['uid']}' == _me;
+    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      for (var i = 0; i < ((p['count'] as num?)?.toInt() ?? 3); i++)
+        Padding(
+          padding: const EdgeInsets.only(right: 3),
+          child: _CardView(card: i < plain.length ? plain[i] : null, up: i < plain.length, w: 28),
+        ),
+      const Spacer(),
+      for (var i = 0; i < 2; i++)
+        Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: Opacity(
+            opacity: mine && !open ? 0.8 : 1,
+            child: _CardView(card: i < bouba.length ? bouba[i] : null, up: i < bouba.length, w: 50),
+          ),
+        ),
+    ]);
   }
 }
