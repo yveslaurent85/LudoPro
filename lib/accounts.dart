@@ -472,6 +472,19 @@ class Wallet {
   static Future<Map<String, dynamic>> dbClose(String rid) =>
       _call('dbClose', <String, dynamic>{'rid': rid});
 
+  // ------------------------------------------------------------ Pile ou Face
+  static Future<Map<String, dynamic>> pfList() =>
+      _call('pfList', <String, dynamic>{});
+
+  static Future<Map<String, dynamic>> pfCreate({required int stake, required String side}) =>
+      _call('pfCreate', <String, dynamic>{'stake': stake, 'side': side});
+
+  static Future<Map<String, dynamic>> pfJoin(String gameId) =>
+      _call('pfJoin', <String, dynamic>{'gameId': gameId});
+
+  static Future<Map<String, dynamic>> pfCancel(String gameId) =>
+      _call('pfCancel', <String, dynamic>{'gameId': gameId});
+
   /// Recharge / retrait manuels par code marchand Orange Money.
   /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
   static Future<Map<String, dynamic>> manualInfo() {
