@@ -16,6 +16,7 @@ import 'deposit_screen.dart';
 import 'transfer_screen.dart';
 import 'tournaments_screen.dart';
 import 'pileface_screen.dart';
+import 'cartes.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
@@ -1006,16 +1007,22 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFFF9A825),
           icon: Icons.monetization_on,
           title: tr('Pile ou Face', 'Heads or Tails'),
-          subtitle: tr('Duel à 2, 50 / 50', '1v1 duel, 50 / 50'),
+          subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
           badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => requireLogin(context, (_) => const PileFaceScreen()),
+          onTap: () => _push(
+            context,
+            PileFacePage(
+              openOnline: () => requireLogin(context, (_) => const PileFaceScreen()),
+            ),
+          ),
         ),
         _GameTile(
-          color: Colors.white,
-          icon: Icons.auto_awesome,
-          title: tr('Bientôt', 'Coming soon'),
-          subtitle: tr('De nouveaux jeux arrivent', 'New games on the way'),
-          onTap: null,
+          color: const Color(0xFF0E7A4B),
+          icon: Icons.style,
+          title: tr('Cartes', 'Cards'),
+          subtitle: 'TIAH · BOUBAYAH · TCHEK GAMES',
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => _push(context, const CartesPage()),
         ),
       ],
     );
@@ -3969,7 +3976,6 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ],
     );
   }
-
   Widget buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
