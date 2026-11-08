@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'main.dart' show firebaseReady;
+import 'stake_field.dart';
 
 const Color _kGold = Color(0xFFFFC21A);
 
@@ -96,7 +99,7 @@ class _CoinFace extends StatelessWidget {
 
 /// Pièce qui tourne sur elle-même et s'arrête sur [result] ('pile' | 'face').
 class _FlipCoin extends StatefulWidget {
-  const _FlipCoin({required this.result, required this.size, this.onDone});
+  const _FlipCoin({super.key, required this.result, required this.size, this.onDone});
 
   final String result;
   final double size;
@@ -669,4 +672,673 @@ class _PileFaceScreenState extends State<PileFaceScreen> {
   }
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+}
+
+const BoxDecoration _pfBg = BoxDecoration(
+  gradient: LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+  ),
+);
+
+/// Choix : en présentiel ou en ligne.
+class PileFacePage extends StatelessWidget {
+  const PileFacePage({super.key, required this.openOnline});
+
+  /// Ouvre le mode en ligne (le compte est vérifié par l'appelant).
+  final VoidCallback openOnline;
+
+  Widget _card(IconData icon, String title, String sub, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(colors: [color, Color.lerp(color, Colors.black, 0.25)!]),
+          border: Border.all(color: Colors.white54, width: 2),
+          boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 10, offset: Offset(0, 5))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.2)),
+              child: Icon(icon, color: Colors.white, size: 30),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 2),
+                  Text(sub, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _pfBg,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 12, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    const Text('Pile ou Face',
+                        style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _CoinFace(side: 'face', size: 120),
+                        const SizedBox(height: 26),
+                        _card(
+                          Icons.groups,
+                          tr('En présentiel', 'Face to face'),
+                          tr('2 joueurs sur le même téléphone, avec mise ou gratuit',
+                              '2 players on one phone, with stake or free'),
+                          const Color(0xFF22B14C),
+                          () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(builder: (_) => const PileFaceLocalPage()),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _card(
+                          Icons.public,
+                          tr('En ligne', 'Online'),
+                          tr('Défie un joueur et mise de l\'argent',
+                              'Challenge a player and bet money'),
+                          const Color(0xFFE5262B),
+                          openOnline,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pile ou Face en présentiel : 2 joueurs sur un téléphone.
+/// Mise à 0 = partie gratuite (autant de lancers qu'on veut, avec scores).
+/// Mise > 0 = un lancer par manche, mises débitées et cagnotte versée au gagnant.
+class PileFaceLocalPage extends StatefulWidget {
+  const PileFaceLocalPage({super.key});
+
+  @override
+  State<PileFaceLocalPage> createState() => _PileFaceLocalPageState();
+}
+
+class _PileFaceLocalPageState extends State<PileFaceLocalPage> {
+  final _rnd = Random.secure();
+  final _n1 = TextEditingController();
+  final _n2 = TextEditingController();
+  final Map<int, PlayerAccount> _acc = {};
+
+  int _stake = 0; // choisi à l'écran de préparation
+  int _playStake = 0; // mise de la partie en cours
+  bool _playing = false;
+  bool _starting = false;
+  String? _localId;
+  bool _settled = false;
+  int _jackpot = 0;
+
+  String _p1Side = 'pile';
+  String? _result;
+  bool _spinning = false;
+  bool _shown = false;
+  int _key = 0;
+  int _s1 = 0;
+  int _s2 = 0;
+  final List<String> _history = [];
+
+  bool get _staked => _playing ? _playStake > 0 : _stake > 0;
+  String get _p2Side => _p1Side == 'pile' ? 'face' : 'pile';
+
+  String _name(int seat) {
+    if (_staked && firebaseReady && _acc[seat] != null) return _acc[seat]!.name;
+    final c = seat == 0 ? _n1 : _n2;
+    if (c.text.trim().isNotEmpty) return c.text.trim();
+    return tr('Joueur ${seat + 1}', 'Player ${seat + 1}');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (firebaseReady) {
+      final u = FirebaseAuth.instance.currentUser;
+      if (u != null) _loadHost(u);
+    }
+  }
+
+  @override
+  void dispose() {
+    _n1.dispose();
+    _n2.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadHost(User u) async {
+    int bal = 0;
+    String? token;
+    try {
+      bal = await Wallet.ensure(FirebaseFirestore.instance, u);
+      token = await u.getIdToken();
+    } catch (_) {}
+    if (!mounted) return;
+    final n = (u.displayName != null && u.displayName!.isNotEmpty)
+        ? u.displayName!
+        : (u.email ?? 'Joueur');
+    setState(() {
+      _acc[0] = PlayerAccount(idToken: token, uid: u.uid, name: n, email: u.email ?? '', balance: bal);
+    });
+  }
+
+  Future<void> _connect(int seat) async {
+    final acc = await showPlayerLogin(
+      context,
+      colorName: tr('Joueur ${seat + 1}', 'Player ${seat + 1}'),
+      color: seat == 0 ? _kGold : const Color(0xFF7CD4FF),
+    );
+    if (acc == null || !mounted) return;
+    if (_acc.entries.any((e) => e.key != seat && e.value.uid == acc.uid)) {
+      _snack(tr('Ce compte joue déjà dans la partie.', 'This account is already in the game.'));
+      return;
+    }
+    setState(() => _acc[seat] = acc);
+  }
+
+  void _snack(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+
+  String? get _broke {
+    if (_stake <= 0 || !firebaseReady) return null;
+    for (var s = 0; s < 2; s++) {
+      final a = _acc[s];
+      if (a != null && a.balance < _stake) return a.name;
+    }
+    return null;
+  }
+
+  bool get _canStart {
+    if (_starting || _stake < 0) return false;
+    if (_stake == 0) return true;
+    if (!firebaseReady) return false;
+    return _acc.length == 2 && _broke == null && _stake >= Wallet.minStake;
+  }
+
+  /// Débite les mises (si partie payante) puis ouvre la manche.
+  Future<bool> _begin() async {
+    if (_stake > 0 && firebaseReady) {
+      setState(() => _starting = true);
+      try {
+        final tokens = <String>[];
+        for (var s = 0; s < 2; s++) {
+          final a = _acc[s]!;
+          if (a.uid == FirebaseAuth.instance.currentUser?.uid) {
+            tokens.add((await FirebaseAuth.instance.currentUser?.getIdToken(true)) ?? '');
+          } else {
+            tokens.add(a.idToken ?? '');
+          }
+        }
+        _localId = await Wallet.startLocalGame(
+          stake: _stake,
+          tokens: tokens,
+          names: [_acc[0]!.name, _acc[1]!.name],
+          game: 'pileface',
+        );
+      } catch (e) {
+        if (mounted) {
+          setState(() => _starting = false);
+          _snack(Wallet.errorText(e));
+        }
+        return false;
+      }
+      if (!mounted) return false;
+      setState(() => _starting = false);
+    } else {
+      _localId = null;
+    }
+    setState(() {
+      _playStake = _stake;
+      _playing = true;
+      _settled = false;
+      _jackpot = 0;
+      _result = null;
+      _shown = false;
+    });
+    return true;
+  }
+
+  void _flip() {
+    if (_spinning || (_playStake > 0 && _shown)) return;
+    setState(() {
+      _result = _rnd.nextBool() ? 'pile' : 'face';
+      _spinning = true;
+      _shown = false;
+      _key++;
+    });
+  }
+
+  void _done() {
+    if (!mounted) return;
+    final r = _result!;
+    setState(() {
+      _spinning = false;
+      _shown = true;
+      if (r == _p1Side) {
+        _s1++;
+      } else {
+        _s2++;
+      }
+      _history.insert(0, r == 'pile' ? 'P' : 'F');
+      if (_history.length > 10) _history.removeLast();
+    });
+    if (_localId != null) _settle(r == _p1Side ? 0 : 1, 0);
+  }
+
+  Future<void> _settle(int winSeat, int tries) async {
+    final id = _localId;
+    final a = _acc[winSeat];
+    if (id == null || a == null || _settled) return;
+    _settled = true;
+    try {
+      final res = await Wallet.settleLocalFull(id, [a.uid], [winSeat == 0 ? 1 : 0, winSeat == 1 ? 1 : 0]);
+      final jp = (res['jackpot'] as num?)?.toInt() ?? 0;
+      if (mounted && jp > 0) setState(() => _jackpot = jp);
+    } catch (_) {
+      _settled = false;
+      if (mounted && tries < 4) {
+        Future.delayed(const Duration(seconds: 5), () => _settle(winSeat, tries + 1));
+      }
+    }
+  }
+
+  Future<void> _rematch() async {
+    final ok = await _begin();
+    if (!ok && mounted) setState(() => _playing = false);
+  }
+
+  Future<void> _backToSetup() async {
+    setState(() {
+      _playing = false;
+      _result = null;
+      _shown = false;
+    });
+    final u = firebaseReady ? FirebaseAuth.instance.currentUser : null;
+    if (u != null) {
+      _acc.removeWhere((k, v) => k != 0);
+      await _loadHost(u);
+    }
+  }
+
+  void _swap() => setState(() {
+        _p1Side = _p2Side;
+        _result = null;
+        _shown = false;
+      });
+
+  // ------------------------------------------------------------------ UI
+
+  Widget _seatRow(int seat) {
+    final acc = _acc[seat];
+    final c = seat == 0 ? _n1 : _n2;
+    final color = seat == 0 ? _kGold : const Color(0xFF7CD4FF);
+    Widget field;
+    if (_stake <= 0 || !firebaseReady) {
+      field = TextField(
+        controller: c,
+        maxLength: 14,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        decoration: InputDecoration(
+          counterText: '',
+          isDense: true,
+          hintText: tr('Joueur ${seat + 1}', 'Player ${seat + 1}'),
+          hintStyle: const TextStyle(color: Colors.white54),
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.12),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+        ),
+      );
+    } else if (acc != null) {
+      field = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: Colors.white.withOpacity(0.12),
+          border: Border.all(color: color, width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(acc.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+            Text('💰 ${_pfFcfa(acc.balance)}', style: const TextStyle(color: Color(0xFFFFE082), fontSize: 12)),
+          ],
+        ),
+      );
+    } else {
+      field = OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          side: BorderSide(color: color, width: 2),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+        onPressed: () => _connect(seat),
+        icon: const Icon(Icons.login),
+        label: Text(tr('Joueur ${seat + 1} : se connecter', 'Player ${seat + 1}: sign in')),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 14, backgroundColor: color),
+          const SizedBox(width: 12),
+          Expanded(child: field),
+          if (_stake > 0 && firebaseReady && acc != null && seat != 0)
+            IconButton(
+              onPressed: () => setState(() => _acc.remove(seat)),
+              icon: const Icon(Icons.logout, color: Colors.white70),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _header(String title) => Row(
+        children: [
+          IconButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+          ),
+          Expanded(
+            child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+          ),
+        ],
+      );
+
+  Widget _setup() {
+    final broke = _broke;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      children: [
+        _header(tr('Pile ou Face · présentiel', 'Heads or Tails · face to face')),
+        const SizedBox(height: 8),
+        Center(child: _CoinFace(side: 'face', size: 110)),
+        const SizedBox(height: 16),
+        if (firebaseReady) ...[
+          Text(tr('Mise de chaque joueur (0 = partie gratuite)', "Each player's stake (0 = free game)"),
+              style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          StakeField(stake: _stake, players: 2, local: true, onChanged: (v) => setState(() => _stake = v)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: _stake == 0 ? _kGold : Colors.white30, width: 2),
+                  ),
+                  onPressed: () => setState(() => _stake = 0),
+                  child: Text(tr('Jouer gratuit', 'Play for free')),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+        ],
+        Text(
+          _stake > 0 && firebaseReady
+              ? tr('Joueurs (chacun se connecte à son compte)', 'Players (each one signs in to their account)')
+              : tr('Joueurs', 'Players'),
+          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        _seatRow(0),
+        _seatRow(1),
+        if (broke != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(tr('Solde insuffisant : $broke', 'Insufficient balance: $broke'),
+                style: const TextStyle(color: Color(0xFFFF8A80), fontWeight: FontWeight.w700)),
+          ),
+        if (_stake > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              tr('Gain du vainqueur : ${_pfFcfa(Wallet.prize(_stake * 2, local: true))} (commission 5 %)',
+                  "Winner's prize: ${_pfFcfa(Wallet.prize(_stake * 2, local: true))} (5 % fee)"),
+              style: const TextStyle(color: Color(0xFF7CFFB0), fontWeight: FontWeight.w800),
+            ),
+          ),
+        SizedBox(
+          height: 54,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF22B14C),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            ),
+            onPressed: _canStart ? _begin : null,
+            child: Text(
+              _starting
+                  ? tr('Mise en cours...', 'Placing stakes...')
+                  : (_stake <= 0
+                      ? tr('Lancer · partie gratuite', 'Start · free game')
+                      : tr('Lancer · mise ${_pfFcfa(_stake)}', 'Start · stake ${_pfFcfa(_stake)}')),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _playerBox(int seat, String side, bool win) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: win ? const Color(0x2E7CFFB0) : Colors.white.withOpacity(0.14),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: win ? const Color(0xFF7CFFB0) : Colors.white30, width: 2),
+        ),
+        child: Column(
+          children: [
+            Text(_name(seat),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+              decoration: BoxDecoration(color: _kGold, borderRadius: BorderRadius.circular(10)),
+              child: Text(_sideName(side),
+                  style: const TextStyle(color: Color(0xFF1A1200), fontWeight: FontWeight.w900, letterSpacing: 1)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _score(String name, int s) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(14)),
+        child: Column(
+          children: [
+            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('$s', style: const TextStyle(color: _kGold, fontSize: 26, fontWeight: FontWeight.w900)),
+          ],
+        ),
+      );
+
+  Widget _game() {
+    final r = _shown ? _result : null;
+    final p1Wins = r != null && r == _p1Side;
+    final p2Wins = r != null && r != _p1Side;
+    final pot = _playStake * 2;
+    final canSwap = !_spinning && !(_playStake > 0 && _shown);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      child: Column(
+        children: [
+          _header(_playStake > 0
+              ? tr('Pile ou Face · mise ${_pfFcfa(_playStake)}', 'Heads or Tails · stake ${_pfFcfa(_playStake)}')
+              : tr('Pile ou Face · gratuit', 'Heads or Tails · free')),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _playerBox(0, _p1Side, p1Wins),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 24),
+                child: Text('VS', style: TextStyle(color: _kGold, fontWeight: FontWeight.w900, fontSize: 18)),
+              ),
+              _playerBox(1, _p2Side, p2Wins),
+            ],
+          ),
+          TextButton.icon(
+            onPressed: canSwap ? _swap : null,
+            icon: const Icon(Icons.swap_horiz, color: Colors.white70),
+            label: Text(tr('Échanger les côtés', 'Swap sides'), style: const TextStyle(color: Colors.white70)),
+          ),
+          SizedBox(
+            height: 230,
+            child: Center(
+              child: _result == null
+                  ? _CoinFace(side: 'face', size: 150)
+                  : _FlipCoin(key: ValueKey(_key), result: _result!, size: 150, onDone: _done),
+            ),
+          ),
+          if (r != null) ...[
+            Text(_sideName(r),
+                style: const TextStyle(color: _kGold, fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: 2)),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), color: const Color(0xFF1B8A3A)),
+              child: Column(
+                children: [
+                  Text(
+                    tr('${_name(p1Wins ? 0 : 1)} gagne !', '${_name(p1Wins ? 0 : 1)} wins!'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+                  ),
+                  if (_playStake > 0)
+                    Text(
+                      tr('+ ${_pfFcfa(Wallet.prize(pot, local: true))} versés sur son compte',
+                          '+ ${_pfFcfa(Wallet.prize(pot, local: true))} paid to their account'),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                  if (_jackpot > 0)
+                    Text(tr('🎰 Jackpot : ${_pfFcfa(_jackpot)} !', '🎰 Jackpot: ${_pfFcfa(_jackpot)}!'),
+                        style: const TextStyle(color: Color(0xFFFFE082), fontWeight: FontWeight.w900)),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: _score(_name(0), _s1)),
+              const SizedBox(width: 10),
+              Expanded(child: _score(_name(1), _s2)),
+            ],
+          ),
+          if (_history.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final h in _history)
+                  CircleAvatar(
+                    radius: 15,
+                    backgroundColor: h == 'P' ? Colors.white24 : _kGold,
+                    child: Text(h,
+                        style: TextStyle(
+                            color: h == 'P' ? Colors.white : const Color(0xFF1A1200), fontWeight: FontWeight.w900)),
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 56,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF22B14C),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: _spinning || _starting
+                  ? null
+                  : (_playStake > 0
+                      ? (_shown ? _rematch : _flip)
+                      : _flip),
+              child: Text(
+                _spinning
+                    ? tr('La pièce tourne…', 'Flipping…')
+                    : _playStake > 0
+                        ? (_shown
+                            ? tr('Revanche · même mise ${_pfFcfa(_playStake)}', 'Rematch · same stake ${_pfFcfa(_playStake)}')
+                            : tr('Lancer la pièce', 'Flip the coin'))
+                        : (_shown ? tr('Rejouer', 'Flip again') : tr('Lancer la pièce', 'Flip the coin')),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _spinning ? null : _backToSetup,
+            child: Text(tr('Changer la mise ou les joueurs', 'Change stake or players'),
+                style: const TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _pfBg,
+        child: SafeArea(child: _playing ? _game() : _setup()),
+      ),
+    );
+  }
 }
