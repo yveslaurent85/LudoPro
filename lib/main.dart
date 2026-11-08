@@ -16,6 +16,7 @@ import 'deposit_screen.dart';
 import 'transfer_screen.dart';
 import 'tournaments_screen.dart';
 import 'deux_buts_screen.dart';
+import 'pileface_screen.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
@@ -474,6 +475,9 @@ class HomeScreen extends StatelessWidget {
                 item(Icons.emoji_events, tr('Tournois', 'Tournaments'),
                     const Color(0xFFF57C00),
                     () => go((_) => const TournamentsScreen())),
+                item(Icons.monetization_on, tr('Pile ou Face', 'Heads or Tails'),
+                    const Color(0xFFF9A825),
+                    () => go((_) => const PileFaceScreen())),
                 item(Icons.grid_on, tr('Damier • Deux buts sort', 'Checkers • Two strikes'),
                     const Color(0xFF6D4C41),
                     () => go((_) => const DeuxButsScreen())),
