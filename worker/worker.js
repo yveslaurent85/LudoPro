@@ -44,7 +44,7 @@ const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir l
 const REFERRAL_WITHDRAW_MIN = 100; // gains de parrainage minimum pour pouvoir les retirer vers le solde
 
 // Parties en ligne gérées : le Ludo (« games »), Deux dés (« deuxdes »), Songô et Damier.
-const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo', 'damier'];
+const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo', 'damier', 'pileface'];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 class HttpError extends Error {
@@ -727,6 +727,7 @@ function winnersFor(col, d, uids) {
   if (col === 'deuxdes') return deuxDesWinners(d, uids);
   if (col === 'damier') return damierWinners(d, uids);
   if (col === 'songo') return songoWinners(d, uids);
+  if (col === 'pileface') return typeof d.winnerUid === 'string' ? [d.winnerUid] : [];
   return ludoWinners(d, uids);
 }
 
@@ -2326,6 +2327,7 @@ function requireAdmin(uid, env) {
     throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
   }
 }
+
 function eqFilter(field, value) {
   return {
     fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: toFs(value) },
@@ -2563,7 +2565,7 @@ async function adminReviveGames({ uid, env }) {
   await accessToken(env);
   const limitMs = Date.now() - REVIVE_AFTER_MIN * 60 * 1000;
   const targets = [];
-  for (const col of ['games', 'deuxdes', 'songo', 'damier', 'localGames']) {
+  for (const col of ['games', 'deuxdes', 'songo', 'damier', 'pileface', 'localGames']) {
     for (const status of ['waiting', 'playing']) {
       const docs = await queryDocs(env, col, eqFilter('status', status), 200);
       for (const d of docs) {
@@ -4471,6 +4473,186 @@ async function dbList({ uid, data, env }) {
   return { rooms: out, now: Date.now() };
 }
 
+// ======================================================================
+// Pile ou Face : duel en ligne à deux, tirage fait ici (côté serveur)
+// ======================================================================
+// pileface/{id} : { hostUid, hostName, hostSide ('pile'|'face'), stake, paid, pot,
+//   players, uids, status ('waiting'|'playing'|'finished'|'cancelled'),
+//   result, winnerUid, over, settled }
+// Le créateur mise et choisit son côté ; celui qui relève le défi mise la même
+// somme et prend l'autre côté. La pièce est tirée au hasard au moment où le 2e
+// joueur relève le défi ; le règlement (5 % de commission) passe par settleGame.
+
+const PF_MAX_OPEN_PER_HOST = 3;
+
+function pfSide(v) {
+  return v === 'face' ? 'face' : 'pile';
+}
+
+function pfLockedStake(data) {
+  const stake = intOr(data.stake, 0);
+  if (stake < MIN_STAKE || stake > MAX_STAKE) {
+    throw new HttpError('invalid-argument', `Mise entre ${MIN_STAKE} et ${MAX_STAKE} FCFA.`);
+  }
+  return stake;
+}
+
+/** Crée un défi : la mise du créateur est débitée tout de suite. */
+async function pfCreate({ uid, data, env }) {
+  const stake = pfLockedStake(data);
+  const side = pfSide(data.side);
+  const open = await queryDocs(env, 'pileface', eqFilter('hostUid', uid), 100);
+  if (open.filter((g) => g.status === 'waiting').length >= PF_MAX_OPEN_PER_HOST) {
+    throw new HttpError('failed-precondition', `Tu as déjà ${PF_MAX_OPEN_PER_HOST} défis ouverts. Annule-en un d'abord.`);
+  }
+  const id = newId();
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    tx.write(`pileface/${id}`, {
+      create: true,
+      set: {
+        hostUid: uid,
+        hostName: tournName(me),
+        hostSide: side,
+        stake,
+        paid: [uid],
+        pot: stake,
+        players: [{ uid, name: tournName(me) }],
+        uids: [uid],
+        maxPlayers: 2,
+        status: 'waiting',
+        over: false,
+      },
+      serverTime: ['createdAt'],
+    });
+    return { id, balance: balanceOf(me) - stake };
+  });
+}
+
+/** Relève un défi : mise identique, côté opposé, tirage immédiat, règlement automatique. */
+async function pfJoin({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  const roll = crypto.getRandomValues(new Uint8Array(1))[0] % 2 === 0 ? 'pile' : 'face';
+  const out = await runTx(env, async (tx) => {
+    const g = await tx.get(`pileface/${gid}`);
+    if (!g || g.status !== 'waiting') {
+      throw new HttpError('failed-precondition', "Ce défi n'est plus disponible.");
+    }
+    if (g.hostUid === uid) throw new HttpError('invalid-argument', 'Tu ne peux pas relever ton propre défi.');
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const stake = intOr(g.stake, 0);
+    if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    const hostWins = roll === g.hostSide;
+    const winnerUid = hostWins ? g.hostUid : uid;
+    tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    tx.write(`pileface/${gid}`, {
+      set: {
+        joinerUid: uid,
+        joinerName: tournName(me),
+        paid: [g.hostUid, uid],
+        pot: stake * 2,
+        players: [
+          { uid: g.hostUid, name: g.hostName || 'Joueur' },
+          { uid, name: tournName(me) },
+        ],
+        uids: [g.hostUid, uid],
+        status: 'playing',
+        result: roll,
+        winnerUid,
+        over: true,
+      },
+      serverTime: ['playedAt'],
+    });
+    return { stake, hostSide: g.hostSide, hostUid: g.hostUid, winnerUid, hostName: g.hostName || '' };
+  });
+  let gain = 0;
+  try {
+    await settleGame({ uid, data: { gameId: gid }, env });
+    gain = prizeOf(out.stake * 2);
+  } catch (e) {
+    console.error('pf settle', e);
+  }
+  const me2 = await readDoc(env, `users/${uid}`);
+  return {
+    gameId: gid,
+    result: roll,
+    mySide: out.hostSide === 'pile' ? 'face' : 'pile',
+    won: out.winnerUid === uid,
+    gain,
+    stake: out.stake,
+    opponentName: out.hostName,
+    balance: balanceOf(me2),
+  };
+}
+
+/** Le créateur annule son défi tant que personne ne l'a relevé : mise rendue. */
+async function pfCancel({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  return runTx(env, async (tx) => {
+    const g = await tx.get(`pileface/${gid}`);
+    if (!g || g.status !== 'waiting') throw new HttpError('failed-precondition', "Ce défi n'est plus ouvert.");
+    if (g.hostUid !== uid) throw new HttpError('permission-denied', 'Ce défi ne t\'appartient pas.');
+    tx.write(`users/${uid}`, { incr: { balance: intOr(g.stake, 0) } });
+    tx.write(`pileface/${gid}`, { set: { status: 'cancelled', over: true, settled: true } });
+    return { refunded: intOr(g.stake, 0) };
+  });
+}
+
+/** Défis ouverts + mes derniers tirages + mon solde. Règle au passage un tirage resté en suspens. */
+async function pfList({ uid, env }) {
+  await accessToken(env);
+  const open = await queryDocs(env, 'pileface', eqFilter('status', 'waiting'), 60);
+  const mineAll = await queryDocs(env, 'pileface', arrayContainsFilter('uids', uid), 60);
+  for (const g of mineAll) {
+    if (g.over === true && g.settled !== true && g.status === 'playing') {
+      try {
+        await settleGame({ uid, data: { gameId: g.id }, env });
+        g.status = 'finished';
+        g.settled = true;
+      } catch (e) {
+        console.error('pf resettle', e);
+      }
+    }
+  }
+  const me = await readDoc(env, `users/${uid}`);
+  const toOpen = (g) => ({
+    id: g.id,
+    hostUid: g.hostUid,
+    hostName: g.hostName || '',
+    hostSide: g.hostSide,
+    stake: intOr(g.stake, 0),
+  });
+  const toDone = (g) => {
+    const mine = g.hostUid === uid;
+    const mySide = mine ? g.hostSide : g.hostSide === 'pile' ? 'face' : 'pile';
+    return {
+      id: g.id,
+      stake: intOr(g.stake, 0),
+      result: g.result,
+      mySide,
+      won: g.winnerUid === uid,
+      opponentName: mine ? g.joinerName || '' : g.hostName || '',
+      gain: prizeOf(intOr(g.stake, 0) * 2),
+      at: typeof g.playedAt === 'string' ? g.playedAt : '',
+    };
+  };
+  return {
+    balance: balanceOf(me),
+    open: open.sort(byDateDesc('createdAt')).map(toOpen),
+    done: mineAll
+      .filter((g) => g.status === 'finished' && g.result)
+      .sort(byDateDesc('playedAt'))
+      .slice(0, 12)
+      .map(toDone),
+  };
+}
+
 /** Annule un tournoi et rembourse tous les inscrits payés (reprise possible si interrompu). */
 async function cancelTournament(env, tid, why) {
   let announce = false;
@@ -4594,6 +4776,10 @@ const HANDLERS = {
   dbLeave,
   dbClose,
   dbList,
+  pfCreate,
+  pfJoin,
+  pfCancel,
+  pfList,
 };
 
 const CORS = {
@@ -4648,6 +4834,7 @@ export default {
     }
   },
 };
+
 
 
 
