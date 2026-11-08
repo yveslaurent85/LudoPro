@@ -485,6 +485,52 @@ class Wallet {
   static Future<Map<String, dynamic>> pfCancel(String gameId) =>
       _call('pfCancel', <String, dynamic>{'gameId': gameId});
 
+  // ------------------------------------------------------------ Cartes en ligne
+  static Future<Map<String, dynamic>> cardsList(String game) =>
+      _call('cardsList', <String, dynamic>{'game': game});
+
+  static Future<Map<String, dynamic>> cardsCreate({
+    required String game,
+    required int stake,
+    required int maxPlayers,
+    required bool isPublic,
+  }) =>
+      _call('cardsCreate', <String, dynamic>{
+        'game': game,
+        'stake': stake,
+        'maxPlayers': maxPlayers,
+        'isPublic': isPublic,
+      });
+
+  static Future<Map<String, dynamic>> cardsJoin({String? gameId, String? code}) =>
+      _call('cardsJoin', <String, dynamic>{
+        if (gameId != null) 'gameId': gameId,
+        if (code != null) 'code': code,
+      });
+
+  static Future<Map<String, dynamic>> cardsGet(String gameId) =>
+      _call('cardsGet', <String, dynamic>{'gameId': gameId});
+
+  static Future<Map<String, dynamic>> cardsStart(String gameId) =>
+      _call('cardsStart', <String, dynamic>{'gameId': gameId});
+
+  static Future<Map<String, dynamic>> cardsOpen(String gameId) =>
+      _call('cardsOpen', <String, dynamic>{'gameId': gameId});
+
+  /// TIAH : prendre la carte [card] (code serveur) parmi les cartes ouvertes du milieu.
+  static Future<Map<String, dynamic>> cardsTake(String gameId, int card) =>
+      _call('cardsTake', <String, dynamic>{'gameId': gameId, 'card': card});
+
+  /// TIAH : s'arrêter là (fin de son tour).
+  static Future<Map<String, dynamic>> cardsStop(String gameId) =>
+      _call('cardsStop', <String, dynamic>{'gameId': gameId});
+
+  static Future<Map<String, dynamic>> cardsLeave(String gameId) =>
+      _call('cardsLeave', <String, dynamic>{'gameId': gameId});
+
+  static Future<Map<String, dynamic>> cardsRematch(String gameId) =>
+      _call('cardsRematch', <String, dynamic>{'gameId': gameId});
+
   /// Recharge / retrait manuels par code marchand Orange Money.
   /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
   static Future<Map<String, dynamic>> manualInfo() {
