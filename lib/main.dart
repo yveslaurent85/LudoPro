@@ -975,7 +975,7 @@ class _GamesGrid extends StatelessWidget {
           image: 'assets/game_ludo.png',
           title: 'Ludo',
           subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
-          onTap: () => _push(context, _LudoModePage(onLocal: onLocal)),
+          onTap: () => requireLogin(context, (_) => _LudoModePage(onLocal: onLocal)),
         ),
         _GameTile(
           color: const Color(0xFFFFA000),
@@ -983,7 +983,7 @@ class _GamesGrid extends StatelessWidget {
           image: 'assets/game_deuxdes.png',
           title: tr('Deux dés', 'Two dice'),
           subtitle: tr('Lance deux dés, défie les autres', 'Roll two dice, challenge others'),
-          onTap: () => _push(context, const DeuxDesPage()),
+          onTap: () => requireLogin(context, (_) => const DeuxDesPage()),
         ),
         _GameTile(
           color: const Color(0xFF8D5A2B),
@@ -991,7 +991,7 @@ class _GamesGrid extends StatelessWidget {
           image: 'assets/game_songo.png',
           title: 'Songô',
           subtitle: tr('Jeu de graines', 'Seed game'),
-          onTap: () => _push(context, const SongoPage()),
+          onTap: () => requireLogin(context, (_) => const SongoPage()),
         ),
         _GameTile(
           color: const Color(0xFF37474F),
@@ -1001,7 +1001,7 @@ class _GamesGrid extends StatelessWidget {
           subtitle: tr('Présentiel, en ligne, Deux buts sort, tournoi',
               'Local, online, Two strikes, tournament'),
           badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => _push(context, const DamierPage()),
+          onTap: () => requireLogin(context, (_) => const DamierPage()),
         ),
         _GameTile(
           color: const Color(0xFFF9A825),
@@ -1009,9 +1009,9 @@ class _GamesGrid extends StatelessWidget {
           title: tr('Pile ou Face', 'Heads or Tails'),
           subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
           badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => _push(
+          onTap: () => requireLogin(
             context,
-            PileFacePage(
+            (_) => PileFacePage(
               openOnline: () => requireLogin(context, (_) => const PileFaceScreen()),
             ),
           ),
@@ -1022,7 +1022,7 @@ class _GamesGrid extends StatelessWidget {
           title: tr('Cartes', 'Cards'),
           subtitle: 'TIAH · BOUBAYAH · TCHEK GAMES',
           badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => _push(context, const CartesPage()),
+          onTap: () => requireLogin(context, (_) => const CartesPage()),
         ),
       ],
     );
@@ -3976,6 +3976,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       ],
     );
   }
+
   Widget buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
