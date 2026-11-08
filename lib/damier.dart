@@ -9,6 +9,8 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'deux_buts_screen.dart';
+import 'tournaments_screen.dart';
 import 'game_chat.dart';
 import 'lang.dart';
 import 'main.dart';
@@ -1560,10 +1562,11 @@ class DamierPage extends StatelessWidget {
         onPressed: () => _dShowRules(context),
         icon: const Icon(Icons.help_outline, color: Colors.white),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             _card(
               Icons.groups,
@@ -1592,7 +1595,26 @@ class DamierPage extends StatelessWidget {
                 _go(context, (_) => const _DamierHub());
               },
             ),
+            const SizedBox(height: 14),
+            _card(
+              Icons.bolt,
+              'DEUX BUTS SORT',
+              tr('Salle ouverte à tous : 2 défaites et tu sors',
+                  'Open room for everyone: 2 losses and you are out'),
+              const Color(0xFFE65100),
+              () => _go(context, (_) => const DeuxButsScreen()),
+            ),
+            const SizedBox(height: 14),
+            _card(
+              Icons.emoji_events,
+              tr('Tournoi', 'Tournament'),
+              tr('Tournois Katika : inscris-toi et gagne',
+                  'Katika tournaments: sign up and win'),
+              const Color(0xFF8E24AA),
+              () => _go(context, (_) => const TournamentsScreen()),
+            ),
           ],
+        ),
         ),
       ),
     );
