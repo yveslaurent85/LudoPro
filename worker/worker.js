@@ -44,7 +44,7 @@ const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir l
 const REFERRAL_WITHDRAW_MIN = 100; // gains de parrainage minimum pour pouvoir les retirer vers le solde
 
 // Parties en ligne gérées : le Ludo (« games »), Deux dés (« deuxdes »), Songô et Damier.
-const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo', 'damier', 'pileface'];
+const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo', 'damier', 'pileface', 'cards'];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 class HttpError extends Error {
@@ -728,6 +728,7 @@ function winnersFor(col, d, uids) {
   if (col === 'damier') return damierWinners(d, uids);
   if (col === 'songo') return songoWinners(d, uids);
   if (col === 'pileface') return typeof d.winnerUid === 'string' ? [d.winnerUid] : [];
+  if (col === 'cards') return Array.isArray(d.winnerUids) ? d.winnerUids : [];
   return ludoWinners(d, uids);
 }
 
@@ -2565,7 +2566,7 @@ async function adminReviveGames({ uid, env }) {
   await accessToken(env);
   const limitMs = Date.now() - REVIVE_AFTER_MIN * 60 * 1000;
   const targets = [];
-  for (const col of ['games', 'deuxdes', 'songo', 'damier', 'pileface', 'localGames']) {
+  for (const col of ['games', 'deuxdes', 'songo', 'damier', 'pileface', 'cards', 'localGames']) {
     for (const status of ['waiting', 'playing']) {
       const docs = await queryDocs(env, col, eqFilter('status', status), 200);
       for (const d of docs) {
@@ -4718,6 +4719,549 @@ async function adminTournamentEntries({ uid, data, env }) {
   };
 }
 
+// ======================================================================
+// Cartes en ligne : TIAH et BOUBAYAH (2 à 6 joueurs)
+// ======================================================================
+// cards/{id} : une manche = un document (mise et règlement par settleGame).
+//   game ('tiah'|'boubayah'), hostUid, dealerUid, code, isPublic, stake, pot,
+//   maxPlayers, status ('waiting'|'playing'|'finished'|'cancelled'),
+//   players [{uid,name}], uids, paid, order (ordre des sièges de la manche précédente),
+//   round, prevId, nextId, createdAtMs,
+//   ... en jeu : deck, hands | plain+bouba, first, seq, turnIdx, opened, turnAt,
+//   ... fin : over, winnerUids, fomekou, nextDealerUid.
+// Le serveur mélange, distribue et garde les cartes ; chaque joueur ne reçoit que
+// ce qu'il a le droit de voir (cardsView). Un joueur inactif est joué automatiquement
+// après CARDS_TURN_MS (l'ouverture est la seule action possible).
+
+const CARDS_TURN_MS = 45000;
+const CARDS_MAX_OPEN_PER_HOST = 3;
+const CARDS_START_AFTER_MS = 120000;
+
+const cardVal = (c) => Math.floor(c / 4);
+
+function cardsDeck(game) {
+  const top = game === 'tiah' ? 11 : 10;
+  const d = [];
+  for (let v = 3; v <= top; v++) for (let s = 0; s < 4; s++) d.push(v * 4 + s);
+  for (let i = d.length - 1; i > 0; i--) {
+    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+    [d[i], d[j]] = [d[j], d[i]];
+  }
+  return d;
+}
+
+function cardsGameOf(v) {
+  if (v !== 'tiah' && v !== 'boubayah') throw new HttpError('invalid-argument', 'Jeu inconnu.');
+  return v;
+}
+
+function cardsStakeOf(data) {
+  const stake = intOr(data.stake, 0);
+  if (stake !== 0 && (stake < MIN_STAKE || stake > MAX_STAKE)) {
+    throw new HttpError('invalid-argument', `Mise : 0 (gratuit) ou entre ${MIN_STAKE} et ${MAX_STAKE} FCFA.`);
+  }
+  return stake;
+}
+
+const cardsTotal = (hand) => (hand || []).reduce((a, c) => a + cardVal(c), 0);
+const cardsBoubaTotal = (d, uid) => ((d.bouba && d.bouba[uid]) || []).reduce((a, c) => a + cardVal(c), 0);
+const cardsIsFomekou = (d, uid) => {
+  const b = (d.bouba && d.bouba[uid]) || [];
+  return b.length === 2 && cardVal(b[0]) === 3 && cardVal(b[1]) === 3;
+};
+
+/** Fin de manche : gagnants et prochain distributeur. */
+function cardsFinish(d, opened, hands) {
+  const uids = d.seq || [];
+  const patch = { over: true, finishedMs: Date.now() };
+  let winners;
+  if (d.game === 'tiah') {
+    let best = -1;
+    for (const u of uids) {
+      const t = cardsTotal(hands[u]);
+      if (t <= 21 && t > best) best = t;
+    }
+    winners = best < 0 ? [...uids] : uids.filter((u) => cardsTotal(hands[u]) === best);
+    patch.nextDealerUid = nextAfter(d.order || uids, d.first, uids);
+  } else {
+    const fom = opened.filter((u) => cardsIsFomekou(d, u)); // dans l'ordre de révélation
+    if (fom.length) {
+      winners = fom;
+      patch.fomekou = true;
+      patch.nextDealerUid = fom[0];
+    } else {
+      let best = 0;
+      for (const u of uids) best = Math.max(best, cardsBoubaTotal(d, u));
+      winners = opened.filter((u) => cardsBoubaTotal(d, u) === best);
+      patch.fomekou = false;
+      patch.nextDealerUid = winners[0];
+    }
+  }
+  patch.winnerUids = winners;
+  return patch;
+}
+
+/** BOUBAYAH : le joueur `uid` ouvre ses deux cartes. */
+function cardsApplyOpen(d, uid) {
+  const seq = d.seq || [];
+  const opened = [...(d.opened || []), uid];
+  const patch = { opened, turnIdx: intOr(d.turnIdx, 0) + 1, turnAt: Date.now() };
+  if (opened.length >= seq.length) Object.assign(patch, cardsFinish(d, opened, null));
+  return patch;
+}
+
+/** TIAH : ouvrir ses 2 cartes, prendre une carte ouverte du milieu, ou s'arrêter.
+ *  Le joueur prend autant de cartes qu'il veut sans dépasser 21 ; le tour se termine
+ *  tout seul à 21 ou quand plus aucune carte du milieu ne tient. */
+function cardsTiahStep(d, uid, act, card) {
+  const seq = d.seq || [];
+  const hands = { ...(d.hands || {}) };
+  const deck = [...(d.deck || [])];
+  const opened = [...(d.opened || [])];
+  let curOpen = d.curOpen === true;
+  let end = false;
+  if (act === 'open') {
+    if (curOpen) throw new HttpError('failed-precondition', 'Tes cartes sont déjà ouvertes.');
+    curOpen = true;
+    opened.push(uid);
+  } else if (!curOpen) {
+    throw new HttpError('failed-precondition', "Ouvre d'abord tes cartes.");
+  } else if (act === 'take') {
+    const i = deck.indexOf(card);
+    if (i < 0) throw new HttpError('failed-precondition', "Cette carte n'est plus au milieu.");
+    const hand = [...(hands[uid] || [])];
+    if (cardsTotal(hand) + cardVal(card) > 21) throw new HttpError('failed-precondition', 'Tu dépasserais 21.');
+    hand.push(card);
+    deck.splice(i, 1);
+    hands[uid] = hand;
+  } else if (act === 'stop') {
+    end = true;
+  } else {
+    throw new HttpError('invalid-argument', 'Action inconnue.');
+  }
+  const hand = hands[uid] || [];
+  const tot = cardsTotal(hand);
+  if (curOpen && (tot >= 21 || !deck.some((c) => tot + cardVal(c) <= 21))) end = true;
+  const patch = { deck, hands, opened, turnAt: Date.now(), curOpen };
+  if (end) {
+    patch.curOpen = false;
+    patch.turnIdx = intOr(d.turnIdx, 0) + 1;
+    if (patch.turnIdx >= seq.length) Object.assign(patch, cardsFinish(d, opened, hands));
+  }
+  return patch;
+}
+
+/** Joueur inactif : on joue à sa place (ouvre ses cartes, puis s'arrête). */
+function cardsAutoStep(d, uid) {
+  if (d.game !== 'tiah') return cardsApplyOpen(d, uid);
+  let cur = { ...d };
+  let all = {};
+  if (cur.curOpen !== true) {
+    const p = cardsTiahStep(cur, uid, 'open');
+    all = { ...all, ...p };
+    cur = { ...cur, ...p };
+  }
+  if (intOr(cur.turnIdx, 0) === intOr(d.turnIdx, 0) && cur.over !== true) {
+    const p = cardsTiahStep(cur, uid, 'stop');
+    all = { ...all, ...p };
+  }
+  return all;
+}
+
+/** Joueur qui suit `uid` dans l'ordre des sièges. */
+function nextAfter(order, uid, present) {
+  const list = (order && order.length ? order : present).filter((u) => present.includes(u));
+  const i = list.indexOf(uid);
+  return list[(i + 1) % list.length] || present[0];
+}
+
+async function cardsDrive(env, gid) {
+  for (let i = 0; i < 8; i++) {
+    const g = await readDoc(env, `cards/${gid}`);
+    if (!g || g.status !== 'playing' || g.over === true) return;
+    if (Date.now() - intOr(g.turnAt, 0) <= CARDS_TURN_MS) return;
+    await runTx(env, async (tx) => {
+      const path = `cards/${gid}`;
+      const d = await tx.get(path);
+      if (!d || d.status !== 'playing' || d.over === true) return;
+      if (Date.now() - intOr(d.turnAt, 0) <= CARDS_TURN_MS) return;
+      const cur = (d.seq || [])[intOr(d.turnIdx, 0)];
+      if (!cur) return;
+      tx.write(path, { set: cardsAutoStep(d, cur) });
+    });
+  }
+}
+
+/** Ce que `uid` a le droit de voir de la manche. */
+function cardsView(id, g, uid) {
+  const over = g.over === true;
+  const players = playersOf(g);
+  const opened = Array.isArray(g.opened) ? g.opened : [];
+  const seq = Array.isArray(g.seq) ? g.seq : [];
+  const turnUid = g.status === 'playing' && !over ? seq[intOr(g.turnIdx, 0)] || '' : '';
+  const out = players.map((p) => {
+    const isOpen = opened.includes(p.uid);
+    const row = { uid: p.uid, name: p.name || 'Joueur', opened: isOpen };
+    if (g.game === 'tiah') {
+      const hand = (g.hands && g.hands[p.uid]) || [];
+      row.count = hand.length;
+      if (isOpen || over) {
+        row.cards = hand;
+        row.total = cardsTotal(hand);
+      }
+    } else if (g.game === 'boubayah') {
+      const plain = (g.plain && g.plain[p.uid]) || [];
+      const bouba = (g.bouba && g.bouba[p.uid]) || [];
+      row.count = plain.length;
+      if (isOpen || over || p.uid === uid) row.bouba = bouba;
+      if (isOpen || over) {
+        row.total = cardsBoubaTotal(g, p.uid);
+        row.fomekou = cardsIsFomekou(g, p.uid);
+      }
+      if (over || p.uid === uid) row.plain = plain;
+      row.bouba = isOpen || over || p.uid === uid ? bouba : undefined;
+      row.myOnly = !isOpen && !over && p.uid === uid;
+    }
+    return row;
+  });
+  const stake = intOr(g.stake, 0);
+  const winners = Array.isArray(g.winnerUids) ? g.winnerUids : [];
+  const n = (Array.isArray(g.paid) && g.paid.length) || players.length;
+  return {
+    id,
+    game: g.game,
+    code: g.code || '',
+    isPublic: g.isPublic === true,
+    stake,
+    pot: intOr(g.pot, 0),
+    maxPlayers: intOr(g.maxPlayers, 6),
+    status: over ? 'finished' : g.status,
+    round: intOr(g.round, 1),
+    hostUid: g.hostUid,
+    dealerUid: g.dealerUid || g.hostUid,
+    players: out,
+    pile: Array.isArray(g.deck) ? g.deck.length : 0,
+    pileCards: g.game === 'tiah' && Array.isArray(g.deck) ? [...g.deck].sort((x, y) => x - y) : [],
+    curOpen: g.curOpen === true,
+    seq: Array.isArray(g.seq) ? g.seq : [],
+    turnUid,
+    turnLeftMs: turnUid ? Math.max(0, CARDS_TURN_MS - (Date.now() - intOr(g.turnAt, 0))) : 0,
+    over,
+    winnerUids: over ? winners : [],
+    fomekou: g.fomekou === true,
+    nextDealerUid: over ? g.nextDealerUid || '' : '',
+    nextId: g.nextId || '',
+    settled: g.settled === true,
+    refunded: g.refunded === true,
+    prize: over && stake > 0 ? (winners.length === n ? stake : Math.floor(prizeOf(stake * n) / Math.max(1, winners.length))) : 0,
+    canStart:
+      g.status === 'waiting' &&
+      players.length >= 2 &&
+      (uid === (g.dealerUid || g.hostUid) ||
+        (players.some((p) => p.uid === uid) && Date.now() - intOr(g.createdAtMs, 0) > CARDS_START_AFTER_MS)),
+    now: Date.now(),
+  };
+}
+
+async function cardsFetch(env, gid, uid) {
+  await accessToken(env);
+  await cardsDrive(env, gid);
+  let g = await readDoc(env, `cards/${gid}`);
+  if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+  if (!playersOf(g).some((p) => p.uid === uid)) {
+    throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
+  }
+  if (g.over === true && g.settled !== true) {
+    try {
+      await settleGame({ uid, data: { gameId: gid }, env });
+      g = (await readDoc(env, `cards/${gid}`)) || g;
+    } catch (e) {
+      console.error('cards settle', e);
+    }
+  }
+  return cardsView(gid, g, uid);
+}
+
+function cardsNewDoc({ game, stake, maxPlayers, isPublic, uid, name, round = 1, prevId = '', order = [], dealerUid = '' }) {
+  return {
+    game,
+    hostUid: uid,
+    dealerUid: dealerUid || uid,
+    code: tournCode(),
+    isPublic: !!isPublic,
+    stake,
+    pot: stake,
+    maxPlayers,
+    status: 'waiting',
+    over: false,
+    round,
+    prevId,
+    nextId: '',
+    order,
+    players: [{ uid, name }],
+    uids: [uid],
+    paid: stake > 0 ? [uid] : [],
+    createdAtMs: Date.now(),
+  };
+}
+
+async function cardsCreate({ uid, data, env }) {
+  const game = cardsGameOf(data.game);
+  const stake = cardsStakeOf(data);
+  const maxPlayers = Math.min(6, Math.max(2, intOr(data.maxPlayers, 4)));
+  const open = await queryDocs(env, 'cards', eqFilter('hostUid', uid), 100);
+  if (open.filter((g) => g.status === 'waiting').length >= CARDS_MAX_OPEN_PER_HOST) {
+    throw new HttpError('failed-precondition', `Tu as déjà ${CARDS_MAX_OPEN_PER_HOST} salles ouvertes.`);
+  }
+  const id = newId();
+  await runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (stake > 0) {
+      if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+      tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    }
+    tx.write(`cards/${id}`, {
+      create: true,
+      set: cardsNewDoc({ game, stake, maxPlayers, isPublic: data.isPublic !== false, uid, name: tournName(me) }),
+      serverTime: ['createdAt'],
+    });
+  });
+  return cardsFetch(env, id, uid);
+}
+
+async function cardsJoin({ uid, data, env }) {
+  let gid = idStr(data.gameId);
+  if (!gid && typeof data.code === 'string') {
+    const code = data.code.trim().toUpperCase();
+    const found = (await queryDocs(env, 'cards', eqFilter('code', code), 5)).filter((g) => g.status === 'waiting');
+    if (!found.length) throw new HttpError('not-found', 'Code inconnu ou salle fermée.');
+    gid = found[0].id;
+  }
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g || g.status !== 'waiting') throw new HttpError('failed-precondition', "Cette salle n'est plus ouverte.");
+    const players = playersOf(g);
+    if (players.some((p) => p.uid === uid)) return;
+    if (players.length >= intOr(g.maxPlayers, 6)) throw new HttpError('failed-precondition', 'Salle complète.');
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const stake = intOr(g.stake, 0);
+    if (stake > 0) {
+      if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+      tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    }
+    const np = [...players, { uid, name: tournName(me) }];
+    tx.write(path, {
+      set: {
+        players: np,
+        uids: np.map((p) => p.uid),
+        paid: stake > 0 ? [...(Array.isArray(g.paid) ? g.paid : []), uid] : [],
+        pot: stake * np.length,
+      },
+    });
+  });
+  return cardsFetch(env, gid, uid);
+}
+
+async function cardsLeave({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g || g.status !== 'waiting') throw new HttpError('failed-precondition', 'On ne peut quitter qu\'avant le départ.');
+    const players = playersOf(g);
+    if (!players.some((p) => p.uid === uid)) return;
+    const stake = intOr(g.stake, 0);
+    if (stake > 0) tx.write(`users/${uid}`, { incr: { balance: stake } });
+    const np = players.filter((p) => p.uid !== uid);
+    if (!np.length) {
+      tx.write(path, { set: { status: 'cancelled', over: true, settled: true, players: [], uids: [], paid: [], pot: 0 } });
+      return;
+    }
+    tx.write(path, {
+      set: {
+        players: np,
+        uids: np.map((p) => p.uid),
+        paid: stake > 0 ? (Array.isArray(g.paid) ? g.paid : []).filter((u) => u !== uid) : [],
+        pot: stake * np.length,
+        hostUid: g.hostUid === uid ? np[0].uid : g.hostUid,
+        dealerUid: (g.dealerUid || g.hostUid) === uid ? np[0].uid : g.dealerUid || g.hostUid,
+      },
+    });
+  });
+  return { ok: true };
+}
+
+async function cardsStart({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g || g.status !== 'waiting') throw new HttpError('failed-precondition', 'La manche a déjà commencé.');
+    let players = playersOf(g);
+    if (!players.some((p) => p.uid === uid)) throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette salle.');
+    if (players.length < 2) throw new HttpError('failed-precondition', 'Il faut au moins 2 joueurs.');
+    const dealerOk = uid === (g.dealerUid || g.hostUid);
+    if (!dealerOk && Date.now() - intOr(g.createdAtMs, 0) <= CARDS_START_AFTER_MS) {
+      throw new HttpError('permission-denied', 'Seul le distributeur peut lancer la manche.');
+    }
+    // sièges : même ordre que la manche précédente
+    const ord = Array.isArray(g.order) ? g.order : [];
+    if (ord.length) {
+      players = [...players].sort((a, b) => {
+        const ia = ord.indexOf(a.uid);
+        const ib = ord.indexOf(b.uid);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
+    }
+    const uids = players.map((p) => p.uid);
+    let dealer = g.dealerUid || g.hostUid;
+    if (!uids.includes(dealer)) dealer = uids[0];
+    const di = uids.indexOf(dealer);
+    const clockwise = (from, n) => Array.from({ length: n }, (_, k) => uids[(from + k) % uids.length]);
+    const deck = cardsDeck(g.game);
+    const set = {
+      players,
+      uids,
+      order: uids,
+      dealerUid: dealer,
+      first: dealer,
+      maxPlayers: uids.length,
+      status: 'playing',
+      turnIdx: 0,
+      opened: [],
+      curOpen: false,
+      turnAt: Date.now(),
+      startedMs: Date.now(),
+    };
+    if (g.game === 'tiah') {
+      const hands = Object.fromEntries(uids.map((u) => [u, []]));
+      const from = clockwise(di, uids.length);
+      for (let k = 0; k < 2 * uids.length; k++) hands[from[k % uids.length]].push(deck.pop());
+      set.hands = hands;
+      set.deck = deck;
+      set.seq = from; // le 1er joueur ouvre en premier
+    } else {
+      const plain = Object.fromEntries(uids.map((u) => [u, []]));
+      const bouba = Object.fromEntries(uids.map((u) => [u, []]));
+      const from = clockwise(di + 1, uids.length); // distribution et révélation après le distributeur
+      for (let r = 0; r < 3; r++) for (const u of from) plain[u].push(deck.pop());
+      for (let r = 0; r < 2; r++) for (const u of from) bouba[u].push(deck.pop());
+      set.plain = plain;
+      set.bouba = bouba;
+      set.deck = [];
+      set.seq = from;
+    }
+    tx.write(path, { set, serverTime: ['startedAt'] });
+  });
+  return cardsFetch(env, gid, uid);
+}
+
+async function cardsAct(uid, data, env, act) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  const card = intOr(data.card, -1);
+  await accessToken(env);
+  await cardsDrive(env, gid);
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const d = await tx.get(path);
+    if (!d || d.status !== 'playing' || d.over === true) throw new HttpError('failed-precondition', 'La manche est terminée.');
+    const cur = (d.seq || [])[intOr(d.turnIdx, 0)];
+    if (cur !== uid) throw new HttpError('failed-precondition', "Ce n'est pas encore ton tour.");
+    const patch =
+      d.game === 'tiah'
+        ? cardsTiahStep(d, uid, act, card)
+        : act === 'open'
+          ? cardsApplyOpen(d, uid)
+          : (() => {
+              throw new HttpError('invalid-argument', 'Action inconnue.');
+            })();
+    tx.write(path, { set: patch });
+  });
+  return cardsFetch(env, gid, uid);
+}
+
+const cardsOpen = ({ uid, data, env }) => cardsAct(uid, data, env, 'open');
+const cardsTake = ({ uid, data, env }) => cardsAct(uid, data, env, 'take');
+const cardsStop = ({ uid, data, env }) => cardsAct(uid, data, env, 'stop');
+
+async function cardsGet({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  return cardsFetch(env, gid, uid);
+}
+
+/** Manche suivante : crée la salle (le premier qui clique mise), les autres la rejoignent. */
+async function cardsRematch({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  const nid = await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g || g.over !== true) throw new HttpError('failed-precondition', "La manche n'est pas terminée.");
+    if (!playersOf(g).some((p) => p.uid === uid)) throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
+    if (g.nextId) return g.nextId;
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    const stake = intOr(g.stake, 0);
+    if (stake > 0) {
+      if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+      tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    }
+    const id = newId();
+    const doc = cardsNewDoc({
+      game: g.game,
+      stake,
+      maxPlayers: intOr(g.maxPlayers, 6),
+      isPublic: false,
+      uid,
+      name: tournName(me),
+      round: intOr(g.round, 1) + 1,
+      prevId: gid,
+      order: Array.isArray(g.order) ? g.order : [],
+      dealerUid: g.nextDealerUid || uid,
+    });
+    tx.write(`cards/${id}`, { create: true, set: doc, serverTime: ['createdAt'] });
+    tx.write(path, { set: { nextId: id } });
+    return id;
+  });
+  return cardsFetch(env, nid, uid);
+}
+
+/** Salles publiques ouvertes + mes salles en cours. */
+async function cardsList({ uid, data, env }) {
+  await accessToken(env);
+  const game = data && (data.game === 'tiah' || data.game === 'boubayah') ? data.game : '';
+  const waiting = await queryDocs(env, 'cards', eqFilter('status', 'waiting'), 80);
+  const mine = await queryDocs(env, 'cards', arrayContainsFilter('uids', uid), 60);
+  const row = (g) => ({
+    id: g.id,
+    game: g.game,
+    hostName: (playersOf(g)[0] && playersOf(g)[0].name) || '',
+    stake: intOr(g.stake, 0),
+    count: playersOf(g).length,
+    maxPlayers: intOr(g.maxPlayers, 6),
+    round: intOr(g.round, 1),
+    status: g.status,
+  });
+  const fresh = Date.now() - 30 * 60 * 1000;
+  return {
+    open: waiting
+      .filter((g) => g.isPublic === true && (!game || g.game === game) && intOr(g.createdAtMs, 0) > fresh)
+      .filter((g) => !playersOf(g).some((p) => p.uid === uid))
+      .map(row),
+    mine: mine
+      .filter((g) => (g.status === 'waiting' || g.status === 'playing') && g.over !== true && (!game || g.game === game))
+      .map(row),
+  };
+}
+
 const HANDLERS = {
   ensureWallet,
   applyPromo,
@@ -4780,6 +5324,16 @@ const HANDLERS = {
   pfJoin,
   pfCancel,
   pfList,
+  cardsCreate,
+  cardsJoin,
+  cardsLeave,
+  cardsStart,
+  cardsOpen,
+  cardsTake,
+  cardsStop,
+  cardsGet,
+  cardsRematch,
+  cardsList,
 };
 
 const CORS = {
