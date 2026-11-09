@@ -2014,7 +2014,7 @@ class _SongoHubState extends State<_SongoHub> {
   bool privateRoom = false;
   bool busy = false;
   String? error;
-  bool showOpen = false;
+  bool showOpen = true; 
   bool showLive = false;
   final TextEditingController codeCtrl = TextEditingController();
 
