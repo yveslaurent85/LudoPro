@@ -753,6 +753,7 @@ async function ensureWallet({ uid, data, env }) {
     });
     return WELCOME;
   });
+  await maybeSweep(env);
   return { balance };
 }
 
@@ -1925,11 +1926,58 @@ function adminIds(env) {
 }
 
 /** Dernières parties d'une collection (champs utiles seulement : plus léger). */
-async function recentDocs(env, collectionId, limit) {
+
+/** Ligne d'admin d'un pari Sports (P2P). */
+function adminSportRow(d) {
+  const amount = Math.max(0, intOr(d.amount, 0));
+  const st = d.status;
+  const matched = st === 'matched' || st === 'settled';
+  return {
+    id: d.id,
+    kind: 'sports',
+    mode: 'online',
+    state: st === 'settled' ? 'done' : st === 'matched' ? 'playing' : st === 'open' ? 'waiting' : 'refund',
+    createdAt: typeof d.createdAt === 'string' ? d.createdAt : null,
+    stake: amount,
+    pot: matched ? amount * 2 : amount,
+    players: matched ? 2 : 1,
+    names: [d.proposerName, d.opponentName].filter((x) => x).map(String),
+    commission: st === 'settled' ? Math.max(0, intOr(d.commission, 0)) : 0,
+    prize: st === 'settled' ? Math.max(0, intOr(d.prize, 0)) : 0,
+    betCommission: 0,
+    referralPaid: 0,
+    partnerPaid: 0,
+    jackpot: 0,
+  };
+}
+
+/** Ligne d'admin du règlement d'une formule de course (pari mutuel). */
+function adminRaceRow(d) {
+  const gross = Math.max(0, intOr(d.gross, 0));
+  return {
+    id: d.id,
+    kind: 'courses',
+    mode: 'online',
+    state: 'done',
+    createdAt: typeof d.createdAt === 'string' ? d.createdAt : null,
+    stake: gross,
+    pot: gross,
+    players: Math.max(0, intOr(d.winners, 0)),
+    names: [String(d.formula || 'course')],
+    commission: Math.max(0, intOr(d.commission, 0)),
+    prize: Math.max(0, intOr(d.net, 0)),
+    betCommission: 0,
+    referralPaid: 0,
+    partnerPaid: 0,
+    jackpot: 0,
+  };
+}
+
+async function recentDocs(env, collectionId, limit, extra = []) {
   const fields = [
     'createdAt', 'status', 'stake', 'pot', 'settled', 'jackpot', 'commission',
     'betCommission', 'referralPaid', 'partnerPaid', 'refunded', 'maxPlayers', 'players', 'names',
-    'uids', 'game',
+    'uids', 'game', ...extra,
   ];
   const res = await fsCall(env, 'runQuery', {
     structuredQuery: {
@@ -2000,12 +2048,16 @@ async function adminStats({ uid, data, env }) {
   const limit = Math.min(500, Math.max(20, intOr(data.limit, 150)));
   await accessToken(env); // un seul jeton pour les 4 requêtes parallèles
 
-  const [ludo, deux, songo, damier, local] = await Promise.all([
+  const [ludo, deux, songo, damier, local, pile, cartes, sportB, raceS] = await Promise.all([
     recentDocs(env, 'games', limit),
     recentDocs(env, 'deuxdes', limit),
     recentDocs(env, 'songo', limit),
     recentDocs(env, 'damier', limit),
     recentDocs(env, 'localGames', limit),
+    recentDocs(env, 'pileface', limit).catch(() => []),
+    recentDocs(env, 'cards', limit).catch(() => []),
+    recentDocs(env, 'sportBets', limit, ['amount', 'proposerName', 'opponentName', 'prize']).catch(() => []),
+    recentDocs(env, 'raceSettle', limit, ['gross', 'formula', 'winners', 'net']).catch(() => []),
   ]);
 
   const rows = [
@@ -2013,6 +2065,10 @@ async function adminStats({ uid, data, env }) {
     ...deux.map((d) => adminRow('deuxdes', 'online', d)),
     ...songo.map((d) => adminRow('songo', 'online', d)),
     ...damier.map((d) => adminRow('damier', 'online', d)),
+    ...pile.map((d) => adminRow('pileface', 'online', d)),
+    ...cartes.map((d) => adminRow(d.game === 'boubayah' ? 'boubayah' : 'tiah', 'online', d)),
+    ...sportB.map((d) => adminSportRow(d)),
+    ...raceS.map((d) => adminRaceRow(d)),
     ...local.map((d) =>
       adminRow(
         d.game === 'deuxdes' ? 'deuxdes' : d.game === 'ludo' ? 'ludo' : d.game === 'songo' ? 'songo' : d.game === 'damier' ? 'damier' : d.game === 'pileface' ? 'pileface' : d.game === 'tiah' ? 'tiah' : d.game === 'boubayah' ? 'boubayah' : 'unknown',
@@ -2069,7 +2125,7 @@ async function adminStats({ uid, data, env }) {
     pool,
     users,
     limit,
-    fetched: { ludo: ludo.length, deuxdes: deux.length, songo: songo.length, damier: damier.length, local: local.length },
+    fetched: { ludo: ludo.length, deuxdes: deux.length, songo: songo.length, damier: damier.length, local: local.length, pileface: pile.length, cards: cartes.length, sports: sportB.length, courses: raceS.length },
     jackpotPercent: JACKPOT_PERCENT,
     referralPercent: REFERRAL_PERCENT,
     house: {
@@ -4620,6 +4676,7 @@ async function pfCancel({ uid, data, env }) {
 /** Défis ouverts + mes derniers tirages + mon solde. Règle au passage un tirage resté en suspens. */
 async function pfList({ uid, env }) {
   await accessToken(env);
+  await maybeSweep(env);
   const open = await queryDocs(env, 'pileface', eqFilter('status', 'waiting'), 60);
   const mineAll = await queryDocs(env, 'pileface', arrayContainsFilter('uids', uid), 60);
   for (const g of mineAll) {
@@ -5441,6 +5498,7 @@ async function cardsRematch({ uid, data, env }) {
 /** Salles publiques ouvertes + mes salles en cours. */
 async function cardsList({ uid, data, env }) {
   await accessToken(env);
+  await maybeSweep(env);
   const game = data && (data.game === 'tiah' || data.game === 'boubayah') ? data.game : '';
   const waiting = await queryDocs(env, 'cards', eqFilter('status', 'waiting'), 80);
   const mine = await queryDocs(env, 'cards', arrayContainsFilter('uids', uid), 60);
@@ -5996,7 +6054,80 @@ async function adminRaceResult({ uid, data, env }) {
   return racesList({ uid, env });
 }
 
+
+// ======================================================================
+// Parties ouvertes : annulées après 30 min si personne n'a rejoint (mises remboursées)
+// ======================================================================
+const WAITING_CANCEL_MIN = 30;
+
+async function sweepWaitingGames(env) {
+  await accessToken(env);
+  const limitMs = Date.now() - WAITING_CANCEL_MIN * 60 * 1000;
+  let cancelled = 0;
+  for (const col of ONLINE_COLLECTIONS) {
+    let docs = [];
+    try {
+      docs = await queryDocs(env, col, eqFilter('status', 'waiting'), 200);
+    } catch (e) {
+      console.error('sweep query', col, e);
+      continue;
+    }
+    for (const d of docs) {
+      const t = typeof d.createdAt === 'string' ? Date.parse(d.createdAt) : 0;
+      if (d.settled === true || d.over === true || !(t > 0 && t < limitMs)) continue;
+      if (playersOf(d).length > 1) continue; // quelqu'un a rejoint : la salle reste ouverte
+      try {
+        const done = await runTx(env, async (tx) => {
+          const path = `${col}/${d.id}`;
+          const g = await tx.get(path);
+          if (!g || g.status !== 'waiting' || g.settled === true || g.over === true) return false;
+          if (playersOf(g).length > 1) return false;
+          const stake = Math.max(0, intOr(g.stake, 0));
+          refund(tx, Array.isArray(g.paid) ? g.paid : [], stake);
+          tx.write(path, {
+            set: {
+              settled: true,
+              refunded: true,
+              status: col === 'cards' || col === 'pileface' ? 'cancelled' : 'finished',
+              over: true,
+              commission: 0,
+              referralPaid: 0,
+              partnerPaid: 0,
+            },
+          });
+          return true;
+        });
+        if (done) cancelled++;
+      } catch (e) {
+        console.error('sweep cancel', col, d.id, e);
+      }
+    }
+  }
+  return cancelled;
+}
+
+/** Lance le balayage au plus une fois par minute (appelé par la tâche planifiée et par quelques écrans). */
+async function maybeSweep(env, force = false) {
+  try {
+    const now = Date.now();
+    const st = await readDoc(env, 'app/sweep');
+    if (!force && st && now - intOr(st.lastMs, 0) < 60000) return 0;
+    await runTx(env, async (tx) => {
+      tx.write('app/sweep', { set: { lastMs: now } });
+    });
+    return await sweepWaitingGames(env);
+  } catch (e) {
+    console.error('maybeSweep', e);
+    return 0;
+  }
+}
+
+async function sweepWaiting({ env }) {
+  return { cancelled: await maybeSweep(env), afterMinutes: WAITING_CANCEL_MIN };
+}
+
 const HANDLERS = {
+  sweepWaiting,
   racesList,
   raceBetCreate,
   adminRaceSave,
@@ -6097,6 +6228,10 @@ function json(body, status = 200) {
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(maybeSweep(env, true));
+  },
+
   async fetch(request, env) {
     // Webhook Campay : appelé par Campay, sans connexion joueur.
     const p0 = new URL(request.url).pathname.replace(/^\/+|\/+$/g, '');
