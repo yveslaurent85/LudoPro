@@ -17,6 +17,7 @@ import 'transfer_screen.dart';
 import 'tournaments_screen.dart';
 import 'pileface_screen.dart';
 import 'cartes.dart';
+import 'paris_screen.dart';
 import 'deux_des.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
@@ -1023,6 +1024,14 @@ class _GamesGrid extends StatelessWidget {
           subtitle: 'TIAH · BOUBAYAH · TCHEK GAMES',
           badge: tr('NOUVEAU', 'NEW'),
           onTap: () => requireLogin(context, (_) => const CartesPage()),
+        ),
+        _GameTile(
+          color: const Color(0xFF14295C),
+          icon: Icons.sports_soccer,
+          title: tr('Paris par derrière', 'Side bets'),
+          subtitle: tr('Sports · Courses', 'Sports · Races'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const ParisParDerrierePage()),
         ),
       ],
     );
