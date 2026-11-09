@@ -12,6 +12,8 @@ import 'main.dart' show firebaseReady, Sfx;
 import 'online_screen.dart';
 import 'stake_field.dart';
 
+part 'cartes_b.dart';
+
 // ======================================================================
 // Cartes : TIAH, BOUBAYAH, TCHEK GAMES (Tiah et Tchek Games)
 // ======================================================================
@@ -1818,6 +1820,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     );
   }
 }
+part of 'cartes.dart';
 
 // ======================================================================
 // BOUBAYAH — présentiel
@@ -3258,4 +3261,37 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final cards = _cardsOf(p['cards']);
     if (show && cards.isNotEmpty) {
       return Wrap(spacing: 5, runSpacing: 5, children: [
-  
+        for (var i = 0; i < cards.length; i++)
+          _PopIn(
+            key: ValueKey('${p['uid']}-${cards[i].v}-${cards[i].suit}'),
+            delayMs: i >= 2 ? i * 450 - 900 : 0,
+            child: _CardView(card: cards[i], w: 40),
+          ),
+      ]);
+    }
+    final n = (p['count'] as num?)?.toInt() ?? 2;
+    return Row(children: [for (var i = 0; i < n; i++) Padding(padding: const EdgeInsets.only(right: 5), child: _CardView(card: null, up: false, w: 40))]);
+  }
+
+  Widget _boubaCards(Map<String, dynamic> p, bool open) {
+    final plain = _cardsOf(p['plain']);
+    final bouba = _cardsOf(p['bouba']);
+    final mine = '${p['uid']}' == _me;
+    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      for (var i = 0; i < ((p['count'] as num?)?.toInt() ?? 3); i++)
+        Padding(
+          padding: const EdgeInsets.only(right: 3),
+          child: _CardView(card: i < plain.length ? plain[i] : null, up: i < plain.length, w: 28),
+        ),
+      const Spacer(),
+      for (var i = 0; i < 2; i++)
+        Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: Opacity(
+            opacity: mine && !open ? 0.8 : 1,
+            child: _CardView(card: i < bouba.length ? bouba[i] : null, up: i < bouba.length, w: 50),
+          ),
+        ),
+    ]);
+  }
+}
