@@ -5466,7 +5466,270 @@ async function cardsList({ uid, data, env }) {
   };
 }
 
+// ======================================================================
+// PARIS PAR DERRIÈRE — SPORTS (paris P2P : duel à mise égale, 7,5 % de commission)
+//   sportEvents/{id} : rencontre créée par l'administrateur
+//   sportBets/{id}   : pari d'un joueur (open → matched → settled / refunded / cancelled)
+// Les mises sont débitées tout de suite (séquestre) et rendues ou payées au règlement.
+// ======================================================================
+
+const SPORT_COMMISSION_PERCENT = 7.5;
+const SPORT_MAX_OPEN_PER_PLAYER = 10;
+const SPORT_CATEGORIES = ['football', 'combats'];
+
+function sportEventOut(e) {
+  return {
+    id: e.id,
+    category: e.category || 'football',
+    subcategory: e.subcategory || '',
+    teamA: e.teamA || '',
+    teamB: e.teamB || '',
+    startsAt: intOr(e.startsAt, 0),
+    status: e.status || 'upcoming',
+    result: e.result || '',
+  };
+}
+
+/** Rembourse un pari encore actif (open ou matched). Sans danger si répété. */
+async function sportRefundBet(env, betId, newStatus) {
+  await runTx(env, async (tx) => {
+    const path = `sportBets/${betId}`;
+    const b = await tx.get(path);
+    if (!b || b.active !== true) return;
+    const amt = intOr(b.amount, 0);
+    tx.write(`users/${b.proposerUid}`, { incr: { balance: amt } });
+    if (b.status === 'matched' && b.opponentUid) tx.write(`users/${b.opponentUid}`, { incr: { balance: amt } });
+    tx.write(path, { set: { status: newStatus, active: false }, serverTime: ['closedAt'] });
+  });
+}
+
+/** Paris ouverts (sans challenger) d'un match dont l'heure limite est passée : remboursés. */
+async function sportExpireOpen(env, events, bets) {
+  const now = Date.now();
+  const late = new Set(
+    events.filter((e) => e.status === 'upcoming' && intOr(e.startsAt, 0) <= now).map((e) => e.id),
+  );
+  if (!late.size) return;
+  for (const b of bets) {
+    if (b.status === 'open' && b.active === true && late.has(b.eventId)) {
+      try {
+        await sportRefundBet(env, b.id, 'refunded');
+        b.status = 'refunded';
+        b.active = false;
+      } catch (e) {
+        console.error('sport expire', e);
+      }
+    }
+  }
+}
+
+async function sportsList({ uid, env }) {
+  await accessToken(env);
+  const isAdmin = adminIds(env).includes(uid);
+  let events = (await queryDocs(env, 'sportEvents', eqFilter('visible', true), 150)).filter(
+    (e) => e.status !== 'cancelled' || isAdmin,
+  );
+  const active = await queryDocs(env, 'sportBets', eqFilter('active', true), 500);
+  await sportExpireOpen(env, events, active);
+  const mine = await queryDocs(env, 'sportBets', arrayContainsFilter('participants', uid), 80);
+  events.sort((a, b) => intOr(a.startsAt, 0) - intOr(b.startsAt, 0));
+  const now = Date.now();
+  const outEvents = events.map((e) => {
+    const o = sportEventOut(e);
+    const open = active.filter((b) => b.eventId === e.id && b.status === 'open');
+    o.open = open.map((b) => ({
+      id: b.id,
+      side: b.side,
+      amount: intOr(b.amount, 0),
+      prize: prizeOf(intOr(b.amount, 0) * 2, SPORT_COMMISSION_PERCENT),
+      proposerName: b.proposerName || '',
+      mine: b.proposerUid === uid,
+    }));
+    o.matched = active.filter((b) => b.eventId === e.id && b.status === 'matched').length;
+    return o;
+  });
+  const myBets = mine
+    .map((b) => ({
+      id: b.id,
+      eventId: b.eventId,
+      side: b.side,
+      amount: intOr(b.amount, 0),
+      status: b.status,
+      role: b.proposerUid === uid ? 'proposer' : 'challenger',
+      opponentName: b.proposerUid === uid ? b.opponentName || '' : b.proposerName || '',
+      mySide: b.proposerUid === uid ? b.side : b.side === 'a' ? 'b' : 'a',
+      winnerUid: b.winnerUid || '',
+      won: b.winnerUid === uid,
+      prize: intOr(b.prize, 0),
+    }))
+    .sort((a, b) => (a.status === 'open' || a.status === 'matched' ? -1 : 1) - (b.status === 'open' || b.status === 'matched' ? -1 : 1));
+  return { admin: isAdmin, now, commission: SPORT_COMMISSION_PERCENT, events: outEvents, myBets };
+}
+
+async function sportBetCreate({ uid, data, env }) {
+  const eventId = idStr(data.eventId);
+  const side = data.side === 'b' ? 'b' : data.side === 'a' ? 'a' : '';
+  const amount = intOr(data.amount, -1);
+  if (!eventId || !side) throw new HttpError('invalid-argument', 'Pari invalide.');
+  if (amount < BET_MIN || amount > BET_MAX) {
+    throw new HttpError('invalid-argument', `Mise : entre ${BET_MIN} et ${BET_MAX} FCFA.`);
+  }
+  const betId = newId();
+  await runTx(env, async (tx) => {
+    const e = await tx.get(`sportEvents/${eventId}`);
+    if (!e || e.status !== 'upcoming') throw new HttpError('failed-precondition', 'Ce match n\'accepte plus de paris.');
+    if (Date.now() >= intOr(e.startsAt, 0)) throw new HttpError('failed-precondition', 'Les paris sont clos pour ce match.');
+    const u = await tx.get(`users/${uid}`);
+    if (balanceOf(u) < amount) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    const mine = await queryDocs(env, 'sportBets', arrayContainsFilter('participants', uid), 80);
+    if (mine.filter((b) => b.status === 'open' && b.proposerUid === uid).length >= SPORT_MAX_OPEN_PER_PLAYER) {
+      throw new HttpError('failed-precondition', 'Trop de paris en attente de challenger.');
+    }
+    tx.write(`users/${uid}`, { incr: { balance: -amount } });
+    tx.write(`sportBets/${betId}`, {
+      create: true,
+      set: {
+        eventId,
+        proposerUid: uid,
+        proposerName: tournName(u),
+        side,
+        amount,
+        status: 'open',
+        active: true,
+        participants: [uid],
+        opponentUid: '',
+        opponentName: '',
+      },
+      serverTime: ['createdAt'],
+    });
+  });
+  return sportsList({ uid, env });
+}
+
+async function sportBetAccept({ uid, data, env }) {
+  const betId = idStr(data.betId);
+  if (!betId) throw new HttpError('invalid-argument', 'Pari invalide.');
+  await runTx(env, async (tx) => {
+    const b = await tx.get(`sportBets/${betId}`);
+    if (!b || b.status !== 'open' || b.active !== true) throw new HttpError('failed-precondition', "Ce pari n'est plus disponible.");
+    if (b.proposerUid === uid) throw new HttpError('failed-precondition', 'Tu ne peux pas relever ton propre pari.');
+    const e = await tx.get(`sportEvents/${b.eventId}`);
+    if (!e || e.status !== 'upcoming' || Date.now() >= intOr(e.startsAt, 0)) {
+      throw new HttpError('failed-precondition', 'Les paris sont clos pour ce match.');
+    }
+    const u = await tx.get(`users/${uid}`);
+    const amount = intOr(b.amount, 0);
+    if (balanceOf(u) < amount) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    tx.write(`users/${uid}`, { incr: { balance: -amount } });
+    tx.write(`sportBets/${betId}`, {
+      set: { status: 'matched', opponentUid: uid, opponentName: tournName(u), pool: amount * 2 },
+      union: { participants: [uid] },
+      serverTime: ['matchedAt'],
+    });
+  });
+  return sportsList({ uid, env });
+}
+
+async function sportBetCancel({ uid, data, env }) {
+  const betId = idStr(data.betId);
+  if (!betId) throw new HttpError('invalid-argument', 'Pari invalide.');
+  await runTx(env, async (tx) => {
+    const b = await tx.get(`sportBets/${betId}`);
+    if (!b || b.status !== 'open' || b.active !== true) throw new HttpError('failed-precondition', "Ce pari n'est plus en attente.");
+    if (b.proposerUid !== uid) throw new HttpError('permission-denied', "Ce pari n'est pas le tien.");
+    tx.write(`users/${uid}`, { incr: { balance: intOr(b.amount, 0) } });
+    tx.write(`sportBets/${betId}`, { set: { status: 'cancelled', active: false }, serverTime: ['closedAt'] });
+  });
+  return sportsList({ uid, env });
+}
+
+async function adminSportEventSave({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const category = SPORT_CATEGORIES.includes(data.category) ? data.category : 'football';
+  const teamA = String(data.teamA || '').trim().slice(0, 40);
+  const teamB = String(data.teamB || '').trim().slice(0, 40);
+  const subcategory = String(data.subcategory || '').trim().slice(0, 40);
+  const startsAt = intOr(data.startsAt, 0);
+  if (!teamA || !teamB || teamA.toLowerCase() === teamB.toLowerCase()) {
+    throw new HttpError('invalid-argument', 'Indique deux équipes ou combattants différents.');
+  }
+  if (startsAt <= Date.now()) throw new HttpError('invalid-argument', "L'heure limite des paris doit être dans le futur.");
+  const id = idStr(data.id) || newId();
+  await runTx(env, async (tx) => {
+    const old = await tx.get(`sportEvents/${id}`);
+    if (old && old.status !== 'upcoming') throw new HttpError('failed-precondition', 'Ce match est déjà terminé ou annulé.');
+    tx.write(`sportEvents/${id}`, {
+      set: { category, subcategory, teamA, teamB, startsAt, status: 'upcoming', visible: true, result: '' },
+      ...(old ? {} : { serverTime: ['createdAt'] }),
+    });
+  });
+  return sportsList({ uid, env });
+}
+
+async function sportActiveBets(env, eventId) {
+  return queryDocs(env, 'sportBets', eqFilter('eventId', eventId), 500).then((l) => l.filter((b) => b.active === true));
+}
+
+async function adminSportEventCancel({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Match inconnu.');
+  await runTx(env, async (tx) => {
+    const e = await tx.get(`sportEvents/${id}`);
+    if (!e) throw new HttpError('not-found', 'Match introuvable.');
+    if (e.status === 'finished') throw new HttpError('failed-precondition', 'Ce match est déjà terminé.');
+    tx.write(`sportEvents/${id}`, { set: { status: 'cancelled' } });
+  });
+  for (const b of await sportActiveBets(env, id)) await sportRefundBet(env, b.id, 'refunded');
+  return sportsList({ uid, env });
+}
+
+/** Saisie du résultat : a, b ou draw. Nul = remboursement des deux sans commission. */
+async function adminSportEventResult({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  const result = data.result;
+  if (!id || !['a', 'b', 'draw'].includes(result)) throw new HttpError('invalid-argument', 'Résultat invalide.');
+  await runTx(env, async (tx) => {
+    const e = await tx.get(`sportEvents/${id}`);
+    if (!e) throw new HttpError('not-found', 'Match introuvable.');
+    if (e.status === 'finished' || e.status === 'cancelled') {
+      throw new HttpError('failed-precondition', 'Ce match est déjà clôturé.');
+    }
+    tx.write(`sportEvents/${id}`, { set: { status: 'finished', result }, serverTime: ['finishedAt'] });
+  });
+  for (const b of await sportActiveBets(env, id)) {
+    if (b.status !== 'matched' || result === 'draw') {
+      await sportRefundBet(env, b.id, 'refunded');
+      continue;
+    }
+    await runTx(env, async (tx) => {
+      const path = `sportBets/${b.id}`;
+      const cur = await tx.get(path);
+      if (!cur || cur.active !== true || cur.status !== 'matched') return;
+      const amount = intOr(cur.amount, 0);
+      const pool = amount * 2;
+      const prize = prizeOf(pool, SPORT_COMMISSION_PERCENT);
+      const winner = cur.side === result ? cur.proposerUid : cur.opponentUid;
+      tx.write(`users/${winner}`, { incr: { balance: prize } });
+      tx.write(path, {
+        set: { status: 'settled', active: false, winnerUid: winner, prize, commission: pool - prize },
+        serverTime: ['closedAt'],
+      });
+      await houseAdd(tx, pool - prize);
+    });
+  }
+  return sportsList({ uid, env });
+}
+
 const HANDLERS = {
+  sportsList,
+  sportBetCreate,
+  sportBetAccept,
+  sportBetCancel,
+  adminSportEventSave,
+  adminSportEventCancel,
+  adminSportEventResult,
   ensureWallet,
   applyPromo,
   referralInfo,
