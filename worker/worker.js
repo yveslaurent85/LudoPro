@@ -4754,7 +4754,8 @@ const cardVal = (c) => Math.floor(c / 4);
 function cardsDeck(game) {
   const top = game === 'tiah' ? 11 : 10;
   const d = [];
-  for (let v = 3; v <= top; v++) for (let s = 0; s < 4; s++) d.push(v * 4 + s);
+  // TIAH : l'as de carreau est retiré (3 as seulement), donc deux joueurs ne peuvent pas avoir TOUCX ensemble.
+  for (let v = 3; v <= top; v++) for (let s = 0; s < 4; s++) if (!(game === 'tiah' && v === 11 && s === 2)) d.push(v * 4 + s);
   for (let i = d.length - 1; i > 0; i--) {
     const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
     [d[i], d[j]] = [d[j], d[i]];
@@ -4776,6 +4777,8 @@ function cardsStakeOf(data) {
 }
 
 const cardsTotal = (hand) => (hand || []).reduce((a, c) => a + cardVal(c), 0);
+/** TOUCX : deux as en main (22) ; bat tout, même 21, et ne peut jamais être égalé. */
+const cardsIsToucx = (hand) => (hand || []).length === 2 && (hand || []).every((c) => cardVal(c) === 11);
 const cardsBoubaTotal = (d, uid) => ((d.bouba && d.bouba[uid]) || []).reduce((a, c) => a + cardVal(c), 0);
 const cardsIsFomekou = (d, uid) => {
   const b = (d.bouba && d.bouba[uid]) || [];
@@ -4788,12 +4791,18 @@ function cardsFinish(d, opened, hands) {
   const patch = { over: true, finishedMs: Date.now() };
   let winners;
   if (d.game === 'tiah') {
+    const tx = uids.filter((u) => cardsIsToucx(hands[u]));
     let best = -1;
     for (const u of uids) {
       const t = cardsTotal(hands[u]);
       if (t <= 21 && t > best) best = t;
     }
-    winners = best < 0 ? [...uids] : uids.filter((u) => cardsTotal(hands[u]) === best);
+    if (tx.length) {
+      winners = [tx[0]];
+      patch.toucx = true;
+    } else {
+      winners = best < 0 ? [...uids] : uids.filter((u) => cardsTotal(hands[u]) === best);
+    }
     patch.nextDealerUid = nextAfter(d.order || uids, d.first, uids);
   } else {
     const fom = opened.filter((u) => cardsIsFomekou(d, u)); // dans l'ordre de révélation
@@ -4877,6 +4886,7 @@ function cardsView(id, g, uid) {
       if (isOpen || over) {
         row.cards = hand;
         row.total = cardsTotal(hand);
+        row.toucx = cardsIsToucx(hand);
       }
     } else if (g.game === 'boubayah') {
       const plain = (g.plain && g.plain[p.uid]) || [];
@@ -4918,6 +4928,7 @@ function cardsView(id, g, uid) {
     over,
     winnerUids: over ? winners : [],
     fomekou: g.fomekou === true,
+    toucx: g.toucx === true,
     nextDealerUid: over ? g.nextDealerUid || '' : '',
     nextId: g.nextId || '',
     settled: g.settled === true,
@@ -4949,7 +4960,9 @@ const cardsPlayed = (g, uid) => g.over === true || (Array.isArray(g.opened) && g
 
 function cardsDuelScore(g, uid) {
   if (g.game === 'tiah') {
-    const t = cardsTotal((g.hands && g.hands[uid]) || []);
+    const h = (g.hands && g.hands[uid]) || [];
+    if (cardsIsToucx(h)) return 100;
+    const t = cardsTotal(h);
     return t > 21 ? -1 : t;
   }
   return cardsIsFomekou(g, uid) ? 100 : cardsBoubaTotal(g, uid);
