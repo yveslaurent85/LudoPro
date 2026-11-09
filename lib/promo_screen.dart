@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import 'accounts.dart';
+import 'promo_link.dart';
 
 /// Code promo : chaque joueur a son pseudo comme code. Quand un joueur entre
 /// le code d'un parrain, le parrain touche une part de la commission que
@@ -142,6 +145,67 @@ class _PromoScreenState extends State<PromoScreen> {
               : "Tu n'as pas encore de pseudo : ton code promo est ton pseudo.",
           style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 14),
         ),
+      if (code != null) ...[
+        const SizedBox(height: 10),
+        const Text(
+          'Ton lien promo',
+          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black26,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SelectableText(
+            PromoLink.linkFor(code),
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
+                ),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: PromoLink.linkFor(code)));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Lien copié')),
+                  );
+                },
+                icon: const Icon(Icons.link),
+                label: const Text('Copier le lien'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
+                onPressed: () {
+                  final msg = 'Rejoins-moi sur Katika et joue pour de vrai ! '
+                      'Crée ton compte avec mon lien : ${PromoLink.linkFor(code)}';
+                  launchUrl(
+                    Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}'),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+                icon: const Icon(Icons.share),
+                label: const Text('WhatsApp'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Quand quelqu\'un ouvre ou installe le site avec ton lien, ton code est déjà rempli : il devient ton filleul à la création de son compte.',
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ],
       const SizedBox(height: 8),
       Text(
         'Partage ton code. Quand un joueur le saisit, tu reçois $percent % de '
