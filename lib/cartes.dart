@@ -144,16 +144,18 @@ void _pushLoggedIn(BuildContext context, Widget Function(BuildContext) page) {
 
 /// Une carte qui apparaît (prise, distribuée) : elle grossit et se fond.
 class _PopIn extends StatelessWidget {
-  const _PopIn({super.key, required this.child});
+  const _PopIn({super.key, required this.child, this.delayMs = 0});
 
   final Widget child;
+  final int delayMs;
 
   @override
   Widget build(BuildContext context) {
+    final total = 450 + delayMs;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 450),
-      curve: Curves.easeOutBack,
+      duration: Duration(milliseconds: total),
+      curve: Interval(delayMs / total, 1, curve: Curves.easeOutBack),
       builder: (context, v, ch) => Opacity(
         opacity: v.clamp(0.0, 1.0),
         child: Transform.translate(
@@ -163,6 +165,38 @@ class _PopIn extends StatelessWidget {
       ),
       child: child,
     );
+  }
+}
+
+/// Cartes du milieu, classées dans l'ordre : la 1re est celle du dessus.
+class _MiddleStrip extends StatelessWidget {
+  const _MiddleStrip({required this.cards, this.w = 38});
+
+  final List<_Card> cards; // la 1re = dessus du paquet
+  final double w;
+
+  @override
+  Widget build(BuildContext context) {
+    if (cards.isEmpty) {
+      return Text(tr('Plus de carte au milieu.', 'No more cards in the middle.'),
+          style: const TextStyle(color: Colors.white54, fontSize: 12));
+    }
+    return Wrap(alignment: WrapAlignment.center, spacing: 5, runSpacing: 6, children: [
+      for (var i = 0; i < cards.length; i++)
+        Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            decoration: i == 0
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(w * 0.18),
+                    boxShadow: const [BoxShadow(color: _gold, blurRadius: 10, spreadRadius: 1)],
+                  )
+                : null,
+            child: _CardView(card: cards[i], w: w),
+          ),
+          Text('${i + 1}',
+              style: TextStyle(color: i == 0 ? _gold : Colors.white38, fontSize: 10, fontWeight: FontWeight.w800)),
+        ]),
+    ]);
   }
 }
 
@@ -611,6 +645,7 @@ class _Table {
   final List<String> names;
   String? localId;
   bool settled = false;
+  final List<String> betLog = []; // paris de la manche en cours
 
   int get n => names.length;
   bool get staked => stake > 0 && firebaseReady;
@@ -619,6 +654,7 @@ class _Table {
   Future<void> begin() async {
     settled = false;
     localId = null;
+    betLog.clear();
     if (!staked) return;
     final tokens = <String>[];
     for (final a in accounts) {
@@ -633,7 +669,7 @@ class _Table {
 
   /// Verse la cagnotte. Égalité générale / à 2 : remboursement sans commission
   /// (géré par le serveur). Renvoie le jackpot éventuel.
-  Future<int> settle(List<int> winSeats) async {
+  Future<int> settle(List<int> winSeats, {List<int>? scores, List<int>? fscores}) async {
     final id = localId;
     if (id == null || settled || !staked) return 0;
     settled = true;
@@ -641,7 +677,8 @@ class _Table {
       final res = await Wallet.settleLocalFull(
         id,
         [for (final s in winSeats) accounts[s]!.uid],
-        [for (var i = 0; i < n; i++) winSeats.contains(i) ? 1 : 0],
+        scores ?? [for (var i = 0; i < n; i++) winSeats.contains(i) ? 1 : 0],
+        fscores: fscores,
       );
       return (res['jackpot'] as num?)?.toInt() ?? 0;
     } catch (_) {
@@ -650,12 +687,208 @@ class _Table {
     }
   }
 
+  /// Jeton de connexion du joueur (le serveur vérifie que c'est bien lui).
+  Future<String> tokenOf(int seat) async {
+    final a = accounts[seat]!;
+    if (a.uid == FirebaseAuth.instance.currentUser?.uid) {
+      return (await FirebaseAuth.instance.currentUser?.getIdToken(true)) ?? '';
+    }
+    return a.idToken ?? '';
+  }
+
   /// Gain de chaque gagnant, 0 si gratuit ; en cas d'égalité générale : remboursement.
   int payPerWinner(List<int> winSeats) {
     if (stake <= 0) return 0;
     if (winSeats.length == n) return stake; // remboursement
     return Wallet.prize(stake * n, local: true) ~/ winSeats.length;
   }
+}
+
+/// Paris en présentiel : Duel (TIAH, BOUBAYAH) et Défi Fétiche 13 (BOUBAYAH).
+/// Possible avant la manche ou pendant, entre des joueurs qui n'ont pas encore ouvert leurs cartes.
+Future<void> _showLocalBets(
+  BuildContext context, {
+  required _Table table,
+  required Set<int> played,
+  required bool boubayah,
+}) {
+  final seats = [for (var s = 0; s < table.n; s++) if (!played.contains(s)) s];
+  String type = 'duel';
+  int? pSeat = seats.isNotEmpty ? seats.first : null;
+  int? oSeat = seats.length > 1 ? seats[1] : null;
+  bool over = true;
+  bool busy = false;
+  final amountCtrl = TextEditingController(text: '${table.stake}');
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFF062E1C),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+    builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+      Future<void> submit() async {
+        final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
+        if (pSeat == null || oSeat == null || pSeat == oSeat) return;
+        if (amount < Wallet.minStake) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+              SnackBar(content: Text(tr('Mise minimum : ${_fcfa(Wallet.minStake)}', 'Minimum: ${_fcfa(Wallet.minStake)}'))));
+          return;
+        }
+        setS(() => busy = true);
+        try {
+          await Wallet.localBet(
+            id: table.localId!,
+            type: type,
+            amount: amount,
+            proposerToken: await table.tokenOf(pSeat!),
+            opponentToken: await table.tokenOf(oSeat!),
+            over7: over,
+          );
+          final pn = table.names[pSeat!];
+          final on = table.names[oSeat!];
+          table.betLog.add(type == 'duel'
+              ? '$pn ⚔ $on · ${_fcfa(amount)}'
+              : '$pn ${over ? tr('plus', 'over') : tr('moins', 'under')} ${tr('de', 'than')} 13 ${tr('contre', 'vs')} $on · ${_fcfa(amount)}');
+          if (ctx.mounted) Navigator.of(ctx).pop();
+        } catch (e) {
+          if (ctx.mounted) {
+            setS(() => busy = false);
+            ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+          }
+        }
+      }
+
+      Widget seatPicker(String label, int? value, void Function(int?) on, {int? exclude}) {
+        return Row(children: [
+          SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Colors.white70))),
+          Expanded(
+            child: DropdownButton<int>(
+              isExpanded: true,
+              dropdownColor: const Color(0xFF0B4A2C),
+              value: value,
+              items: [
+                for (final s in seats)
+                  if (s != exclude)
+                    DropdownMenuItem<int>(
+                      value: s,
+                      child: Text(table.names[s], style: const TextStyle(color: Colors.white)),
+                    ),
+              ],
+              onChanged: busy ? null : (v) => setS(() => on(v)),
+            ),
+          ),
+        ]);
+      }
+
+      return Padding(
+        padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('Paris entre joueurs', 'Bets between players'),
+                style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 4),
+            Text(
+              tr('Possible tant que les joueurs concernés n\'ont pas ouvert leurs cartes. Les deux mises sont débitées tout de suite.',
+                  'Possible until the players involved have opened their cards. Both stakes are charged right away.'),
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+            if (seats.length < 2)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  tr('Il faut au moins 2 joueurs qui n\'ont pas encore ouvert leurs cartes.',
+                      'At least 2 players who have not opened their cards yet are needed.'),
+                  style: const TextStyle(color: Color(0xFFFFCC80), fontWeight: FontWeight.w700),
+                ),
+              )
+            else ...[
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, children: [
+                ChoiceChip(
+                  label: Text(tr('Défier un adversaire', 'Challenge a rival')),
+                  selected: type == 'duel',
+                  selectedColor: _gold,
+                  onSelected: (_) => setS(() => type = 'duel'),
+                ),
+                if (boubayah)
+                  ChoiceChip(
+                    label: Text(tr('Défi Fétiche (13)', 'Fetish challenge (13)')),
+                    selected: type == 'fetiche',
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => type = 'fetiche'),
+                  ),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                type == 'duel'
+                    ? tr(boubayah ? 'Le plus gros score gagne (FOMEKOU bat tout). Égalité : mises rendues.' : 'Le meilleur total (21 max) gagne. Égalité : mises rendues.',
+                        boubayah ? 'Highest score wins (FOMEKOU beats all). Tie: stakes refunded.' : 'Best total (21 max) wins. Tie: stakes refunded.')
+                    : tr('Le total BOUBAYAH du parieur est comparé à 13. FOMEKOU compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
+                        "The bettor's BOUBAYAH total is compared with 13. FOMEKOU counts as 6 (so under 13). Exactly 13: stakes refunded."),
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              seatPicker(tr('Parieur', 'Bettor'), pSeat, (v) {
+                pSeat = v;
+                if (oSeat == pSeat) oSeat = seats.firstWhere((s) => s != pSeat, orElse: () => seats.first);
+              }),
+              seatPicker(tr('Adversaire', 'Opponent'), oSeat, (v) => oSeat = v, exclude: pSeat),
+              if (type == 'fetiche')
+                Row(children: [
+                  SizedBox(width: 100, child: Text(tr('Le parieur dit', 'Bettor says'), style: const TextStyle(color: Colors.white70))),
+                  ChoiceChip(
+                    label: Text(tr('Plus de 13', 'Over 13')),
+                    selected: over,
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => over = true),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: Text(tr('Moins de 13', 'Under 13')),
+                    selected: !over,
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => over = false),
+                  ),
+                ]),
+              const SizedBox(height: 8),
+              TextField(
+                controller: amountCtrl,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                decoration: InputDecoration(
+                  labelText: tr('Mise du pari (FCFA)', 'Bet amount (FCFA)'),
+                  labelStyle: const TextStyle(color: Colors.white60),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE5262B),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: busy || pSeat == null || oSeat == null || pSeat == oSeat ? null : submit,
+                  child: Text(busy ? tr('Mise en cours...', 'Placing...') : tr('Valider le pari', 'Place the bet'),
+                      style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ],
+            if (table.betLog.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(tr('Paris de cette manche', "This round's bets"),
+                  style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w800)),
+              for (final l in table.betLog)
+                Padding(padding: const EdgeInsets.only(top: 4), child: Text(l, style: const TextStyle(color: Colors.white))),
+            ],
+          ]),
+        ),
+      );
+    }),
+  ).whenComplete(amountCtrl.dispose);
 }
 
 class _CardsSetup extends StatefulWidget {
@@ -953,13 +1186,42 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
   int _phase = 0; // 0 passer le téléphone, 1 cartes ouvertes, 2 résultat
   bool _dealing = false;
   bool _turnDone = false;
-  int _taken = 0; // cartes prises dans le tour courant
+  bool _autoTaking = false; // les cartes du milieu partent toutes seules vers le joueur
+  int _left = 30; // secondes restantes pour ouvrir ses cartes
+  Timer? _timer;
   List<int> _winners = [];
   int _jackpot = 0;
   String? _settleError;
   final List<int> _wins = List.filled(6, 0);
 
   int get _n => _t!.n;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _t == null || _dealing || _phase != 0 || _autoTaking) return;
+      if (_left > 0) setState(() => _left--);
+      if (_left <= 0) _open();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  /// Joueurs qui ont déjà ouvert leurs cartes (pas de pari possible avec eux).
+  Set<int> get _played {
+    final s = <int>{};
+    if (_phase == 2) return {for (var i = 0; i < _n; i++) i};
+    for (var k = 0; k < _cur; k++) {
+      s.add(_order[k]);
+    }
+    if (_phase == 1) s.add(_order[_cur]);
+    return s;
+  }
 
   int _total(List<_Card> h) => h.fold(0, (a, c) => a + c.v);
 
@@ -976,53 +1238,36 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     _cur = 0;
     _phase = 0;
     _turnDone = false;
-    _taken = 0;
+    _autoTaking = false;
+    _left = 30;
     _winners = [];
     _jackpot = 0;
     _settleError = null;
     _dealing = true;
   }
 
-  /// Le joueur ouvre ses deux cartes ; les cartes du milieu deviennent visibles.
-  void _open() {
+  /// Le joueur ouvre ses cartes : les cartes du milieu qui lui conviennent partent toutes seules,
+  /// dans l'ordre (la 1re d'abord), tant que son total ne dépasse pas 21.
+  Future<void> _open() async {
+    if (_phase != 0 || _autoTaking) return;
+    final seat = _order[_cur];
     setState(() {
       _phase = 1;
       _turnDone = false;
-      _taken = 0;
+      _autoTaking = true;
     });
-    _checkEnd();
-  }
-
-  /// Le tour se termine tout seul à 21 ou quand plus aucune carte du milieu ne tient.
-  void _checkEnd() {
-    final seat = _order[_cur];
-    final tot = _total(_hands[seat]);
-    final fits = _pile.any((c) => tot + c.v <= 21);
-    if (tot == 21) _sfx.win();
-    if (tot >= 21 || !fits) setState(() => _turnDone = true);
-  }
-
-  /// Le joueur tape une carte du milieu : il la prend si elle ne le fait pas dépasser 21.
-  void _take(int i) {
-    if (_turnDone) return;
-    final seat = _order[_cur];
-    final c = _pile[i];
-    if (_total(_hands[seat]) + c.v > 21) {
-      _sfx.deny();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 1),
-          content: Text(tr('Cette carte te ferait dépasser 21.', 'This card would take you over 21.')),
-        ),
-      );
-      return;
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    while (mounted && _pile.isNotEmpty && _total(_hands[seat]) + _pile.last.v <= 21) {
+      setState(() => _hands[seat].add(_pile.removeLast()));
+      _sfx.land();
+      await Future<void>.delayed(const Duration(milliseconds: 800));
     }
+    if (!mounted) return;
+    if (_total(_hands[seat]) == 21) _sfx.win();
     setState(() {
-      _hands[seat].add(_pile.removeAt(i));
-      _taken++;
+      _autoTaking = false;
+      _turnDone = true;
     });
-    _sfx.land();
-    _checkEnd();
   }
 
   Future<void> _next() async {
@@ -1031,6 +1276,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
         _cur++;
         _phase = 0;
         _turnDone = false;
+        _left = 30;
       });
       return;
     }
@@ -1052,16 +1298,18 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
       }
     });
     try {
-      final jp = await _t!.settle(w);
+      final jp = await _t!.settle(w, scores: _scores());
       if (mounted && jp > 0) setState(() => _jackpot = jp);
     } catch (e) {
       if (mounted) setState(() => _settleError = Wallet.errorText(e));
     }
   }
 
+  List<int> _scores() => [for (final h in _hands) _total(h) > 21 ? -1 : _total(h)];
+
   Future<void> _retrySettle() async {
     try {
-      final jp = await _t!.settle(_winners);
+      final jp = await _t!.settle(_winners, scores: _scores());
       if (mounted) {
         setState(() {
           _settleError = null;
@@ -1122,6 +1370,12 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
             style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
           ),
         ),
+        if (_t!.staked && _phase != 2 && !_autoTaking)
+          TextButton.icon(
+            onPressed: () => _showLocalBets(context, table: _t!, played: _played, boubayah: false),
+            icon: const Icon(Icons.casino, color: _goldSoft, size: 18),
+            label: Text(tr('Paris', 'Bets'), style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w800)),
+          ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(14)),
@@ -1192,7 +1446,15 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 14),
+                  Text('⏱ $_left s',
+                      style: TextStyle(
+                          color: _left <= 10 ? const Color(0xFFFF8A80) : _goldSoft,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900)),
+                  Text(tr('À 0, tes cartes s\'ouvrent toutes seules.', 'At 0 your cards open by themselves.'),
+                      style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                  const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -1217,7 +1479,6 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     final hand = _hands[seat];
     final total = _total(hand);
     final bust = total > 21;
-    final mid = [for (var i = 0; i < _pile.length; i++) i]..sort((x, y) => _pile[x].v.compareTo(_pile[y].v));
     return _scaffold(Column(children: [
       _topBar(),
       Padding(
@@ -1237,6 +1498,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
                   for (var i = 0; i < hand.length; i++)
                     _PopIn(
                       key: ValueKey('$seat-${hand[i].v}-${hand[i].suit}'),
+                      delayMs: i >= 2 ? 0 : i * 250,
                       child: _CardView(card: hand[i], w: 56),
                     ),
                 ],
@@ -1261,28 +1523,22 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               ),
             const SizedBox(height: 8),
             Text(
-              _turnDone
-                  ? tr('Ton tour est terminé.', 'Your turn is over.')
-                  : tr('Tape les cartes du milieu que tu veux prendre (sans dépasser 21) :',
-                      'Tap the middle cards you want (without going over 21):'),
+              _autoTaking
+                  ? tr('Les cartes du milieu qui te conviennent arrivent, dans l\'ordre…',
+                      'Matching middle cards are coming to you, in order…')
+                  : (_turnDone
+                      ? tr('Ton score est affiché. Passe le téléphone au suivant.',
+                          'Your score is shown. Pass the phone on.')
+                      : ''),
+              textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 7,
-              runSpacing: 7,
-              children: [
-                for (final i in mid)
-                  GestureDetector(
-                    onTap: () => _take(i),
-                    child: Opacity(
-                      opacity: !_turnDone && total + _pile[i].v <= 21 ? 1 : 0.4,
-                      child: _CardView(card: _pile[i], w: 44),
-                    ),
-                  ),
-              ],
-            ),
+            const SizedBox(height: 10),
+            Text(tr('Cartes du milieu (dans l\'ordre)', 'Middle cards (in order)'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            const SizedBox(height: 6),
+            _MiddleStrip(cards: _pile.reversed.toList(), w: 36),
           ],
         ),
       ),
@@ -1296,11 +1552,11 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               backgroundColor: const Color(0xFF22B14C),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
-            onPressed: _next,
+            onPressed: _turnDone ? _next : null,
             child: Text(
               _cur + 1 < _n
-                  ? tr('Terminer mon tour · passer le téléphone', 'End my turn · pass the phone')
-                  : tr('Terminer mon tour · fin de manche', 'End my turn · end the round'),
+                  ? tr('Joueur suivant · passer le téléphone', 'Next player · pass the phone')
+                  : tr('Voir le résultat de la manche', 'See the round result'),
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
             ),
           ),
@@ -1472,8 +1728,39 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
   final List<int> _wins = List.filled(6, 0);
   final List<String> _history = [];
   bool _dealing = false;
+  int _left = 30; // secondes pour ouvrir son BOUBAYAH
+  int _leftSeat = -1;
+  Timer? _timer;
 
   int get _n => _t!.n;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _t == null || _dealing || _over) return;
+      final s = _toReveal;
+      if (s < 0) return;
+      if (s != _leftSeat) {
+        setState(() {
+          _leftSeat = s;
+          _left = 30;
+        });
+        return;
+      }
+      if (_left > 0) setState(() => _left--);
+      if (_left <= 0) _reveal(s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  List<int> _scores() => [for (var s = 0; s < _n; s++) _isFomekou(s) ? 100 : _total(s)];
+  List<int> _fscores() => [for (var s = 0; s < _n; s++) _isFomekou(s) ? 6 : _total(s)];
 
   int _total(int s) => _bouba[s][0].v + _bouba[s][1].v;
   bool _isFomekou(int s) => _bouba[s][0].v == 3 && _bouba[s][1].v == 3;
@@ -1504,6 +1791,8 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
       }
     }
     _dealing = true;
+    _left = 30;
+    _leftSeat = -1;
     _revealed.clear();
     _peek.clear();
     _over = false;
@@ -1514,7 +1803,12 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
   }
 
   Future<void> _reveal(int seat) async {
-    setState(() => _revealed.add(seat));
+    if (_revealed.contains(seat) || _over) return;
+    setState(() {
+      _revealed.add(seat);
+      _left = 30;
+      _leftSeat = -1;
+    });
     if (_isFomekou(seat)) _sfx.win();
     if (_revealed.length < _n) return;
     // Calcul du résultat
@@ -1548,7 +1842,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
           '${_fomekou ? ' (FOMEKOU)' : ' (${_total(w.first)})'}');
     });
     try {
-      final jp = await _t!.settle(w);
+      final jp = await _t!.settle(w, scores: _scores(), fscores: _fscores());
       if (mounted && jp > 0) setState(() => _jackpot = jp);
     } catch (e) {
       if (mounted) setState(() => _settleError = Wallet.errorText(e));
@@ -1557,7 +1851,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
 
   Future<void> _retrySettle() async {
     try {
-      final jp = await _t!.settle(_winners);
+      final jp = await _t!.settle(_winners, scores: _scores(), fscores: _fscores());
       if (mounted) {
         setState(() {
           _settleError = null;
@@ -1610,6 +1904,14 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
             ),
           ),
+          if (mine && !_dealing)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Text('⏱ $_left s',
+                  style: TextStyle(
+                      color: _left <= 10 ? const Color(0xFFFF8A80) : _goldSoft,
+                      fontWeight: FontWeight.w900)),
+            ),
           if (open)
             Text('${_total(seat)}',
                 style: TextStyle(
@@ -1710,6 +2012,13 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
             style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
           ),
         ),
+        if (t.staked && !_over && !_dealing)
+          TextButton.icon(
+            onPressed: () =>
+                _showLocalBets(context, table: t, played: _revealed.toSet(), boubayah: true),
+            icon: const Icon(Icons.casino, color: _goldSoft, size: 18),
+            label: Text(tr('Paris', 'Bets'), style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w800)),
+          ),
       ]),
       Expanded(
         child: ListView(
@@ -2107,10 +2416,16 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     super.initState();
     _poll();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _v != null && _v!['over'] != true) setState(() {});
+    });
   }
+
+  Timer? _tick;
 
   @override
   void dispose() {
+    _tick?.cancel();
     _timer?.cancel();
     super.dispose();
   }
@@ -2415,6 +2730,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
                 ]),
               ),
             if (tiah && !over) _middlePile(v, players, myTurn),
+            _betsPanel(v, players, tiah),
             if (over)
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -2497,17 +2813,9 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
                     backgroundColor: const Color(0xFF7B1FA2),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                   ),
-                  onPressed: !myTurn || _busy
-                      ? null
-                      : (tiah && v['curOpen'] == true
-                          ? () => _do(() => Wallet.cardsStop(widget.gameId))
-                          : () => _do(() => Wallet.cardsOpen(widget.gameId))),
+                  onPressed: !myTurn || _busy ? null : () => _do(() => Wallet.cardsOpen(widget.gameId)),
                   child: Text(
-                    tiah
-                        ? (myTurn && v['curOpen'] == true
-                            ? tr('JE M\'ARRÊTE ICI', 'I STOP HERE')
-                            : tr('OUVRIR MES CARTES', 'OPEN MY CARDS'))
-                        : tr('OUVRIR MON BOUBAYAH', 'OPEN MY BOUBAYAH'),
+                    tiah ? tr('OUVRIR MES CARTES', 'OPEN MY CARDS') : tr('OUVRIR MON BOUBAYAH', 'OPEN MY BOUBAYAH'),
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                   ),
                 ),
@@ -2561,56 +2869,272 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     );
   }
 
-  /// Cartes ouvertes au milieu : le joueur dont c'est le tour touche celles qu'il veut prendre.
+  /// Cartes du milieu, classées dans l'ordre : elles partent toutes seules vers le joueur qui ouvre.
   Widget _middlePile(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool myTurn) {
-    final cards = [for (final x in (v['pileCards'] as List? ?? [])) (x as num).toInt()];
-    final taking = myTurn && v['curOpen'] == true;
-    final me = players.where((p) => p['uid'] == _me).toList();
-    final myTotal = me.isEmpty ? 0 : ((me.first['total'] as num?)?.toInt() ?? 0);
+    final cards = [for (final x in (v['pileCards'] as List? ?? [])) _decode((x as num).toInt())];
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
-          taking
-              ? tr('Touche les cartes du milieu à prendre (sans dépasser 21) :',
-                  'Tap the middle cards to take (without going over 21):')
-              : tr('Cartes du milieu (${cards.length})', 'Middle cards (${cards.length})'),
+          tr('Cartes du milieu, dans l\'ordre (${cards.length})', 'Middle cards, in order (${cards.length})'),
           style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12),
         ),
+        const SizedBox(height: 2),
+        Text(
+          tr('Dès qu\'un joueur ouvre ses cartes, celles qui lui conviennent (sans dépasser 21) partent vers lui, une par une.',
+              'As soon as a player opens, the cards that fit (without going over 21) go to him, one by one.'),
+          style: const TextStyle(color: Colors.white54, fontSize: 11),
+        ),
         const SizedBox(height: 8),
-        Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
-          for (final code in cards)
-            GestureDetector(
-              onTap: !taking || _busy
-                  ? null
-                  : () {
-                      if (myTotal + code ~/ 4 > 21) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          duration: const Duration(seconds: 1),
-                          content: Text(tr('Cette carte te ferait dépasser 21.', 'This card would take you over 21.')),
-                        ));
-                        return;
-                      }
-                      _do(() => Wallet.cardsTake(widget.gameId, code));
-                    },
-              child: Opacity(
-                opacity: !taking || myTotal + code ~/ 4 <= 21 ? 1 : 0.4,
-                child: _CardView(card: _decode(code), w: 38),
-              ),
-            ),
-        ]),
+        _MiddleStrip(cards: cards, w: 36),
       ]),
     );
+  }
+
+  // ---------------------------------------------------------------- paris
+
+  Widget _betsPanel(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool tiah) {
+    final bets = [for (final b in (v['bets'] as List? ?? [])) Map<String, dynamic>.from(b as Map)];
+    final over = v['over'] == true;
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    if (stake <= 0 && bets.isEmpty) return const SizedBox.shrink();
+    final myP = players.where((p) => p['uid'] == _me).toList();
+    final iOpened = myP.isNotEmpty && myP.first['opened'] == true;
+    String nameOf(String u) => _firstOf(players.where((p) => p['uid'] == u).map((p) => '${p['name']}')) ?? '?';
+    String label(Map<String, dynamic> b) {
+      final amt = _fcfa((b['amount'] as num).toInt());
+      final who = '${b['proposerName']}';
+      if (b['type'] == 'fetiche') {
+        final side = b['side'] == 'under' ? tr('moins', 'under') : tr('plus', 'over');
+        return '$who : $side ${tr('de', 'than')} 13 · $amt';
+      }
+      final tgt = '${b['targetName']}'.isEmpty ? tr('tous ses adversaires', 'all rivals') : '${b['targetName']}';
+      return '$who ⚔ $tgt · $amt';
+    }
+
+    String status(Map<String, dynamic> b) {
+      switch ('${b['status']}') {
+        case 'open':
+          return tr('en attente', 'waiting');
+        case 'accepted':
+          return '${tr('accepté par', 'accepted by')} ${b['opponentName']}';
+        case 'cancelled':
+          return tr('annulé', 'cancelled');
+        case 'declined':
+          return tr('refusé', 'declined');
+        case 'expired':
+          return tr('expiré · remboursé', 'expired · refunded');
+        case 'settled':
+          final w = '${b['winnerUid']}';
+          if (b['result'] == 'refund' || w.isEmpty) return tr('égalité · remboursé', 'tie · refunded');
+          return '${tr('gagné par', 'won by')} ${nameOf(w)}';
+        default:
+          return '${b['status']}';
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.casino, color: _goldSoft, size: 18),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(tr('Paris entre joueurs', 'Bets between players'),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+          ),
+          if (!over && stake > 0 && !iOpened)
+            TextButton(
+              onPressed: _busy ? null : () => _newBet(v, players, tiah),
+              child: Text(tr('+ Parier', '+ Bet'), style: const TextStyle(color: _gold, fontWeight: FontWeight.w900)),
+            ),
+        ]),
+        if (bets.isEmpty)
+          Text(
+            iOpened
+                ? tr('Tu as ouvert tes cartes : plus de nouveau pari pour toi.', 'You opened your cards: no new bets for you.')
+                : tr('Défie un adversaire avant qu\'il ouvre ses cartes.', 'Challenge a rival before he opens his cards.'),
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        for (final b in bets)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(label(b), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                  Text(status(b), style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                ]),
+              ),
+              if ('${b['status']}' == 'open' && !over) ...[
+                if (b['proposerUid'] == _me)
+                  TextButton(
+                    onPressed: _busy ? null : () => _do(() => Wallet.cardsBetCancel(widget.gameId, '${b['id']}')),
+                    child: Text(tr('Annuler', 'Cancel')),
+                  )
+                else if (!iOpened && ('${b['targetUid']}'.isEmpty || b['targetUid'] == _me)) ...[
+                  TextButton(
+                    onPressed: _busy ? null : () => _do(() => Wallet.cardsBetAccept(widget.gameId, '${b['id']}')),
+                    child: Text(tr('Relever', 'Accept'),
+                        style: const TextStyle(color: Color(0xFF7CFFB0), fontWeight: FontWeight.w900)),
+                  ),
+                  if ('${b['targetUid']}' == _me)
+                    TextButton(
+                      onPressed: _busy ? null : () => _do(() => Wallet.cardsBetCancel(widget.gameId, '${b['id']}')),
+                      child: Text(tr('Refuser', 'Decline')),
+                    ),
+                ],
+              ],
+            ]),
+          ),
+      ]),
+    );
+  }
+
+  Future<void> _newBet(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool tiah) async {
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final amountCtrl = TextEditingController(text: '${stake > Wallet.minStake ? stake : Wallet.minStake}');
+    final targets = [
+      for (final p in players)
+        if (p['uid'] != _me && p['opened'] != true) p,
+    ];
+    String type = 'duel';
+    String target = ''; // '' = tous
+    bool over = true;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF062E1C),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('Nouveau pari', 'New bet'),
+                  style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, children: [
+                ChoiceChip(
+                  label: Text(tr('Défier ses adversaires', 'Challenge rivals')),
+                  selected: type == 'duel',
+                  selectedColor: _gold,
+                  onSelected: (_) => setS(() => type = 'duel'),
+                ),
+                if (!tiah)
+                  ChoiceChip(
+                    label: Text(tr('Défi Fétiche (13)', 'Fetish challenge (13)')),
+                    selected: type == 'fetiche',
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => type = 'fetiche'),
+                  ),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                type == 'duel'
+                    ? tr(tiah ? 'Le meilleur total (21 max) gagne. Égalité : mises rendues.' : 'Le plus gros score gagne (FOMEKOU bat tout). Égalité : mises rendues.',
+                        tiah ? 'Best total (21 max) wins. Tie: stakes refunded.' : 'Highest score wins (FOMEKOU beats all). Tie: stakes refunded.')
+                    : tr('Ton total BOUBAYAH est comparé à 13. FOMEKOU compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
+                        'Your BOUBAYAH total is compared with 13. FOMEKOU counts as 6 (so under 13). Exactly 13: stakes refunded.'),
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+              if (type == 'duel') ...[
+                const SizedBox(height: 8),
+                DropdownButton<String>(
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF0B4A2C),
+                  value: target,
+                  items: [
+                    DropdownMenuItem<String>(
+                        value: '',
+                        child: Text(tr('Tous mes adversaires', 'All my rivals'), style: const TextStyle(color: Colors.white))),
+                    for (final p in targets)
+                      DropdownMenuItem<String>(
+                          value: '${p['uid']}', child: Text('${p['name']}', style: const TextStyle(color: Colors.white))),
+                  ],
+                  onChanged: (x) => setS(() => target = x ?? ''),
+                ),
+              ] else ...[
+                const SizedBox(height: 8),
+                Row(children: [
+                  ChoiceChip(
+                    label: Text(tr('Plus de 13', 'Over 13')),
+                    selected: over,
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => over = true),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: Text(tr('Moins de 13', 'Under 13')),
+                    selected: !over,
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => over = false),
+                  ),
+                ]),
+              ],
+              const SizedBox(height: 8),
+              TextField(
+                controller: amountCtrl,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                decoration: InputDecoration(
+                  labelText: tr('Mise du pari (FCFA)', 'Bet amount (FCFA)'),
+                  labelStyle: const TextStyle(color: Colors.white60),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE5262B),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () {
+                    final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
+                    if (amount < Wallet.minStake) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text(tr('Mise minimum : ${_fcfa(Wallet.minStake)}', 'Minimum: ${_fcfa(Wallet.minStake)}'))));
+                      return;
+                    }
+                    Navigator.of(ctx).pop();
+                    _do(() => Wallet.cardsBetPropose(
+                          gameId: widget.gameId,
+                          type: type,
+                          amount: amount,
+                          targetUid: type == 'duel' && target.isNotEmpty ? target : null,
+                          over: over,
+                        ));
+                  },
+                  child: Text(tr('Proposer le pari', 'Offer the bet'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ]),
+          ),
+        );
+      }),
+    );
+    amountCtrl.dispose();
   }
 
   Widget _tiahCards(Map<String, dynamic> p, bool show) {
     final cards = _cardsOf(p['cards']);
     if (show && cards.isNotEmpty) {
       return Wrap(spacing: 5, runSpacing: 5, children: [
-        for (final c in cards)
-          _PopIn(key: ValueKey('${p['uid']}-${c.v}-${c.suit}'), child: _CardView(card: c, w: 40)),
+        for (var i = 0; i < cards.length; i++)
+          _PopIn(
+            key: ValueKey('${p['uid']}-${cards[i].v}-${cards[i].suit}'),
+            delayMs: i >= 2 ? i * 450 - 900 : 0,
+            child: _CardView(card: cards[i], w: 40),
+          ),
       ]);
     }
     final n = (p['count'] as num?)?.toInt() ?? 2;
