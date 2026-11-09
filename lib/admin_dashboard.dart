@@ -301,14 +301,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return true;
   }
 
-  String _kindLabel(String k) =>
-      k == 'ludo'
-          ? 'Ludo'
-          : (k == 'deuxdes'
-              ? 'Deux dés'
-              : (k == 'songo'
-                  ? 'Songô'
-                  : (k == 'damier' ? 'Damier' : 'Autre')));
+  String _kindLabel(String k) {
+    switch (k) {
+      case 'ludo':
+        return 'Ludo';
+      case 'deuxdes':
+        return 'Deux dés';
+      case 'songo':
+        return 'Songô';
+      case 'damier':
+        return 'Damier';
+      case 'pileface':
+        return 'Pile ou Face';
+      case 'tiah':
+        return 'TIAH';
+      case 'boubayah':
+        return 'BOUBAYAH';
+      case 'sports':
+        return 'Paris Sports';
+      case 'courses':
+        return 'Paris Courses';
+      default:
+        return 'Autre';
+    }
+  }
 
   String _modeLabel(String m) => m == 'online' ? 'En ligne' : 'Présentiel';
 
@@ -798,6 +814,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       _snack("Cette partie n'a pas encore commencé.");
       return;
     }
+    if (const ['pileface', 'tiah', 'boubayah', 'sports', 'courses'].contains(r['kind'])) {
+      _snack('Pas de revue pour ce jeu : consulte les mises et les commissions ici.');
+      return;
+    }
     final Widget page = r['kind'] == 'deuxdes'
         ? DeuxDesSpectator(roomId: id)
         : r['kind'] == 'songo'
@@ -1023,6 +1043,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 () => setState(() => kind = 'songo')),
             _chip('Damier', kind == 'damier',
                 () => setState(() => kind = 'damier')),
+            _chip('Pile ou Face', kind == 'pileface',
+                () => setState(() => kind = 'pileface')),
+            _chip('TIAH', kind == 'tiah', () => setState(() => kind = 'tiah')),
+            _chip('BOUBAYAH', kind == 'boubayah',
+                () => setState(() => kind = 'boubayah')),
+            _chip('Paris Sports', kind == 'sports',
+                () => setState(() => kind = 'sports')),
+            _chip('Paris Courses', kind == 'courses',
+                () => setState(() => kind = 'courses')),
           ]),
           _filterRow('Mode', [
             _chip('Tous', mode == 'all', () => setState(() => mode = 'all')),
@@ -1133,6 +1162,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   _i(fetched['deuxdes']) >= limit ||
                   _i(fetched['songo']) >= limit ||
                   _i(fetched['damier']) >= limit ||
+                  _i(fetched['pileface']) >= limit ||
+                  _i(fetched['cards']) >= limit ||
                   _i(fetched['local']) >= limit))
             Padding(
               padding: const EdgeInsets.only(top: 10),
