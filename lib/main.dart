@@ -37,6 +37,7 @@ import 'firebase_web.dart';
 import 'damier.dart';
 import 'songo.dart';
 import 'rules.dart';
+import 'promo_link.dart';
 import 'whatsapp_group.dart';
 import 'withdraw_screen.dart';
 
@@ -45,6 +46,7 @@ bool firebaseReady = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await PromoLink.capture(); // lien promo « ?ref=CODE » : gardé pour la création du compte
   try {
     await Firebase.initializeApp(
       options: kIsWeb ? kWebFirebaseOptions : null,
