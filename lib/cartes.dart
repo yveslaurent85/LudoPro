@@ -200,8 +200,87 @@ class _MiddleStrip extends StatelessWidget {
   }
 }
 
+/// Sabot : boîte de distribution avec la pile de cartes et la fente de sortie.
+class _Shoe extends StatelessWidget {
+  const _Shoe({this.left});
+
+  final int? left; // cartes restantes (null = pas de compteur)
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 92,
+      height: 110,
+      child: Stack(clipBehavior: Clip.none, children: [
+        // corps du sabot
+        Positioned(
+          left: 0,
+          top: 18,
+          child: Container(
+            width: 80,
+            height: 84,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF3A2A1A), Color(0xFF14100B)],
+              ),
+              border: Border.all(color: _gold, width: 2),
+              boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 12, offset: Offset(0, 6))],
+            ),
+          ),
+        ),
+        // pile de cartes dans le sabot
+        for (var k = 3; k >= 0; k--)
+          Positioned(
+            left: 12 + k * 1.5,
+            top: 4 + k * 1.2,
+            child: const _CardView(card: null, up: false, w: 40),
+          ),
+        // lèvre avant + fente
+        Positioned(
+          left: 0,
+          top: 44,
+          child: Container(
+            width: 80,
+            height: 58,
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14), top: Radius.circular(6)),
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF4A3622), Color(0xFF1B140D)],
+              ),
+              border: Border.all(color: _goldSoft, width: 1.2),
+            ),
+            alignment: Alignment.bottomCenter,
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Container(
+              width: 56,
+              height: 5,
+              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(3)),
+            ),
+          ),
+        ),
+        if (left != null)
+          Positioned(
+            right: -2,
+            top: 22,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: _gold, borderRadius: BorderRadius.circular(10)),
+              child: Text('$left',
+                  style: const TextStyle(color: Color(0xFF1A1200), fontSize: 11, fontWeight: FontWeight.w900)),
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
 // ----------------------------------------------------------------------
-// Animation de distribution : les cartes partent du paquet vers chaque joueur
+// Animation de distribution : les cartes sortent du sabot vers chaque joueur
 // ----------------------------------------------------------------------
 
 class _DealOverlay extends StatefulWidget {
@@ -211,7 +290,16 @@ class _DealOverlay extends StatefulWidget {
     required this.labels,
     required this.onDone,
     this.sfx,
+    this.grouped = false,
+    this.deckSize = 0,
   });
+
+  /// false : 1 carte par joueur à chaque tour de table (TIAH).
+  /// true : chaque joueur reçoit d'un coup son lot de cartes (BOUBAYAH : 3 par 3, puis 2 par 2).
+  final bool grouped;
+
+  /// Nombre de cartes dans le sabot au départ (compteur affiché).
+  final int deckSize;
 
   /// Joueurs, dans l'ordre de distribution.
   final List<String> names;
@@ -227,8 +315,8 @@ class _DealOverlay extends StatefulWidget {
 }
 
 class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderStateMixin {
-  static const int _gap = 150; // ms entre deux cartes
-  static const int _fly = 520; // durée d'un vol
+  static const int _gap = 260; // ms entre deux cartes
+  static const int _fly = 600; // durée d'un vol
   late final AnimationController _c;
   final List<List<int>> _deals = []; // [siège, lot]
   late final int _totalMs;
@@ -238,9 +326,17 @@ class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderSta
   void initState() {
     super.initState();
     for (var b = 0; b < widget.batches.length; b++) {
-      for (var r = 0; r < widget.batches[b]; r++) {
+      if (widget.grouped) {
         for (var s = 0; s < widget.names.length; s++) {
-          _deals.add([s, b]);
+          for (var r = 0; r < widget.batches[b]; r++) {
+            _deals.add([s, b]);
+          }
+        }
+      } else {
+        for (var r = 0; r < widget.batches[b]; r++) {
+          for (var s = 0; s < widget.names.length; s++) {
+            _deals.add([s, b]);
+          }
         }
       }
     }
@@ -313,34 +409,38 @@ class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderSta
               ]),
             ));
           }
-          // paquet
-          children.add(Positioned(
-            left: center.dx - 22,
-            top: center.dy - 31,
-            child: Stack(children: [
-              for (var k = 3; k >= 0; k--)
-                Transform.translate(offset: Offset(k * 1.5, -k * 1.5), child: const _CardView(card: null, up: false, w: 44)),
-            ]),
-          ));
-          // cartes en vol / arrivées
+          // cartes en vol / arrivées (elles sortent de la fente du sabot)
+          final slot = Offset(center.dx, center.dy + 36);
           final seatCount = List.filled(n, 0);
+          var dealt = 0;
+          final flying = <Widget>[];
           for (var k = 0; k < _deals.length; k++) {
             final seat = _deals[k][0];
             final m = seatCount[seat]++;
             final t = ((elapsed - k * _gap) / _fly).clamp(0.0, 1.0);
             if (t <= 0) continue;
+            dealt++;
             final e = Curves.easeOutCubic.transform(t);
             final target = seatPos(seat) + Offset((m - 2) * 11.0, 46 + (m % 2) * 3.0);
-            final pos = Offset.lerp(center, target, e)!;
-            children.add(Positioned(
+            final pos = Offset.lerp(slot, target, e)!;
+            flying.add(Positioned(
               left: pos.dx - 17,
               top: pos.dy - 24,
               child: Transform.rotate(
-                angle: (1 - e) * (k.isEven ? 0.9 : -0.9),
+                angle: (1 - e) * (k.isEven ? 0.5 : -0.5),
                 child: _CardView(card: null, up: false, w: 34),
               ),
             ));
           }
+          // un petit recul du sabot à chaque carte tirée
+          final phase = (elapsed % _gap) / _gap;
+          final kick = dealt > 0 && dealt <= _deals.length ? (1 - phase).clamp(0.0, 1.0) * 3 : 0.0;
+          children.add(Positioned(
+            left: center.dx - 40 + kick,
+            top: center.dy - 52,
+            child: _Shoe(left: widget.deckSize > 0 ? max(0, widget.deckSize - dealt) : null),
+          ));
+          children.addAll(flying);
           children.add(Positioned(
             left: 0,
             right: 0,
@@ -1349,7 +1449,8 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               child: _DealOverlay(
                 names: [for (final s in _order) _t!.names[s]],
                 batches: const [2],
-                labels: [tr('Distribution…', 'Dealing…')],
+                deckSize: 36,
+                labels: [tr('Distribution… une carte à la fois', 'Dealing… one card at a time')],
                 sfx: _sfx,
                 onDone: () {
                   if (mounted) setState(() => _dealing = false);
@@ -1972,7 +2073,9 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
                 child: _DealOverlay(
                   names: [for (var k = 1; k <= _n; k++) _t!.names[(_dealer + k) % _n]],
                   batches: const [3, 2],
-                  labels: [tr('Cartes ordinaires', 'Ordinary cards'), tr('Cartes BOUBAYAH', 'BOUBAYAH cards')],
+                  grouped: true,
+                  deckSize: 32,
+                  labels: [tr('Cartes ordinaires · 3 par 3', 'Ordinary cards · 3 by 3'), tr('Cartes BOUBAYAH · 2 par 2', 'BOUBAYAH cards · 2 by 2')],
                   sfx: _sfx,
                   onDone: () {
                     if (mounted) setState(() => _dealing = false);
@@ -2570,9 +2673,11 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
       overlay = _DealOverlay(
         names: names.isEmpty ? [for (final p in plv) '${p['name']}'] : names,
         batches: tiahGame ? const [2] : const [3, 2],
+        grouped: !tiahGame,
+        deckSize: tiahGame ? 36 : 32,
         labels: tiahGame
-            ? [tr('Distribution…', 'Dealing…')]
-            : [tr('Cartes ordinaires', 'Ordinary cards'), tr('Cartes BOUBAYAH', 'BOUBAYAH cards')],
+            ? [tr('Distribution… une carte à la fois', 'Dealing… one card at a time')]
+            : [tr('Cartes ordinaires · 3 par 3', 'Ordinary cards · 3 by 3'), tr('Cartes BOUBAYAH · 2 par 2', 'BOUBAYAH cards · 2 by 2')],
         sfx: _sfx,
         onDone: () {
           if (mounted) setState(() => _dealtFor = id);
