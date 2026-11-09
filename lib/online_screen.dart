@@ -7,6 +7,7 @@ import 'history.dart';
 import 'lang.dart';
 import 'main.dart' show firebaseReady;
 import 'online.dart';
+import 'promo_link.dart';
 import 'recharge.dart';
 
 const BoxDecoration _appBackground = BoxDecoration(
@@ -53,6 +54,12 @@ class _OnlineScreenState extends State<OnlineScreen> {
     if (firebaseReady) {
       user = FirebaseAuth.instance.currentUser;
     }
+    // Venu par le lien promo d'un joueur : son code est déjà rempli.
+    PromoLink.pending().then((code) {
+      if (code.isNotEmpty && mounted && promoCtrl.text.isEmpty) {
+        setState(() => promoCtrl.text = code);
+      }
+    });
   }
 
   @override
@@ -145,6 +152,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
           if (promo.isNotEmpty) {
             try {
               await Wallet.applyPromo(promo);
+              PromoLink.clear();
               messenger.showSnackBar(
                 const SnackBar(content: Text('Code promo validé !')),
               );
