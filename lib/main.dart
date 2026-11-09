@@ -2581,7 +2581,44 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (capFaces.isNotEmpty && random.nextInt(1000) < captureBoost) {
       return capFaces[random.nextInt(capFaces.length)];
     }
-    return random.nextInt(6) + 1;
+    return _balancedFace();
+  }
+
+  /// Équilibrage : le joueur trop en avance (> 15 % de parcours sur le
+  /// meilleur adversaire) tire plutôt de petits chiffres ; le joueur trop
+  /// en retard tire plutôt de grands chiffres.
+  int _balancedFace() {
+    final cp = currentPlayer;
+    final mine = progressOf(players[cp]);
+    double bestOther = 0, worstOther = 1;
+    bool any = false;
+    for (int i = 0; i < players.length; i++) {
+      if (i == cp) continue;
+      if (players[i].pawns.every((x) => x == 56)) continue;
+      final pr = progressOf(players[i]);
+      any = true;
+      if (pr > bestOther) bestOther = pr;
+      if (pr < worstOther) worstOther = pr;
+    }
+    int face = random.nextInt(6) + 1;
+    if (!any) return face;
+    final ahead = mine - bestOther;
+    final behind = bestOther - mine;
+    if (ahead > 0.08) {
+      final tries = ahead > 0.15 ? 3 : (ahead > 0.11 ? 2 : 1);
+      for (int k = 0; k < tries; k++) {
+        final f = random.nextInt(6) + 1;
+        if (f < face) face = f;
+      }
+      if (ahead > 0.15 && face > 3) face = 1 + random.nextInt(3);
+    } else if (behind > 0.08) {
+      final tries = behind > 0.15 ? 3 : (behind > 0.11 ? 2 : 1);
+      for (int k = 0; k < tries; k++) {
+        final f = random.nextInt(6) + 1;
+        if (f > face) face = f;
+      }
+    }
+    return face;
   }
 
   /// Un des pions du joueur courant capturerait-il avec la face [f] ?
@@ -2715,7 +2752,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     } catch (_) {
       return;
     }
-    _flight.duration = const Duration(milliseconds: 1000);
+    _flight.duration = const Duration(milliseconds: 550);
     await _flight.forward(from: 0);
     if (!mounted || token != _token) return;
     // Le résultat n'est pas encore arrivé : on cache le dé volant.
@@ -3117,7 +3154,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   Timer? _autoTimer;
   String _lastSig = '';
   int _idle = 0;
-  int stepMs = 105; // vitesse des pions (ms par case)
+  int stepMs = 55; // vitesse des pions (ms par case)
   DateTime? _lastBack; // dernier appui sur « retour » (double retour pour aller à l'accueil)
 
   // Animation d'arrivée à la maison
@@ -3357,7 +3394,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     sfx.roll();
     _pushRoll(); // les adversaires voient mon dé rouler
 
-    _flight.duration = const Duration(milliseconds: 1000);
+    _flight.duration = const Duration(milliseconds: 550);
     await _flight.forward(from: 0);
     _localRoll = false;
     if (!mounted || rollToken != _token) return;
@@ -3396,11 +3433,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     });
     _pushState();
 
-    await Future.delayed(const Duration(milliseconds: 650));
+    await Future.delayed(const Duration(milliseconds: 280));
     if (!mounted || rollToken != _token) return;
 
     // Le dé s'efface sur place (il ne se déplace plus)
-    _flight.duration = const Duration(milliseconds: 380);
+    _flight.duration = const Duration(milliseconds: 200);
     await _flight.reverse();
     if (!mounted || rollToken != _token) return;
     setState(() {
@@ -3409,7 +3446,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
     if (legal.isEmpty) {
       sfx.deny();
-      await Future.delayed(const Duration(milliseconds: 600));
+      await Future.delayed(const Duration(milliseconds: 280));
       if (!mounted || rollToken != _token || gameOver) return;
       if (dice == 6) {
         // Un 6 donne toujours un nouveau lancer, même pendant la finition.
@@ -3423,7 +3460,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       }
     } else if (autoPlay && distinct.length == 1) {
       // Un seul choix possible : le jeu joue à ta place
-      await Future.delayed(const Duration(milliseconds: 250));
+      await Future.delayed(const Duration(milliseconds: 100));
       if (!mounted || rollToken != _token) return;
       movePawn(currentPlayer, distinct.first);
     }
@@ -3493,7 +3530,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       setState(() {
         player.pawns[pawnIndex] = 0;
       });
-      await Future.delayed(Duration(milliseconds: stepMs + 90));
+      await Future.delayed(Duration(milliseconds: stepMs + 40));
       if (!mounted || token != _token) return;
     } else {
       // Le pion avance case par case
@@ -4545,7 +4582,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   void showSettings() {
-    const speeds = <String, int>{'Lente': 200, 'Normale': 105, 'Rapide': 60};
+    const speeds = <String, int>{'Lente': 110, 'Normale': 55, 'Rapide': 30};
 
     showModalBottomSheet<void>(
       context: context,
