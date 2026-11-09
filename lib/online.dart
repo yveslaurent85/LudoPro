@@ -354,7 +354,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int captureAmount = Wallet.minCapture; // montant par capture
   bool busy = false;
   bool optionsStep = false; // 2e page : options de jeu
-  bool showOpen = false; // liste « Parties ouvertes » dépliée
+  bool showOpen = true;  // liste « Parties ouvertes » dépliée
   bool showLive = false; // liste « Parties en cours » dépliée
   String? error;
 
