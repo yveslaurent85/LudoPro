@@ -5716,13 +5716,292 @@ async function adminSportEventResult({ uid, data, env }) {
         set: { status: 'settled', active: false, winnerUid: winner, prize, commission: pool - prize },
         serverTime: ['closedAt'],
       });
-      await houseAdd(tx, pool - prize);
+      // Les parrains et partenaires touchent leur part de la commission, le reste revient à Katika.
+      const commission = pool - prize;
+      const ref = await referralPayout(tx, [cur.proposerUid, cur.opponentUid], commission, { gameId: id, mode: 'sport' });
+      tx.write(`users/${cur.proposerUid}`, { incr: { wagered: amount } });
+      tx.write(`users/${cur.opponentUid}`, { incr: { wagered: amount } });
+      await houseAdd(tx, commission - ref.referral - ref.partner);
     });
   }
   return sportsList({ uid, env });
 }
 
+// ======================================================================
+// PARIS PAR DERRIÈRE — COURSES (pari mutuel à coefficient)
+//   races/{id}        : course créée par l'administrateur
+//   raceBets/{id}     : billet (formule, numéros, coefficient)
+//   raceSettle/{id}_{formule} : règlement d'une formule (une seule fois)
+//   raceCarry/{formule}       : cagnotte reportée (aucun gagnant)
+// Ticket de base 100 FCFA = coefficient 1. Commission 25 % de la masse.
+// Gain par unité = (masse × 75 % + report) / total des coefficients gagnants.
+// ======================================================================
+
+const RACE_UNIT = 100;
+const RACE_COMMISSION_PERCENT = 25;
+const RACE_MAX_COEF = 1000;
+// formule : nombre de numéros à choisir, et rang dans lequel ils doivent arriver (l'ordre n'importe pas)
+const RACE_FORMULAS = {
+  couple: { picks: 2, within: 3, exact: false }, // 2 numéros parmi les 3 premiers
+  deux4: { picks: 2, within: 4, exact: false }, // 2 numéros parmi les 4 premiers
+  tierce: { picks: 3, within: 3, exact: true }, // les 3 premiers, dans le désordre
+  quinte: { picks: 5, within: 5, exact: true }, // les 5 premiers, dans le désordre
+  super6: { picks: 6, within: 6, exact: true }, // les 6 premiers, dans le désordre
+};
+const RACE_FORMULA_KEYS = Object.keys(RACE_FORMULAS);
+
+function raceWins(formula, picks, arrival) {
+  const f = RACE_FORMULAS[formula];
+  if (!f || !Array.isArray(picks) || !Array.isArray(arrival)) return false;
+  const top = arrival.slice(0, f.within);
+  if (top.length < f.within) return false;
+  if (f.exact) return picks.length === f.picks && picks.every((n) => top.includes(n));
+  return picks.length === f.picks && picks.every((n) => top.includes(n));
+}
+
+function raceOut(r, carry) {
+  const pools = {};
+  const carries = {};
+  for (const k of RACE_FORMULA_KEYS) {
+    const gross = intOr(r[`pool_${k}`], 0);
+    pools[k] = gross;
+    carries[k] = intOr(carry[k], 0);
+  }
+  return {
+    id: r.id,
+    name: r.name || '',
+    runners: intOr(r.runners, 0),
+    startsAt: intOr(r.startsAt, 0),
+    status: r.status || 'open',
+    arrival: Array.isArray(r.arrival) ? r.arrival : [],
+    pools,
+    carries,
+    nets: Object.fromEntries(RACE_FORMULA_KEYS.map((k) => [k, Math.floor((pools[k] * (100 - RACE_COMMISSION_PERCENT)) / 100) + carries[k]])),
+  };
+}
+
+async function raceCarryAll(env) {
+  const out = {};
+  for (const k of RACE_FORMULA_KEYS) {
+    const d = await readDoc(env, `raceCarry/${k}`);
+    out[k] = d ? intOr(d.amount, 0) : 0;
+  }
+  return out;
+}
+
+async function racesList({ uid, env }) {
+  await accessToken(env);
+  const isAdmin = adminIds(env).includes(uid);
+  const races = (await queryDocs(env, 'races', eqFilter('visible', true), 100)).filter(
+    (r) => r.status !== 'cancelled' || isAdmin,
+  );
+  races.sort((a, b) => intOr(b.startsAt, 0) - intOr(a.startsAt, 0));
+  const carry = await raceCarryAll(env);
+  const mine = await queryDocs(env, 'raceBets', eqFilter('uid', uid), 100);
+  mine.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+  return {
+    admin: isAdmin,
+    now: Date.now(),
+    unit: RACE_UNIT,
+    commission: RACE_COMMISSION_PERCENT,
+    races: races.map((r) => raceOut(r, carry)),
+    carry,
+    myBets: mine.slice(0, 60).map((b) => ({
+      id: b.id,
+      raceId: b.raceId,
+      formula: b.formula,
+      picks: Array.isArray(b.picks) ? b.picks : [],
+      coef: intOr(b.coef, 1),
+      stake: intOr(b.stake, 0),
+      status: b.status,
+      payout: intOr(b.payout, 0),
+    })),
+  };
+}
+
+async function raceBetCreate({ uid, data, env }) {
+  const raceId = idStr(data.raceId);
+  const formula = String(data.formula || '');
+  const f = RACE_FORMULAS[formula];
+  const coef = intOr(data.coef, 0);
+  if (!raceId || !f) throw new HttpError('invalid-argument', 'Pari invalide.');
+  if (coef < 1 || coef > RACE_MAX_COEF) throw new HttpError('invalid-argument', `Coefficient : 1 à ${RACE_MAX_COEF}.`);
+  const picks = Array.isArray(data.picks) ? data.picks.map((n) => intOr(n, 0)) : [];
+  if (picks.length !== f.picks || new Set(picks).size !== picks.length) {
+    throw new HttpError('invalid-argument', `Choisis exactement ${f.picks} numéros différents.`);
+  }
+  const stake = RACE_UNIT * coef;
+  if (stake < BET_MIN || stake > BET_MAX) throw new HttpError('invalid-argument', 'Mise invalide.');
+  const betId = newId();
+  await runTx(env, async (tx) => {
+    const r = await tx.get(`races/${raceId}`);
+    if (!r || r.status !== 'open') throw new HttpError('failed-precondition', "Cette course n'accepte plus de paris.");
+    if (Date.now() >= intOr(r.startsAt, 0)) throw new HttpError('failed-precondition', 'Les paris sont clos pour cette course.');
+    const runners = intOr(r.runners, 0);
+    if (picks.some((n) => n < 1 || n > runners)) throw new HttpError('invalid-argument', `Numéros de 1 à ${runners}.`);
+    const u = await tx.get(`users/${uid}`);
+    if (balanceOf(u) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    tx.write(`races/${raceId}`, { incr: { [`pool_${formula}`]: stake } });
+    tx.write(`raceBets/${betId}`, {
+      create: true,
+      set: {
+        raceId,
+        uid,
+        name: tournName(u),
+        formula,
+        picks: [...picks].sort((a, b) => a - b),
+        coef,
+        stake,
+        status: 'active',
+        payout: 0,
+        createdAtMs: Date.now(),
+      },
+      serverTime: ['createdAt'],
+    });
+  });
+  return racesList({ uid, env });
+}
+
+async function adminRaceSave({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const name = String(data.name || '').trim().slice(0, 60);
+  const runners = intOr(data.runners, 0);
+  const startsAt = intOr(data.startsAt, 0);
+  if (!name) throw new HttpError('invalid-argument', 'Donne un nom à la course.');
+  if (runners < 6 || runners > 20) throw new HttpError('invalid-argument', 'Nombre de partants : 6 à 20.');
+  if (startsAt <= Date.now()) throw new HttpError('invalid-argument', "L'heure limite des paris doit être dans le futur.");
+  const id = newId();
+  await runTx(env, async (tx) => {
+    const set = { name, runners, startsAt, status: 'open', visible: true, arrival: [] };
+    for (const k of RACE_FORMULA_KEYS) set[`pool_${k}`] = 0;
+    tx.write(`races/${id}`, { create: true, set, serverTime: ['createdAt'] });
+  });
+  return racesList({ uid, env });
+}
+
+async function raceBetsOf(env, raceId) {
+  return queryDocs(env, 'raceBets', eqFilter('raceId', raceId), 2000);
+}
+
+async function adminRaceCancel({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Course inconnue.');
+  await runTx(env, async (tx) => {
+    const r = await tx.get(`races/${id}`);
+    if (!r) throw new HttpError('not-found', 'Course introuvable.');
+    if (r.status === 'finished') throw new HttpError('failed-precondition', 'Cette course est terminée.');
+    tx.write(`races/${id}`, { set: { status: 'cancelled' } });
+  });
+  for (const b of await raceBetsOf(env, id)) {
+    if (b.status !== 'active') continue;
+    await runTx(env, async (tx) => {
+      const cur = await tx.get(`raceBets/${b.id}`);
+      if (!cur || cur.status !== 'active') return;
+      tx.write(`users/${cur.uid}`, { incr: { balance: intOr(cur.stake, 0) } });
+      tx.write(`raceBets/${b.id}`, { set: { status: 'refunded' } });
+    });
+  }
+  return racesList({ uid, env });
+}
+
+/** Règle UNE formule d'une course (idempotent : la fiche de règlement n'est créée qu'une fois). */
+async function raceSettleFormula(env, race, formula, arrival) {
+  const sid = `${race.id}_${formula}`;
+  let st = await readDoc(env, `raceSettle/${sid}`);
+  const bets = (await raceBetsOf(env, race.id)).filter((b) => b.formula === formula);
+  if (!st) {
+    const gross = bets.reduce((a, b) => a + intOr(b.stake, 0), 0);
+    const winners = bets.filter((b) => raceWins(formula, b.picks, arrival));
+    const totalCoef = winners.reduce((a, b) => a + intOr(b.coef, 0), 0);
+    const commission = gross - Math.floor((gross * (100 - RACE_COMMISSION_PERCENT)) / 100);
+    await runTx(env, async (tx) => {
+      const carryDoc = await tx.get(`raceCarry/${formula}`);
+      const carry = carryDoc ? intOr(carryDoc.amount, 0) : 0;
+      const net = gross - commission + carry;
+      let unit = 0;
+      let carryAfter = 0;
+      if (gross === 0 && carry === 0) {
+        carryAfter = 0;
+      } else if (totalCoef > 0) {
+        unit = Math.floor(net / totalCoef);
+        carryAfter = net - unit * totalCoef; // les centimes restent dans le report
+      } else {
+        carryAfter = net; // aucun gagnant : la cagnotte nette est reportée à la course suivante
+      }
+      tx.write(`raceCarry/${formula}`, { set: { amount: carryAfter } });
+      tx.write(`raceSettle/${sid}`, {
+        create: true,
+        set: { raceId: race.id, formula, gross, commission, carryIn: carry, net, totalCoef, unit, carryAfter, winners: winners.length },
+        serverTime: ['createdAt'],
+      });
+      // Part de commission de chaque billet : versée aux parrains/partenaires puis à Katika billet par billet.
+      // Ici seulement le reste des arrondis revient à Katika.
+      let shares = 0;
+      if (gross > 0) for (const b of bets) shares += Math.floor((commission * intOr(b.stake, 0)) / gross);
+      await houseAdd(tx, commission - shares);
+    });
+    st = await readDoc(env, `raceSettle/${sid}`);
+  }
+  const unit = intOr(st && st.unit, 0);
+  const gross = intOr(st && st.gross, 0);
+  const commission = intOr(st && st.commission, 0);
+  for (const b of bets) {
+    if (b.status !== 'active') continue;
+    const win = raceWins(formula, b.picks, arrival) && unit > 0;
+    await runTx(env, async (tx) => {
+      const cur = await tx.get(`raceBets/${b.id}`);
+      if (!cur || cur.status !== 'active') return;
+      const stake = intOr(cur.stake, 0);
+      const share = gross > 0 ? Math.floor((commission * stake) / gross) : 0;
+      const ref = await referralPayout(tx, [cur.uid], share, { gameId: race.id, mode: 'course' });
+      tx.write(`users/${cur.uid}`, { incr: { wagered: stake } });
+      await houseAdd(tx, share - ref.referral - ref.partner);
+      if (win) {
+        const payout = unit * intOr(cur.coef, 0);
+        tx.write(`users/${cur.uid}`, { incr: { balance: payout } });
+        tx.write(`raceBets/${b.id}`, { set: { status: 'won', payout } });
+      } else {
+        tx.write(`raceBets/${b.id}`, { set: { status: 'lost' } });
+      }
+    });
+  }
+}
+
+/** Saisie de l'arrivée officielle : les numéros dans l'ordre d'arrivée (6 premiers). */
+async function adminRaceResult({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  const arrival = Array.isArray(data.arrival) ? data.arrival.map((n) => intOr(n, 0)) : [];
+  if (!id) throw new HttpError('invalid-argument', 'Course inconnue.');
+  let race;
+  await runTx(env, async (tx) => {
+    const r = await tx.get(`races/${id}`);
+    if (!r) throw new HttpError('not-found', 'Course introuvable.');
+    if (r.status === 'finished' || r.status === 'cancelled') throw new HttpError('failed-precondition', 'Cette course est déjà clôturée.');
+    const runners = intOr(r.runners, 0);
+    const need = Math.min(6, runners);
+    const arr = r.status === 'settling' && Array.isArray(r.arrival) && r.arrival.length ? r.arrival : arrival;
+    if (arr.length !== need || new Set(arr).size !== arr.length || arr.some((n) => n < 1 || n > runners)) {
+      throw new HttpError('invalid-argument', `Indique les ${need} premiers numéros, tous différents, entre 1 et ${runners}.`);
+    }
+    tx.write(`races/${id}`, { set: { status: 'settling', arrival: arr } });
+    race = { id, arrival: arr };
+  });
+  for (const k of RACE_FORMULA_KEYS) await raceSettleFormula(env, race, k, race.arrival);
+  await runTx(env, async (tx) => {
+    tx.write(`races/${id}`, { set: { status: 'finished' }, serverTime: ['finishedAt'] });
+  });
+  return racesList({ uid, env });
+}
+
 const HANDLERS = {
+  racesList,
+  raceBetCreate,
+  adminRaceSave,
+  adminRaceCancel,
+  adminRaceResult,
   sportsList,
   sportBetCreate,
   sportBetAccept,
