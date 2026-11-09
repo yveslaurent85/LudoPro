@@ -2307,7 +2307,7 @@ async function campayDeposit({ uid, data, env }) {
 }
 
 /** Interroge Campay et crédite le portefeuille si le paiement a réussi (une seule fois). */
-async function settleDeposit(env, id) {
+async function settleDepositCore(env, id) {
   const dep = await readDoc(env, `deposits/${id}`);
   if (!dep) return { status: 'unknown' };
   if (dep.status !== 'pending' || !dep.campayRef) return { status: dep.status };
@@ -3007,7 +3007,7 @@ async function adminResetBalances({ uid, data, env }) {
   return { reset: count };
 }
 
-async function adminManualDecide({ uid, data, env }) {
+async function adminManualDecideCore({ uid, data, env }) {
   requireAdmin(uid, env);
   const id = idStr(data.id);
   const kind = data.kind === 'withdrawal' ? 'withdrawal' : data.kind === 'deposit' ? 'deposit' : '';
@@ -3214,7 +3214,7 @@ async function sebpayDeposit({ uid, data, env }) {
 }
 
 /** Lit la collecte chez SebPay et crédite le solde (une seule fois). */
-async function settleSebpayDeposit(env, id) {
+async function settleSebpayDepositCore(env, id) {
   const dep = await readDoc(env, `sebpayDeposits/${id}`);
   if (!dep) return { status: 'unknown' };
   if (dep.status !== 'pending') return { status: dep.status };
@@ -3350,7 +3350,7 @@ async function sebpayWithdrawRequest({ uid, data, env }) {
 }
 
 /** Lit le payout chez SebPay : payé, ou échoué (jetons remboursés une seule fois). */
-async function settleSebpayPayout(env, id) {
+async function settleSebpayPayoutCore(env, id) {
   const p = await readDoc(env, `sebpayPayouts/${id}`);
   if (!p) return { status: 'unknown' };
   if (p.status !== 'pending') return { status: p.status };
@@ -4949,13 +4949,13 @@ function cardsView(id, g, uid) {
       const plain = (g.plain && g.plain[p.uid]) || [];
       const bouba = (g.bouba && g.bouba[p.uid]) || [];
       row.count = plain.length;
-      if (isOpen || over || p.uid === uid) row.bouba = bouba;
       if (isOpen || over) {
         row.total = cardsBoubaTotal(g, p.uid);
         row.fomekou = cardsIsFomekou(g, p.uid);
       }
       if (over || p.uid === uid) row.plain = plain;
-      row.bouba = isOpen || over || p.uid === uid ? bouba : undefined;
+      // BOUBAYAH masqué pour tout le monde (y compris soi) jusqu'à l'ouverture.
+      row.bouba = isOpen || over ? bouba : undefined;
       row.myOnly = !isOpen && !over && p.uid === uid;
     }
     return row;
@@ -6126,6 +6126,113 @@ async function sweepWaiting({ env }) {
   return { cancelled: await maybeSweep(env), afterMinutes: WAITING_CANCEL_MIN };
 }
 
+
+// ======================================================================
+// Notifications ntfy de TOUTES les transactions d'argent (variable NTFY_TOPIC)
+// recharges, retraits, transferts, retraits de gains et de commissions.
+// ======================================================================
+function fcfaText(n) {
+  const s = String(Math.max(0, Math.floor(Number(n) || 0)));
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' FCFA';
+}
+
+async function ntfyTx(env, uid, tag, line) {
+  try {
+    if (!env.NTFY_TOPIC) return;
+    let who = '';
+    if (uid) {
+      const u = await readDoc(env, `users/${uid}`);
+      who = u ? String(u.pseudo || u.promoCode || '') : '';
+    }
+    await fetch(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
+      method: 'POST',
+      headers: { Title: 'Katika - transaction', Priority: 'default', Tags: tag },
+      body: `${line}${who ? ` · ${who}` : ''}`,
+    });
+  } catch (_) {
+    /* sans effet */
+  }
+}
+
+async function settleDeposit(env, id) {
+  const before = await readDoc(env, `deposits/${id}`);
+  const r = await settleDepositCore(env, id);
+  if (before && before.status === 'pending' && r.status === 'credited') {
+    await ntfyTx(env, before.uid, 'moneybag', `💰 Recharge Campay : +${fcfaText(before.amount)}`);
+  }
+  return r;
+}
+
+async function settleSebpayDeposit(env, id) {
+  const before = await readDoc(env, `sebpayDeposits/${id}`);
+  const r = await settleSebpayDepositCore(env, id);
+  if (before && before.status === 'pending' && r.status === 'credited') {
+    await ntfyTx(env, before.uid, 'moneybag', `💰 Recharge International (${before.operator === 'mtn' ? 'MTN MoMo' : 'Orange Money'}) : +${fcfaText(before.amount)}`);
+  }
+  return r;
+}
+
+async function settleSebpayPayout(env, id) {
+  const before = await readDoc(env, `sebpayPayouts/${id}`);
+  const r = await settleSebpayPayoutCore(env, id);
+  if (before && before.status === 'pending' && (r.status === 'paid' || r.status === 'failed')) {
+    const op = before.operator === 'mtn' ? 'MTN MoMo' : 'Orange Money';
+    await ntfyTx(
+      env,
+      before.uid,
+      r.status === 'paid' ? 'outbox_tray' : 'warning',
+      r.status === 'paid'
+        ? `💸 Retrait International envoyé (${op}) : ${fcfaText(before.amount)}`
+        : `⚠️ Retrait International échoué, jetons remboursés (${op}) : ${fcfaText(before.amount)}`,
+    );
+  }
+  return r;
+}
+
+async function adminManualDecide(args) {
+  const { data, env } = args;
+  const kind = data.kind === 'withdrawal' ? 'withdrawal' : 'deposit';
+  const before = await readDoc(env, `${kind === 'deposit' ? 'manualDeposits' : 'manualWithdrawals'}/${idStr(data.id)}`);
+  const r = await adminManualDecideCore(args);
+  if (before) {
+    const approve = data.action === 'approve';
+    const amt = kind === 'deposit' ? intOr(before.amount, 0) : intOr(before.tokens, intOr(before.amount, 0));
+    await ntfyTx(
+      env,
+      before.uid,
+      approve ? 'white_check_mark' : 'x',
+      kind === 'deposit'
+        ? approve
+          ? `💰 Recharge Local Cameroun validée : +${fcfaText(amt)}`
+          : `❌ Recharge Local Cameroun refusée : ${fcfaText(amt)}`
+        : approve
+          ? `💸 Retrait Local Cameroun payé : ${fcfaText(amt)}`
+          : `❌ Retrait Local Cameroun refusé (remboursé) : ${fcfaText(amt)}`,
+    );
+  }
+  return r;
+}
+
+/** Transactions notifiées après un appel réussi (les demandes manuelles passent déjà par notifyAdmin). */
+async function ntfyAfterHandler(env, name, uid, data, result) {
+  const amount = result && typeof result.amount === 'number' ? result.amount : intOr(data && data.amount, 0);
+  switch (name) {
+    case 'transfer':
+      return ntfyTx(env, uid, 'repeat', `🔁 Transfert : ${fcfaText(amount)} vers ${result && result.toName ? result.toName : '?'}`);
+    case 'referralWithdraw':
+      return ntfyTx(env, uid, 'handshake', `🤝 Retrait des gains de parrainage : ${fcfaText(amount)}`);
+    case 'partnerWithdraw':
+      return ntfyTx(env, uid, 'handshake', `🤝 Retrait des gains partenaire : ${fcfaText(amount)}`);
+    case 'adminHouseWithdraw':
+      return ntfyTx(env, uid, 'bank', `🏦 Retrait des commissions Katika : ${fcfaText(amount)}`);
+    case 'sebpayWithdrawRequest':
+      return ntfyTx(env, uid, 'hourglass', `⏳ Demande de retrait International : ${fcfaText(intOr(data && data.amount, 0))}`);
+    default:
+      return undefined;
+  }
+}
+const NTFY_HANDLERS = new Set(['transfer', 'referralWithdraw', 'partnerWithdraw', 'adminHouseWithdraw', 'sebpayWithdrawRequest']);
+
 const HANDLERS = {
   sweepWaiting,
   racesList,
@@ -6232,7 +6339,7 @@ export default {
     ctx.waitUntil(maybeSweep(env, true));
   },
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     // Webhook Campay : appelé par Campay, sans connexion joueur.
     const p0 = new URL(request.url).pathname.replace(/^\/+|\/+$/g, '');
     if (p0 === 'campay/webhook') return campayWebhook(request, env);
@@ -6260,6 +6367,10 @@ export default {
       } catch (_) {}
 
       const result = await handler({ uid, data, env });
+      if (NTFY_HANDLERS.has(name)) {
+        const p = ntfyAfterHandler(env, name, uid, data, result).catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+      }
       return json({ data: result });
     } catch (e) {
       if (e instanceof HttpError) {
