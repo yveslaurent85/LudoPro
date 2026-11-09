@@ -12,8 +12,6 @@ import 'main.dart' show firebaseReady, Sfx;
 import 'online_screen.dart';
 import 'stake_field.dart';
 
-part 'cartes_b.dart';
-
 // ======================================================================
 // Cartes : TIAH, BOUBAYAH, TCHEK GAMES (Tiah et Tchek Games)
 // ======================================================================
@@ -1820,7 +1818,6 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     );
   }
 }
-part of 'cartes.dart';
 
 // ======================================================================
 // BOUBAYAH — présentiel
