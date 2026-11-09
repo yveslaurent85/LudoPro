@@ -111,9 +111,9 @@ class PayModeSwitch extends StatelessWidget {
       ),
       child: Row(
         children: [
-          chip(tr('⚡ Automatique', '⚡ Automatic'), true),
+          chip(tr('🌍 International', '🌍 International'), true),
           const SizedBox(width: 4),
-          chip(tr('🕐 Manuel (Orange)', '🕐 Manual (Orange)'), false),
+          chip(tr('🇨🇲 Local Cameroun (OM · MoMo)', '🇨🇲 Local Cameroon (OM · MoMo)'), false),
         ],
       ),
     );
@@ -324,7 +324,7 @@ class _SebpayDepositPanelState extends State<SebpayDepositPanel> {
   Widget _form() {
     return _card([
       Text(
-        tr('Recharge automatique', 'Automatic top-up'),
+        tr('Recharge International', 'International top-up'),
         style: const TextStyle(
             color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
       ),
@@ -443,7 +443,7 @@ class _SebpayDepositPanelState extends State<SebpayDepositPanel> {
         children: [
           Expanded(
             child: Text(
-              tr('Mes recharges automatiques', 'My automatic top-ups'),
+              tr('Mes recharges International', 'My International top-ups'),
               style: const TextStyle(
                   color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
             ),
@@ -609,7 +609,7 @@ class _SebpayWithdrawPanelState extends State<SebpayWithdrawPanel> {
   Widget _form() {
     return _card([
       Text(
-        tr('Retrait automatique', 'Automatic withdrawal'),
+        tr('Retrait International', 'International withdrawal'),
         style: const TextStyle(
             color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
       ),
@@ -706,7 +706,7 @@ class _SebpayWithdrawPanelState extends State<SebpayWithdrawPanel> {
         children: [
           Expanded(
             child: Text(
-              tr('Mes retraits automatiques', 'My automatic withdrawals'),
+              tr('Mes retraits International', 'My International withdrawals'),
               style: const TextStyle(
                   color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
             ),
