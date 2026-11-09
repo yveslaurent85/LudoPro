@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
+import 'courses_screen.dart';
 import 'lang.dart';
 
 // ======================================================================
@@ -118,7 +119,7 @@ class ParisParDerrierePage extends StatelessWidget {
                   sub: tr('Pari mutuel : Couplé, 2/4, Tiercé, Quinté, Super 6',
                       'Pari-mutuel: Couple, 2/4, Tierce, Quinte, Super 6'),
                   color: const Color(0xFF7B1FA2),
-                  badge: tr('BIENTÔT', 'SOON'),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CoursesPage())),
                 ),
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
