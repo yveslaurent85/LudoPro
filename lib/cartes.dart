@@ -66,6 +66,7 @@ List<_Card> _newDeck({required bool withAce}) {
   final d = <_Card>[];
   for (var s = 0; s < 4; s++) {
     for (var v = 3; v <= (withAce ? 11 : 10); v++) {
+      if (withAce && v == 11 && s == 2) continue; // TIAH : pas d'as de carreau (3 as seulement)
       d.add(_Card(v, s));
     }
   }
@@ -373,7 +374,7 @@ class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderSta
       onTap: _finish,
       child: Container(
         color: const Color(0xD9021A0E),
-        child: LayoutBuilder(builder: (context, box) {
+        child: AnimatedBuilder(animation: _c, builder: (context, _) => LayoutBuilder(builder: (context, box) {
           final w = box.maxWidth;
           final h = box.maxHeight;
           final center = Offset(w / 2, h * 0.44);
@@ -454,7 +455,7 @@ class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderSta
             ]),
           ));
           return Stack(children: children);
-        }),
+        })),
       ),
     );
   }
@@ -1325,6 +1326,9 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
 
   int _total(List<_Card> h) => h.fold(0, (a, c) => a + c.v);
 
+  /// TOUCX : deux as en main (22) ; bat tout, même 21.
+  bool _toucx(List<_Card> h) => h.length == 2 && h.every((c) => c.v == 11);
+
   void _deal() {
     final deck = _newDeck(withAce: true);
     final n = _n;
@@ -1363,7 +1367,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
       await Future<void>.delayed(const Duration(milliseconds: 800));
     }
     if (!mounted) return;
-    if (_total(_hands[seat]) == 21) _sfx.win();
+    if (_total(_hands[seat]) == 21 || _toucx(_hands[seat])) _sfx.win();
     setState(() {
       _autoTaking = false;
       _turnDone = true;
@@ -1386,10 +1390,13 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     for (final x in totals) {
       if (x <= 21 && x > best) best = x;
     }
-    final w = <int>[
-      for (var i = 0; i < _n; i++)
-        if (best < 0 || totals[i] == best) i,
-    ];
+    final tx = [for (var i = 0; i < _n; i++) if (_toucx(_hands[i])) i];
+    final w = tx.isNotEmpty
+        ? <int>[tx.first]
+        : <int>[
+            for (var i = 0; i < _n; i++)
+              if (best < 0 || totals[i] == best) i,
+          ];
     setState(() {
       _winners = w;
       _phase = 2;
@@ -1405,7 +1412,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     }
   }
 
-  List<int> _scores() => [for (final h in _hands) _total(h) > 21 ? -1 : _total(h)];
+  List<int> _scores() => [for (final h in _hands) _toucx(h) ? 100 : (_total(h) > 21 ? -1 : _total(h))];
 
   Future<void> _retrySettle() async {
     try {
@@ -1449,7 +1456,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               child: _DealOverlay(
                 names: [for (final s in _order) _t!.names[s]],
                 batches: const [2],
-                deckSize: 36,
+                deckSize: 35,
                 labels: [tr('Distribution… une carte à la fois', 'Dealing… one card at a time')],
                 sfx: _sfx,
                 onDone: () {
@@ -1579,7 +1586,8 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     // phase 1 : cartes ouvertes + cartes du milieu à taper
     final hand = _hands[seat];
     final total = _total(hand);
-    final bust = total > 21;
+    final tx = _toucx(hand);
+    final bust = total > 21 && !tx;
     return _scaffold(Column(children: [
       _topBar(),
       Padding(
@@ -1608,7 +1616,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
             Center(
               child: Text('$total',
                   style: TextStyle(
-                      color: total == 21 ? _gold : (bust ? const Color(0xFFFF8A80) : Colors.white),
+                      color: total == 21 || tx ? _gold : (bust ? const Color(0xFFFF8A80) : Colors.white),
                       fontSize: 54,
                       fontWeight: FontWeight.w900)),
             ),
@@ -1616,6 +1624,16 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               const Center(
                 child: Text('TIAH !',
                     style: TextStyle(color: _gold, fontSize: 30, fontWeight: FontWeight.w900, letterSpacing: 4)),
+              ),
+            if (tx)
+              const Center(
+                child: Text('TOUCX !',
+                    style: TextStyle(color: _gold, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 4)),
+              ),
+            if (tx)
+              Center(
+                child: Text(tr('Deux as : tu gagnes la manche, rien ne bat TOUCX.', 'Two aces: you win the round, nothing beats TOUCX.'),
+                    textAlign: TextAlign.center, style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w700)),
               ),
             if (bust)
               Center(
@@ -1671,8 +1689,8 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     final totals = [for (final h in _hands) _total(h)];
     final idx = List<int>.generate(_n, (i) => i)
       ..sort((a, b) {
-        final ta = totals[a] > 21 ? -1 : totals[a];
-        final tb = totals[b] > 21 ? -1 : totals[b];
+        final ta = _toucx(_hands[a]) ? 100 : (totals[a] > 21 ? -1 : totals[a]);
+        final tb = _toucx(_hands[b]) ? 100 : (totals[b] > 21 ? -1 : totals[b]);
         return tb.compareTo(ta);
       });
     final pay = t.payPerWinner(_winners);
@@ -1763,7 +1781,8 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
   Widget _resultRow(int seat, int rank, List<int> totals) {
     final t = _t!;
     final win = _winners.contains(seat) && _winners.length < _n;
-    final bust = totals[seat] > 21;
+    final tx = _toucx(_hands[seat]);
+    final bust = totals[seat] > 21 && !tx;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
@@ -1787,9 +1806,10 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
         Column(children: [
           Text('${totals[seat]}',
               style: TextStyle(
-                  color: totals[seat] == 21 ? _gold : (bust ? const Color(0xFFFF8A80) : Colors.white),
+                  color: totals[seat] == 21 || tx ? _gold : (bust ? const Color(0xFFFF8A80) : Colors.white),
                   fontSize: 26,
                   fontWeight: FontWeight.w900)),
+          if (tx) const Text('TOUCX', style: TextStyle(color: _gold, fontWeight: FontWeight.w900, fontSize: 11)),
           if (totals[seat] == 21)
             const Text('TIAH', style: TextStyle(color: _gold, fontWeight: FontWeight.w900, fontSize: 11)),
           if (bust) Text(tr('dépasse', 'bust'), style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 11)),
@@ -2540,7 +2560,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     for (final p in pl) {
       final m = Map<String, dynamic>.from(p as Map);
       final key = '${v['id']}-${m['uid']}';
-      final special = v['game'] == 'tiah' ? m['total'] == 21 : m['fomekou'] == true;
+      final special = v['game'] == 'tiah' ? (m['total'] == 21 || m['toucx'] == true) : m['fomekou'] == true;
       if (special && !_announced.contains(key)) {
         _announced.add(key);
         if (_v != null) _sfx.win();
@@ -2674,7 +2694,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         names: names.isEmpty ? [for (final p in plv) '${p['name']}'] : names,
         batches: tiahGame ? const [2] : const [3, 2],
         grouped: !tiahGame,
-        deckSize: tiahGame ? 36 : 32,
+        deckSize: tiahGame ? 35 : 32,
         labels: tiahGame
             ? [tr('Distribution… une carte à la fois', 'Dealing… one card at a time')]
             : [tr('Cartes ordinaires · 3 par 3', 'Ordinary cards · 3 by 3'), tr('Cartes BOUBAYAH · 2 par 2', 'BOUBAYAH cards · 2 by 2')],
@@ -2845,6 +2865,9 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
                   color: iWon ? const Color(0xFF1B8A3A) : (refund ? const Color(0xFF546E7A) : const Color(0xFF8E2A22)),
                 ),
                 child: Column(children: [
+                  if (tiah && v['toucx'] == true)
+                    const Text('TOUCX !',
+                        style: TextStyle(color: _gold, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 4)),
                   if (v['fomekou'] == true)
                     const Text('FOMEKOU !',
                         style: TextStyle(color: _gold, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 4)),
@@ -2936,7 +2959,8 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final win = over && winners.contains(uid) && winners.length < (v['players'] as List).length;
     final opened = p['opened'] == true;
     final total = (p['total'] as num?)?.toInt();
-    final special = tiah ? total == 21 : p['fomekou'] == true;
+    final toucx = tiah && p['toucx'] == true;
+    final special = tiah ? (total == 21 || toucx) : p['fomekou'] == true;
     final dealer = uid == '${v['dealerUid']}';
     final idx = (v['players'] as List).indexWhere((x) => (x as Map)['uid'] == uid);
     return Container(
@@ -2965,10 +2989,10 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         if (special)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(tiah ? 'TIAH !' : 'FOMEKOU !',
+            child: Text(tiah ? (toucx ? 'TOUCX !' : 'TIAH !') : 'FOMEKOU !',
                 style: const TextStyle(color: _gold, fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 18)),
           ),
-        if (tiah && total != null && total > 21)
+        if (tiah && total != null && total > 21 && !toucx)
           Text(tr('dépasse 21', 'over 21'), style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12)),
       ]),
     );
@@ -3234,37 +3258,4 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final cards = _cardsOf(p['cards']);
     if (show && cards.isNotEmpty) {
       return Wrap(spacing: 5, runSpacing: 5, children: [
-        for (var i = 0; i < cards.length; i++)
-          _PopIn(
-            key: ValueKey('${p['uid']}-${cards[i].v}-${cards[i].suit}'),
-            delayMs: i >= 2 ? i * 450 - 900 : 0,
-            child: _CardView(card: cards[i], w: 40),
-          ),
-      ]);
-    }
-    final n = (p['count'] as num?)?.toInt() ?? 2;
-    return Row(children: [for (var i = 0; i < n; i++) Padding(padding: const EdgeInsets.only(right: 5), child: _CardView(card: null, up: false, w: 40))]);
-  }
-
-  Widget _boubaCards(Map<String, dynamic> p, bool open) {
-    final plain = _cardsOf(p['plain']);
-    final bouba = _cardsOf(p['bouba']);
-    final mine = '${p['uid']}' == _me;
-    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      for (var i = 0; i < ((p['count'] as num?)?.toInt() ?? 3); i++)
-        Padding(
-          padding: const EdgeInsets.only(right: 3),
-          child: _CardView(card: i < plain.length ? plain[i] : null, up: i < plain.length, w: 28),
-        ),
-      const Spacer(),
-      for (var i = 0; i < 2; i++)
-        Padding(
-          padding: const EdgeInsets.only(left: 6),
-          child: Opacity(
-            opacity: mine && !open ? 0.8 : 1,
-            child: _CardView(card: i < bouba.length ? bouba[i] : null, up: i < bouba.length, w: 50),
-          ),
-        ),
-    ]);
-  }
-}
+  
