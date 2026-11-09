@@ -489,6 +489,30 @@ class Wallet {
   static Future<Map<String, dynamic>> adminSportEventResult(String id, String result) =>
       _call('adminSportEventResult', <String, dynamic>{'id': id, 'result': result});
 
+  // ---- Paris par derrière : Courses (pari mutuel)
+  static Future<Map<String, dynamic>> racesList() => _call('racesList', <String, dynamic>{});
+
+  static Future<Map<String, dynamic>> raceBetCreate({
+    required String raceId,
+    required String formula,
+    required List<int> picks,
+    required int coef,
+  }) =>
+      _call('raceBetCreate', <String, dynamic>{'raceId': raceId, 'formula': formula, 'picks': picks, 'coef': coef});
+
+  static Future<Map<String, dynamic>> adminRaceSave({
+    required String name,
+    required int runners,
+    required int startsAt,
+  }) =>
+      _call('adminRaceSave', <String, dynamic>{'name': name, 'runners': runners, 'startsAt': startsAt});
+
+  static Future<Map<String, dynamic>> adminRaceCancel(String id) =>
+      _call('adminRaceCancel', <String, dynamic>{'id': id});
+
+  static Future<Map<String, dynamic>> adminRaceResult(String id, List<int> arrival) =>
+      _call('adminRaceResult', <String, dynamic>{'id': id, 'arrival': arrival});
+
   static Future<Map<String, dynamic>> adminTournamentCancel(String tid) =>
       _call('adminTournamentCancel', <String, dynamic>{'tid': tid});
 
