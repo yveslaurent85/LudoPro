@@ -1548,7 +1548,7 @@ class _OnlineHubState extends State<_OnlineHub> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
       _rooms.where('uids', arrayContains: uid).snapshots();
 
-  bool showOpen = false; // liste « Parties ouvertes » dépliée
+  bool showOpen = true;  // liste « Parties ouvertes » dépliée
   bool showLive = false; // liste « Parties en cours » dépliée
 
   @override
