@@ -68,18 +68,26 @@ Widget _label(String s) => Padding(
 
 /// Bascule « Automatique (SebPay) » / « Manuel (Orange Money) ».
 class PayModeSwitch extends StatelessWidget {
-  const PayModeSwitch({super.key, required this.auto, required this.onChanged});
+  const PayModeSwitch({
+    super.key,
+    required this.auto,
+    required this.onChanged,
+    this.disableInternational = false,
+  });
 
+  /// Grise le choix « International » (non utilisable pour le moment).
+  final bool disableInternational;
   final bool auto;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     Widget chip(String label, bool value) {
-      final on = auto == value;
+      final locked = disableInternational && value;
+      final on = !locked && auto == value;
       return Expanded(
         child: GestureDetector(
-          onTap: () => onChanged(value),
+          onTap: locked ? null : () => onChanged(value),
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
             alignment: Alignment.center,
@@ -87,13 +95,16 @@ class PayModeSwitch extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               color: on ? _gold : Colors.transparent,
             ),
-            child: Text(
+            child: Opacity(
+              opacity: locked ? 0.35 : 1,
+              child: Text(
               label,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: on ? Colors.black : Colors.white,
                 fontWeight: FontWeight.w800,
                 fontSize: 13,
+              ),
               ),
             ),
           ),
