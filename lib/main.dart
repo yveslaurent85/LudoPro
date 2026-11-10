@@ -308,6 +308,7 @@ class HomeScreen extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF0A1B66),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -348,7 +349,8 @@ class HomeScreen extends StatelessWidget {
         }
 
         return SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
+           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -480,6 +482,8 @@ class HomeScreen extends StatelessWidget {
                     ),
                   );
                 }),
+                item(Icons.card_giftcard, 'Code promo',
+                    const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
                 item(Icons.add_card, 'Recharge', const Color(0xFF22B14C),
                     () => go((_) => const DepositScreen())),
                 item(Icons.swap_horiz, 'Transférer de l\'argent',
@@ -494,8 +498,6 @@ class HomeScreen extends StatelessWidget {
                   Navigator.of(sheetCtx).pop();
                   openWhatsAppGroup(context);
                 }),
-                item(Icons.card_giftcard, 'Code promo',
-                    const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
                 if (user != null)
                   item(Icons.bar_chart, 'Détails', const Color(0xFF00838F),
                       () => go((_) => const MyDetailsScreen())),
@@ -517,6 +519,7 @@ class HomeScreen extends StatelessWidget {
                   }),
               ],
             ),
+           ),
           ),
         );
       },
