@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'accounts.dart';
 import 'game_chat.dart';
 import 'lang.dart';
+import 'lobby_widgets.dart';
 import 'main.dart';
 import 'online_screen.dart';
 import 'stake_field.dart';
@@ -2016,6 +2017,7 @@ class _SongoHubState extends State<_SongoHub> {
   String? error;
   bool showOpen = true; 
   bool showLive = false;
+  bool creating = false; // vrai : options de création affichées
   final TextEditingController codeCtrl = TextEditingController();
 
   late final String uid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -2373,6 +2375,55 @@ class _SongoHubState extends State<_SongoHub> {
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         children: [
           const JackpotBanner(),
+          if (!creating) ...[
+            lobbyCreateButton(() => setState(() => creating = true)),
+          _label('Rejoindre avec un code'),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 6,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    letterSpacing: 4,
+                  ),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'CODE',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF22B14C),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: busy ? null : _joinByCode,
+                  child: const Text('Rejoindre'),
+                ),
+              ),
+            ],
+          ),
+          _mine(),
+            lobbySectionTitle('🌰 Parties ouvertes'),
+            _openList(),
+            lobbySectionTitle('👀 Parties en cours'),
+            _liveList(),
+          ] else ...[
+            lobbyBackButton(() => setState(() => creating = false)),
           _label('Créer une partie'),
           StreamBuilder<int>(
             stream: Wallet.watch(uid),
@@ -2430,53 +2481,7 @@ class _SongoHubState extends State<_SongoHub> {
                 ),
               ),
             ),
-          _label('Rejoindre avec un code'),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: codeCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  maxLength: 6,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    letterSpacing: 4,
-                  ),
-                  decoration: InputDecoration(
-                    counterText: '',
-                    hintText: 'CODE',
-                    hintStyle: const TextStyle(color: Colors.white38),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                height: 56,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF22B14C),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: busy ? null : _joinByCode,
-                  child: const Text('Rejoindre'),
-                ),
-              ),
-            ],
-          ),
-          _mine(),
-          _listButton('🌰 Parties ouvertes', showOpen,
-              () => setState(() => showOpen = !showOpen)),
-          if (showOpen) _openList(),
-          _listButton('👀 Parties en cours', showLive,
-              () => setState(() => showLive = !showLive)),
-          if (showLive) _liveList(),
+          ],
         ],
       ),
     );
