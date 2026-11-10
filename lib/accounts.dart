@@ -285,6 +285,17 @@ class Wallet {
     return _call('adminBackfillStats', <String, dynamic>{'before': before});
   }
 
+  /// Mon rôle : { admin, cashier }.
+  static Future<Map<String, dynamic>> myRole() => _call('myRole', <String, dynamic>{});
+
+  /// Administrateur : active ou retire un compte caissière (par code promo).
+  static Future<Map<String, dynamic>> adminSetCashier(String code, bool on) =>
+      _call('adminSetCashier', <String, dynamic>{'code': code, 'on': on});
+
+  /// Administrateur : liste des caissières.
+  static Future<Map<String, dynamic>> adminCashiers() =>
+      _call('adminCashiers', <String, dynamic>{});
+
   /// Administrateur : donne ou retire le statut d'hôtesse (par code promo).
   static Future<Map<String, dynamic>> adminSetHostess(String code, bool on) {
     return _call('adminSetHostess', <String, dynamic>{'code': code, 'on': on});
