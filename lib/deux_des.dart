@@ -10,6 +10,7 @@ import 'accounts.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
 import 'lang.dart';
+import 'lobby_widgets.dart';
 import 'main.dart';
 import 'jackpot_live.dart';
 import 'local_side_bets.dart';
@@ -1550,6 +1551,7 @@ class _OnlineHubState extends State<_OnlineHub> {
 
   bool showOpen = true;  // liste « Parties ouvertes » dépliée
   bool showLive = false; // liste « Parties en cours » dépliée
+  bool creating = false; // vrai : options de création affichées
 
   @override
   void dispose() {
@@ -1895,6 +1897,55 @@ class _OnlineHubState extends State<_OnlineHub> {
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         children: [
           const JackpotBanner(),
+          if (!creating) ...[
+            lobbyCreateButton(() => setState(() => creating = true)),
+          _label('Rejoindre avec un code'),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 6,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    letterSpacing: 4,
+                  ),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'CODE',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF22B14C),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: busy ? null : _joinByCode,
+                  child: const Text('Rejoindre'),
+                ),
+              ),
+            ],
+          ),
+          _mine(),
+            lobbySectionTitle('🎲 Parties ouvertes'),
+            _openList(),
+            lobbySectionTitle('👀 Parties en cours'),
+            _liveList(),
+          ] else ...[
+            lobbyBackButton(() => setState(() => creating = false)),
           _label('Créer une partie'),
           Wrap(
             spacing: 8,
@@ -1961,59 +2012,7 @@ class _OnlineHubState extends State<_OnlineHub> {
                 ),
               ),
             ),
-          _label('Rejoindre avec un code'),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: codeCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  maxLength: 6,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    letterSpacing: 4,
-                  ),
-                  decoration: InputDecoration(
-                    counterText: '',
-                    hintText: 'CODE',
-                    hintStyle: const TextStyle(color: Colors.white38),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                height: 56,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF22B14C),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: busy ? null : _joinByCode,
-                  child: const Text('Rejoindre'),
-                ),
-              ),
-            ],
-          ),
-          _mine(),
-          _listButton(
-            '🎲 Parties ouvertes',
-            showOpen,
-            () => setState(() => showOpen = !showOpen),
-          ),
-          if (showOpen) _openList(),
-          _listButton(
-            '👀 Parties en cours',
-            showLive,
-            () => setState(() => showLive = !showLive),
-          ),
-          if (showLive) _liveList(),
+          ],
         ],
       ),
     );
