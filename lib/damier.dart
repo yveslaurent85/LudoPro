@@ -13,6 +13,7 @@ import 'deux_buts_screen.dart';
 import 'tournaments_screen.dart';
 import 'game_chat.dart';
 import 'lang.dart';
+import 'lobby_widgets.dart';
 import 'main.dart';
 import 'online_screen.dart';
 import 'stake_field.dart';
@@ -2321,6 +2322,7 @@ class _DamierHubState extends State<_DamierHub> {
   String? error;
   bool showOpen = true;
   bool showLive = false;
+  bool creating = false; // vrai : options de création affichées
   final TextEditingController codeCtrl = TextEditingController();
 
   late final String uid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -2725,6 +2727,55 @@ class _DamierHubState extends State<_DamierHub> {
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         children: [
           const JackpotBanner(),
+          if (!creating) ...[
+            lobbyCreateButton(() => setState(() => creating = true)),
+          _dLabel(tr('Rejoindre avec un code', 'Join with a code')),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 6,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    letterSpacing: 4,
+                  ),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'CODE',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF22B14C),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: busy ? null : _joinByCode,
+                  child: Text(tr('Rejoindre', 'Join')),
+                ),
+              ),
+            ],
+          ),
+          _mine(),
+            lobbySectionTitle(tr('♟️ Parties ouvertes', '♟️ Open games')),
+            _openList(),
+            lobbySectionTitle(tr('👀 Parties en cours', '👀 Games in progress')),
+            _liveList(),
+          ] else ...[
+            lobbyBackButton(() => setState(() => creating = false)),
           _dLabel(tr('Créer une partie', 'Create a game')),
           StreamBuilder<int>(
             stream: Wallet.watch(uid),
@@ -2807,53 +2858,7 @@ class _DamierHubState extends State<_DamierHub> {
                 ),
               ),
             ),
-          _dLabel(tr('Rejoindre avec un code', 'Join with a code')),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: codeCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  maxLength: 6,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    letterSpacing: 4,
-                  ),
-                  decoration: InputDecoration(
-                    counterText: '',
-                    hintText: 'CODE',
-                    hintStyle: const TextStyle(color: Colors.white38),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                height: 56,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF22B14C),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: busy ? null : _joinByCode,
-                  child: Text(tr('Rejoindre', 'Join')),
-                ),
-              ),
-            ],
-          ),
-          _mine(),
-          _listButton(tr('♟️ Parties ouvertes', '♟️ Open games'), showOpen,
-              () => setState(() => showOpen = !showOpen)),
-          if (showOpen) _openList(),
-          _listButton(tr('👀 Parties en cours', '👀 Games in progress'),
-              showLive, () => setState(() => showLive = !showLive)),
-          if (showLive) _liveList(),
+          ],
         ],
       ),
     );
