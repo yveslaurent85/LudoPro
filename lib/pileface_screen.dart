@@ -7,6 +7,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'lobby_widgets.dart';
 import 'main.dart' show firebaseReady;
 import 'stake_field.dart';
 
@@ -288,6 +289,7 @@ class _PileFaceScreenState extends State<PileFaceScreen> {
   static const List<int> _stakes = [100, 500, 1000, 2000];
 
   bool _loading = true;
+  bool _creating = false; // vrai : options de création affichées
   bool _busy = false;
   String? _error;
   int _balance = 0;
@@ -515,6 +517,8 @@ class _PileFaceScreenState extends State<PileFaceScreen> {
                         : ListView(
                             padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                             children: [
+                              if (_creating) ...[
+                                lobbyBackButton(() => setState(() => _creating = false)),
                               Center(child: _CoinFace(side: _side, size: 150)),
                               const SizedBox(height: 16),
                               _label(tr('Choisis ton côté', 'Pick your side')),
@@ -578,8 +582,10 @@ class _PileFaceScreenState extends State<PileFaceScreen> {
                                   ),
                                 ),
                               ),
+                              ] else
+                                lobbyCreateButton(() => setState(() => _creating = true)),
                               const SizedBox(height: 18),
-                              _label(tr('Défis ouverts', 'Open challenges')),
+                              _label(tr('Parties ouvertes', 'Open games')),
                               if (_open.isEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
