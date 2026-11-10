@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'accounts.dart';
 import 'game_chat.dart';
 import 'lang.dart';
+import 'lobby_widgets.dart';
 import 'main.dart';
 import 'stake_field.dart';
 
@@ -356,6 +357,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   bool optionsStep = false; // 2e page : options de jeu
   bool showOpen = true;  // liste « Parties ouvertes » dépliée
   bool showLive = false; // liste « Parties en cours » dépliée
+  bool creating = false; // vrai : options de création affichées
   String? error;
 
   final TextEditingController codeCtrl = TextEditingController();
@@ -910,7 +912,9 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   IconButton(
                     onPressed: () => optionsStep
                         ? setState(() => optionsStep = false)
-                        : Navigator.of(context).pop(),
+                        : (creating
+                            ? setState(() => creating = false)
+                            : Navigator.of(context).pop()),
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                   ),
                   const Text(
@@ -1006,7 +1010,17 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                     ),
                   ),
                 ),
+              ] else if (!creating) ...[
+              const JackpotBanner(),
+              lobbyCreateButton(() => setState(() => creating = true)),
+              _codeSection(),
+              _mineSection(),
+              lobbySectionTitle('🎲 Parties ouvertes'),
+              _openSection(),
+              lobbySectionTitle('👀 Parties en cours'),
+              _liveSection(),
               ] else ...[
+              lobbyBackButton(() => setState(() => creating = false)),
               const JackpotBanner(),
               _sectionTitle('Créer une partie'),
               _pickerRow(
@@ -1085,20 +1099,6 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                     ),
                   ),
                 ),
-              _codeSection(),
-              _mineSection(),
-              _listButton(
-                '🎲 Parties ouvertes',
-                showOpen,
-                () => setState(() => showOpen = !showOpen),
-              ),
-              if (showOpen) _openSection(),
-              _listButton(
-                '👀 Parties en cours',
-                showLive,
-                () => setState(() => showLive = !showLive),
-              ),
-              if (showLive) _liveSection(),
               ],
             ],
           ),
