@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'lobby_widgets.dart';
 import 'main.dart' show firebaseReady, Sfx;
 import 'online_screen.dart';
 import 'stake_field.dart';
@@ -192,7 +193,12 @@ class _MiddleStrip extends StatelessWidget {
                     boxShadow: const [BoxShadow(color: _gold, blurRadius: 10, spreadRadius: 1)],
                   )
                 : null,
-            child: _CardView(card: cards[i], w: w),
+            // Les cartes s'ouvrent l'une après l'autre quand le milieu apparaît.
+            child: _PopIn(
+              key: ValueKey('mid-${cards[i].v}-${cards[i].suit}'),
+              delayMs: i * 170,
+              child: _CardView(card: cards[i], w: w),
+            ),
           ),
           Text('${i + 1}',
               style: TextStyle(color: i == 0 ? _gold : Colors.white38, fontSize: 10, fontWeight: FontWeight.w800)),
@@ -1521,11 +1527,23 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
         _topBar(),
         Expanded(
           child: Center(
-            child: Padding(
+            child: SingleChildScrollView(
+             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
+                    child: Column(children: [
+                      Text(tr('10 cartes ouvertes au milieu (dans l\'ordre)', '10 open cards in the middle (in order)'),
+                          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      _MiddleStrip(cards: _pile.reversed.toList(), w: 34),
+                    ]),
+                  ),
                   CircleAvatar(radius: 38, backgroundColor: _seatColors[seat],
                       child: Text((name.isEmpty ? '?' : name.substring(0, 1).toUpperCase()),
                           style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Color(0xFF1A1200)))),
@@ -1580,6 +1598,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
                   ),
                 ],
               ),
+             ),
             ),
           ),
         ),
@@ -2273,6 +2292,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
   int _max = 4;
   bool _public = true;
   bool _busy = false;
+  bool _creating = false; // vrai : options de création affichées
   final _code = TextEditingController();
 
   @override
@@ -2411,13 +2431,55 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
                     ),
                   ),
               ]),
+              if (!_creating) ...[
+                const SizedBox(height: 8),
+                lobbyCreateButton(() => setState(() => _creating = true)),
+              const SizedBox(height: 18),
+              Text(tr('Parties ouvertes', 'Open games'),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              if (_open.isEmpty)
+                Text(tr('Aucune salle pour le moment : crée la tienne !', 'No room yet: create yours!'),
+                    style: const TextStyle(color: Colors.white60)),
+              for (final r in _open) _roomTile(r, tr('Rejoindre', 'Join'), () => _join(id: r['id'] as String)),
               if (_mine.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(tr('Mes parties en cours', 'My ongoing games'),
+                Text(tr('Parties en cours', 'Games in progress'),
                     style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 6),
                 for (final r in _mine) _roomTile(r, tr('Reprendre', 'Resume'), () => _enter(r['id'] as String)),
               ],
+              const SizedBox(height: 18),
+              Text(tr('Rejoindre avec un code', 'Join with a code'),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _code,
+                    maxLength: 6,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, letterSpacing: 3),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      isDense: true,
+                      hintText: 'CODE',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: _gold, foregroundColor: const Color(0xFF1A1200)),
+                  onPressed: _busy || _code.text.trim().length < 4 ? null : () => _join(code: _code.text.trim()),
+                  child: Text(tr('Rejoindre', 'Join'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ]),
+              ] else ...[
+                lobbyBackButton(() => setState(() => _creating = false)),
               const SizedBox(height: 10),
               Text(tr('Créer une salle', 'Create a room'),
                   style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
@@ -2470,43 +2532,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
                   ),
                 ),
               ),
-              const SizedBox(height: 18),
-              Text(tr('Rejoindre avec un code', 'Join with a code'),
-                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: _code,
-                    maxLength: 6,
-                    textCapitalization: TextCapitalization.characters,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, letterSpacing: 3),
-                    decoration: InputDecoration(
-                      counterText: '',
-                      isDense: true,
-                      hintText: 'CODE',
-                      hintStyle: const TextStyle(color: Colors.white38),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: _gold, foregroundColor: const Color(0xFF1A1200)),
-                  onPressed: _busy || _code.text.trim().length < 4 ? null : () => _join(code: _code.text.trim()),
-                  child: Text(tr('Rejoindre', 'Join'), style: const TextStyle(fontWeight: FontWeight.w900)),
-                ),
-              ]),
-              const SizedBox(height: 18),
-              Text(tr('Salles ouvertes', 'Open rooms'),
-                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
-              const SizedBox(height: 6),
-              if (_open.isEmpty)
-                Text(tr('Aucune salle pour le moment : crée la tienne !', 'No room yet: create yours!'),
-                    style: const TextStyle(color: Colors.white60)),
-              for (final r in _open) _roomTile(r, tr('Rejoindre', 'Join'), () => _join(id: r['id'] as String)),
+              ],
             ],
           ),
         ),
