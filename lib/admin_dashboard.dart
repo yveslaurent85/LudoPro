@@ -4,6 +4,7 @@ import 'accounts.dart';
 import 'admin_manual.dart';
 import 'deux_des.dart';
 import 'hostess_screen.dart';
+import 'cashiers_admin.dart';
 import 'online.dart';
 import 'player_stats.dart';
 import 'damier.dart';
@@ -1008,6 +1009,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 icon: const Text('💁', style: TextStyle(fontSize: 18)),
                 label: const Text(
                   'Hôtesses (inscriptions)',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.16),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const CashiersAdminScreen()),
+                ),
+                icon: const Text('🧾', style: TextStyle(fontSize: 18)),
+                label: const Text(
+                  'Caissières',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
