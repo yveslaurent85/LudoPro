@@ -1305,44 +1305,31 @@ class OnlineGameRoom extends StatelessWidget {
         final from = inv['from']!;
         if (partners[from] != -1) continue;
         widgets.add(
-          card([
-            Expanded(
-              child: Text(
-                tr("${nameOfSeat(from)} t'invite comme binôme",
-                    '${nameOfSeat(from)} invites you as a partner'),
-                style: white(),
-              ),
-            ),
-            TextButton(
-              onPressed: () => run((seat, p, i) {
-                i.removeWhere(
-                  (x) => x['from'] == from && x['to'] == seat,
-                );
-              }),
-              child: const Text(
-                'Refuser',
-                style: TextStyle(color: Color(0xFFFF8A80)),
-              ),
-            ),
-            TextButton(
-              onPressed: () => run((seat, p, i) {
-                final valid = p[seat] == -1 &&
-                    p[from] == -1 &&
-                    i.any((x) => x['from'] == from && x['to'] == seat);
-                if (!valid) return;
-                p[seat] = from;
-                p[from] = seat;
-                i.removeWhere(
-                  (x) =>
-                      x['from'] == seat ||
-                      x['to'] == seat ||
-                      x['from'] == from ||
-                      x['to'] == from,
-                );
-              }),
-              child: const Text('Accepter'),
-            ),
-          ]),
+          _InviteBanner(
+            key: ValueKey('inv-$from'),
+            text: tr("${nameOfSeat(from)} t'invite comme binôme !",
+                '${nameOfSeat(from)} invites you as a partner!'),
+            onRefuse: () => run((seat, p, i) {
+              i.removeWhere(
+                (x) => x['from'] == from && x['to'] == seat,
+              );
+            }),
+            onAccept: () => run((seat, p, i) {
+              final valid = p[seat] == -1 &&
+                  p[from] == -1 &&
+                  i.any((x) => x['from'] == from && x['to'] == seat);
+              if (!valid) return;
+              p[seat] = from;
+              p[from] = seat;
+              i.removeWhere(
+                (x) =>
+                    x['from'] == seat ||
+                    x['to'] == seat ||
+                    x['from'] == from ||
+                    x['to'] == from,
+              );
+            }),
+          ),
         );
       }
 
@@ -1660,6 +1647,106 @@ class OnlineGameRoom extends StatelessWidget {
             names: [for (final p in players) '${p['name']}'],
             uids: [for (final p in players) '${p['uid']}'],
           ),
+        );
+      },
+    );
+  }
+}
+
+
+/// Invitation de binôme : grande bannière dorée qui pulse, impossible à rater.
+class _InviteBanner extends StatefulWidget {
+  const _InviteBanner({
+    super.key,
+    required this.text,
+    required this.onAccept,
+    required this.onRefuse,
+  });
+
+  final String text;
+  final VoidCallback onAccept;
+  final VoidCallback onRefuse;
+
+  @override
+  State<_InviteBanner> createState() => _InviteBannerState();
+}
+
+class _InviteBannerState extends State<_InviteBanner> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat(reverse: true);
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      HapticFeedback.heavyImpact();
+      SystemSound.play(SystemSoundType.alert);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) {
+        final t = _c.value;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF7A4A00),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFFFC21A), width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFFFC21A).withOpacity(0.35 + 0.45 * t),
+                blurRadius: 10 + 16 * t,
+                spreadRadius: 1 + 3 * t,
+              ),
+            ],
+          ),
+          child: Column(children: [
+            Text(
+              '🔔 ${widget.text}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: SizedBox(
+                  height: 50,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white70, width: 2),
+                    ),
+                    onPressed: widget.onRefuse,
+                    child: Text(tr('Refuser', 'Decline'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 50,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1FA34A)),
+                    onPressed: widget.onAccept,
+                    child: Text('✅ ${tr('Accepter', 'Accept')}',
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+                  ),
+                ),
+              ),
+            ]),
+          ]),
         );
       },
     );
