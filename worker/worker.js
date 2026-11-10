@@ -2828,41 +2828,61 @@ async function manualInfo({ env }) {
 /** Prévient l'administrateur sur ntfy, WhatsApp et/ou Telegram (selon les
  *  variables définies). Ne bloque jamais la demande du joueur. */
 async function notifyAdmin(env, text) {
-  // WhatsApp (service CallMeBot) : variables WHATSAPP_PHONE et WHATSAPP_APIKEY.
-  try {
-    if (env.WHATSAPP_PHONE && env.WHATSAPP_APIKEY) {
-      const phone = String(env.WHATSAPP_PHONE).replace(/\D/g, '');
-      const url =
-        `https://api.callmebot.com/whatsapp.php?phone=${phone}` +
-        `&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(env.WHATSAPP_APIKEY)}`;
-      await fetch(url);
-    }
-  } catch (_) {
-    /* sans effet */
+  const tasks = [];
+  // ntfy en premier et en parallèle : un service lent (WhatsApp) ne bloque plus les autres.
+  if (env.NTFY_TOPIC) {
+    tasks.push(
+      ntfyPost(env, { Title: 'Katika', Priority: 'high', Tags: 'moneybag' }, text)
+    );
   }
-  // ntfy (notification gratuite, sans compte) : variable NTFY_TOPIC.
-  try {
-    if (env.NTFY_TOPIC) {
-      await fetch(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
-        method: 'POST',
-        headers: { Title: 'Katika', Priority: 'high', Tags: 'moneybag' },
-        body: text,
-      });
-    }
-  } catch (_) {
-    /* sans effet */
+  // WhatsApp (service CallMeBot) : variables WHATSAPP_PHONE et WHATSAPP_APIKEY.
+  if (env.WHATSAPP_PHONE && env.WHATSAPP_APIKEY) {
+    const phone = String(env.WHATSAPP_PHONE).replace(/\D/g, '');
+    const url =
+      `https://api.callmebot.com/whatsapp.php?phone=${phone}` +
+      `&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(env.WHATSAPP_APIKEY)}`;
+    tasks.push(fetchQuiet(url, undefined, 'WhatsApp'));
   }
   // Telegram (facultatif) : TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.
+  if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
+    tasks.push(
+      fetchQuiet(
+        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text }),
+        },
+        'Telegram'
+      )
+    );
+  }
+  await Promise.all(tasks);
+}
+
+/** Appel réseau qui ne lève jamais d'erreur, avec délai maximum de 6 s. */
+async function fetchQuiet(url, init, label) {
   try {
-    if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
-      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text }),
-      });
-    }
-  } catch (_) {
-    /* sans effet */
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
+    const r = await fetch(url, { ...(init || {}), signal: ctl.signal });
+    clearTimeout(timer);
+    if (!r.ok) console.error(`${label} : réponse ${r.status}`);
+    return r;
+  } catch (e) {
+    console.error(`${label} : échec`, e && e.message);
+    return null;
+  }
+}
+
+/** Envoi ntfy : un second essai si le service répond 429 ou une erreur. */
+async function ntfyPost(env, headers, body) {
+  const url = `https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`;
+  // Les en-têtes ne doivent contenir que de l'ASCII : le texte accentué va dans le corps.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await fetchQuiet(url, { method: 'POST', headers, body }, 'ntfy');
+    if (r && r.ok) return;
+    await new Promise((res) => setTimeout(res, 1200));
   }
 }
 
@@ -5415,7 +5435,10 @@ async function cardsStart({ uid, data, env }) {
       const from = clockwise(di, uids.length);
       for (let k = 0; k < 2 * uids.length; k++) hands[from[k % uids.length]].push(deck.pop());
       set.hands = hands;
-      set.deck = deck;
+      // 10 cartes ouvertes au milieu, visibles de tous avant la 1re ouverture (la 1re tirée = le dessus).
+      const mid = [];
+      for (let k = 0; k < 10 && deck.length; k++) mid.push(deck.pop());
+      set.deck = mid.reverse();
       set.seq = from; // le 1er joueur ouvre en premier
     } else {
       const plain = Object.fromEntries(uids.map((u) => [u, []]));
@@ -6144,11 +6167,7 @@ async function ntfyTx(env, uid, tag, line) {
       const u = await readDoc(env, `users/${uid}`);
       who = u ? String(u.pseudo || u.promoCode || '') : '';
     }
-    await fetch(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
-      method: 'POST',
-      headers: { Title: 'Katika - transaction', Priority: 'default', Tags: tag },
-      body: `${line}${who ? ` · ${who}` : ''}`,
-    });
+    await ntfyPost(env, { Title: 'Katika - transaction', Priority: 'default', Tags: tag }, `${line}${who ? ` · ${who}` : ''}`);
   } catch (_) {
     /* sans effet */
   }
