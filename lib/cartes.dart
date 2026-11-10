@@ -1337,7 +1337,9 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
     for (var k = 0; k < 2 * n; k++) {
       _hands[(start + k) % n].add(deck.removeLast());
     }
-    _pile = deck;
+    // 10 cartes ouvertes au milieu, visibles de tous avant que quiconque ouvre (la 1re = le dessus).
+    final mid = <_Card>[for (var k = 0; k < 10 && deck.isNotEmpty; k++) deck.removeLast()];
+    _pile = mid.reversed.toList();
     _order = [for (var k = 0; k < n; k++) (start + k) % n];
     _cur = 0;
     _phase = 0;
@@ -1653,7 +1655,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
               style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
-            Text(tr('Cartes du milieu (dans l\'ordre)', 'Middle cards (in order)'),
+            Text(tr('10 cartes ouvertes au milieu (dans l\'ordre)', '10 open cards in the middle (in order)'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white54, fontSize: 12)),
             const SizedBox(height: 6),
@@ -3007,7 +3009,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
       decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
-          tr('Cartes du milieu, dans l\'ordre (${cards.length})', 'Middle cards, in order (${cards.length})'),
+          tr('10 cartes ouvertes au milieu, dans l\'ordre (${cards.length})', '10 open cards in the middle, in order (${cards.length})'),
           style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12),
         ),
         const SizedBox(height: 2),
