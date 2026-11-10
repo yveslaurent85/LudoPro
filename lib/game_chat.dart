@@ -106,7 +106,7 @@ class _GameChatState extends State<GameChat> {
     final t = text.trim();
     if (t.isEmpty || _uid.isEmpty) return;
     final now = DateTime.now();
-    if (now.difference(_lastSend) < const Duration(milliseconds: 800)) return;
+    if (now.difference(_lastSend) < const Duration(milliseconds: 1800)) return;
     _lastSend = now;
     final name = widget.myName.trim().isEmpty ? 'Joueur' : widget.myName.trim();
     _col.add({
@@ -657,7 +657,7 @@ class EmojiReactions extends ChangeNotifier {
     _timers[uid]?.cancel();
     _shown[uid] = emoji;
     _stamp[uid] = ++_counter;
-    _timers[uid] = Timer(const Duration(milliseconds: 3500), () {
+    _timers[uid] = Timer(const Duration(milliseconds: 6000), () {
       _shown.remove(uid);
       _timers.remove(uid);
       if (!_disposed) notifyListeners();
@@ -665,12 +665,12 @@ class EmojiReactions extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Envoie un emoji au joueur [toUid] (limité à un toutes les 0,8 s).
+  /// Envoie un emoji au joueur [toUid] (limité à un toutes les 1,8 s).
   void send(String toUid, String emoji) {
     final me = FirebaseAuth.instance.currentUser?.uid ?? '';
     if (me.isEmpty || toUid.isEmpty || emoji.isEmpty) return;
     final now = DateTime.now();
-    if (now.difference(_lastSend) < const Duration(milliseconds: 800)) return;
+    if (now.difference(_lastSend) < const Duration(milliseconds: 1800)) return;
     _lastSend = now;
     final n = myName.trim().isEmpty ? 'Joueur' : myName.trim();
     _col.add({
@@ -745,7 +745,7 @@ class EmojiBubble extends StatelessWidget {
           child: TweenAnimationBuilder<double>(
             key: ValueKey('${uid}_${reactions.stampOf(uid)}'),
             tween: Tween<double>(begin: 0.0, end: 1.0),
-            duration: const Duration(milliseconds: 450),
+            duration: const Duration(milliseconds: 900),
             curve: Curves.elasticOut,
             builder: (context, v, child) => Transform.scale(
               scale: v < 0 ? 0.0 : v,
@@ -842,7 +842,7 @@ class _FlyingEmojiState extends State<_FlyingEmoji>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 950),
+    duration: const Duration(milliseconds: 2200),
   );
 
   @override
