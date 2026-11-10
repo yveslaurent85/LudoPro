@@ -638,12 +638,12 @@ class _DepositScreenState extends State<DepositScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   children: [
                     _balance(),
-                    if (sebpayOn)
-                      PayModeSwitch(
-                        auto: auto,
-                        onChanged: (v) => setState(() => auto = v),
-                      ),
-                    if (sebpayOn && auto)
+                    PayModeSwitch(
+                      auto: false,
+                      disableInternational: true, // recharge International grisée
+                      onChanged: (v) => setState(() => auto = false),
+                    ),
+                    if (false)
                       const SebpayDepositPanel()
                     else ...[
                       _steps(),
