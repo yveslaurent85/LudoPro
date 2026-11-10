@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
+import 'cashier_screen.dart';
+import 'thermal_print.dart';
 import 'lang.dart';
 
 // ======================================================================
@@ -71,6 +73,7 @@ class _CoursesPageState extends State<CoursesPage> with TickerProviderStateMixin
   Map<String, dynamic>? _d;
   String? _err;
   bool _busy = false;
+  Map<String, dynamic>? _lastTicket;
   late TabController _tabs;
 
   @override
@@ -98,6 +101,36 @@ class _CoursesPageState extends State<CoursesPage> with TickerProviderStateMixin
     _err = null;
   }
 
+  /// Ticket de la caissière : impression Bluetooth (RawBT) et duplicata.
+  Future<void> _ticketDialog(Map<String, dynamic> t, {bool autoPrint = false}) async {
+    if (autoPrint) {
+      final ok = await ThermalPrint.printTicket(t);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr("Impression impossible : installe l'appli RawBT et jumelle l'imprimante.",
+              'Cannot print: install the RawBT app and pair the printer.')),
+        ));
+      }
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Ticket #${t['no']}'),
+        content: Text('${t['race']}\n${t['formula']} : ${((t['picks'] as List?) ?? const []).join(' - ')}\n'
+            'x${t['coef']} · ${t['stake']} FCFA'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(tr('Fermer', 'Close'))),
+          FilledButton.icon(
+            onPressed: () => ThermalPrint.printTicket(t, copy: autoPrint),
+            icon: const Icon(Icons.print),
+            label: Text(autoPrint ? tr('Réimprimer', 'Reprint') : tr('Imprimer', 'Print')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _load() async {
     try {
       final r = await Wallet.racesList();
@@ -115,6 +148,13 @@ class _CoursesPageState extends State<CoursesPage> with TickerProviderStateMixin
       if (mounted) {
         setState(() => _apply(r));
         if (ok != null) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok)));
+        if (r['ticket'] is Map) {
+          final t = Map<String, dynamic>.from(r['ticket'] as Map);
+          if (StaffRole.cashier) {
+            _lastTicket = t;
+            _ticketDialog(t, autoPrint: true);
+          }
+        }
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
