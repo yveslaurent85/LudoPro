@@ -9,6 +9,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide Text;
 import 'package:url_launcher/url_launcher.dart';
+import 'cashier_screen.dart';
 
 import 'accounts.dart';
 import 'admin_dashboard.dart';
@@ -80,7 +81,7 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
-      home: const SharedLinkGate(child: HomeScreen()),
+      home: const SharedLinkGate(child: CashierGate(child: HomeScreen())),
     );
   }
 }
