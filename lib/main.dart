@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide Text;
+import 'package:url_launcher/url_launcher.dart';
 
 import 'accounts.dart';
 import 'admin_dashboard.dart';
@@ -484,6 +485,16 @@ class HomeScreen extends StatelessWidget {
                 }),
                 item(Icons.card_giftcard, 'Code promo',
                     const Color(0xFF8E24AA), () => go((_) => const PromoScreen())),
+                item(Icons.school, tr('Tutoriel', 'Tutorial'),
+                    const Color(0xFFEF6C00), () async {
+                  Navigator.of(sheetCtx).pop();
+                  try {
+                    await launchUrl(
+                      Uri.parse('https://katikagames.com/tutoriel.html'),
+                      mode: LaunchMode.externalApplication,
+                    );
+                  } catch (_) {}
+                }),
                 item(Icons.add_card, 'Recharge', const Color(0xFF22B14C),
                     () => go((_) => const DepositScreen())),
                 item(Icons.swap_horiz, 'Transférer de l\'argent',
