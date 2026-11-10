@@ -170,6 +170,148 @@ class _PopIn extends StatelessWidget {
   }
 }
 
+/// Animation de fin de manche : confettis, nom du gagnant et montant total des gains qui défile.
+class _WinBurst extends StatefulWidget {
+  const _WinBurst({super.key, required this.title, required this.amount, this.subtitle = ''});
+
+  final String title;
+  final String subtitle;
+  final int amount; // 0 : partie gratuite, pas de montant
+
+  @override
+  State<_WinBurst> createState() => _WinBurstState();
+}
+
+class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+  Timer? _auto;
+  bool _visible = true;
+  late final List<List<double>> _bits; // x, vitesse, phase, taille, couleur, rotation
+
+  @override
+  void initState() {
+    super.initState();
+    final rnd = Random();
+    _bits = [
+      for (var i = 0; i < 70; i++)
+        [rnd.nextDouble(), 0.5 + rnd.nextDouble() * 0.9, rnd.nextDouble() * 6.28, 6 + rnd.nextDouble() * 8,
+          rnd.nextInt(5).toDouble(), rnd.nextDouble() * 6.28]
+    ];
+    _c = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+    _auto = Timer(const Duration(seconds: 10), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _auto?.cancel();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_visible) return const SizedBox.shrink();
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _visible = false),
+      child: Container(
+        color: Colors.black.withOpacity(0.72),
+        child: Stack(children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _c,
+                builder: (context, _) => CustomPaint(painter: _ConfettiPainter(_bits, _c.value)),
+              ),
+            ),
+          ),
+          Center(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.3, end: 1),
+              duration: const Duration(milliseconds: 700),
+              curve: Curves.elasticOut,
+              builder: (context, v, child) => Transform.scale(scale: v, child: child),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 28),
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(26),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF1B8A3A), Color(0xFF0B5A25)],
+                  ),
+                  border: Border.all(color: _gold, width: 3),
+                  boxShadow: [BoxShadow(color: _gold.withOpacity(0.45), blurRadius: 30, spreadRadius: 2)],
+                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('🏆', style: TextStyle(fontSize: 58)),
+                  const SizedBox(height: 4),
+                  Text(widget.title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900)),
+                  if (widget.amount > 0) ...[
+                    const SizedBox(height: 10),
+                    Text(tr('Total des gains', 'Total winnings'),
+                        style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w700)),
+                    TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0, end: widget.amount.toDouble()),
+                      duration: const Duration(milliseconds: 2200),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, v, _) => Text(_fcfa(v.round()),
+                          style: const TextStyle(
+                              color: _gold, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                    ),
+                  ],
+                  if (widget.subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(widget.subtitle,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  ],
+                  const SizedBox(height: 14),
+                  Text(tr('Touche pour continuer', 'Tap to continue'),
+                      style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                ]),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ConfettiPainter extends CustomPainter {
+  _ConfettiPainter(this.bits, this.t);
+
+  final List<List<double>> bits;
+  final double t;
+
+  static const _colors = [Color(0xFFFFC21A), Color(0xFFE5262B), Color(0xFF22B14C), Color(0xFF1E6BFF), Color(0xFFFFFFFF)];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final b in bits) {
+      final y = ((b[2] / 6.28 + t * b[1]) % 1.15) * (size.height + 40) - 30;
+      final x = b[0] * size.width + sin(t * 6.28 * 2 + b[2]) * 18;
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(b[5] + t * 6.28 * 2 * b[1]);
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset.zero, width: b[3], height: b[3] * 0.55),
+        Paint()..color = _colors[b[4].toInt() % _colors.length],
+      );
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ConfettiPainter old) => old.t != t;
+}
+
 /// Cartes du milieu, classées dans l'ordre : la 1re est celle du dessus.
 class _MiddleStrip extends StatelessWidget {
   const _MiddleStrip({required this.cards, this.w = 38});
@@ -1459,6 +1601,16 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
             decoration: _felt,
             child: SafeArea(child: child),
           ),
+          if (_phase == 2 && !_dealing && _t != null && _winners.isNotEmpty && _winners.length < _n)
+            Positioned.fill(
+              child: _WinBurst(
+                key: ValueKey('burst-$_round'),
+                title: _winners.length == 1
+                    ? tr('${_t!.names[_winners.first]} gagne !', '${_t!.names[_winners.first]} wins!')
+                    : tr('Manche gagnée !', 'Round won!'),
+                amount: _t!.staked ? _t!.payPerWinner(_winners) * _winners.length : 0,
+              ),
+            ),
           if (_dealing && _t != null)
             Positioned.fill(
               child: _DealOverlay(
@@ -2109,6 +2261,16 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
               decoration: _felt,
               child: SafeArea(child: c),
             ),
+            if (_over && !_dealing && _t != null && _winners.isNotEmpty && _winners.length < _n)
+              Positioned.fill(
+                child: _WinBurst(
+                  key: ValueKey('burst-$_round'),
+                  title: _winners.length == 1
+                      ? tr('${_t!.names[_winners.first]} gagne !', '${_t!.names[_winners.first]} wins!')
+                      : tr('Manche gagnée !', 'Round won!'),
+                  amount: _t!.staked ? _t!.payPerWinner(_winners) * _winners.length : 0,
+                ),
+              ),
             if (_dealing && _t != null)
               Positioned.fill(
                 child: _DealOverlay(
@@ -2842,7 +3004,40 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     return left <= 0 ? 0 : (left / 1000).ceil();
   }
 
+  /// Table + animation de fin de manche avec gains et solde du joueur.
   Widget _table(Map<String, dynamic> v) {
+    final body = _tableBody(v);
+    if (v['over'] != true) return body;
+    final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    if (winners.isEmpty || winners.length == players.length) return body;
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final prize = (v['prize'] as num?)?.toInt() ?? 0;
+    final won = winners.contains(_me);
+    String nm = '?';
+    for (final p in players) {
+      if (p['uid'] == winners.first) nm = '${p['name']}';
+    }
+    final title = won
+        ? tr('Tu as gagné !', 'You won!')
+        : (winners.length == 1 ? tr('$nm gagne !', '$nm wins!') : tr('Manche terminée', 'Round over'));
+    return Stack(children: [
+      body,
+      Positioned.fill(
+        child: StreamBuilder<int>(
+          stream: Wallet.watch(_me),
+          builder: (c, s) => _WinBurst(
+            key: ValueKey('burst-${v['nextId']}-${v['pile']}-${winners.join()}'),
+            title: title,
+            amount: stake > 0 ? prize * winners.length : 0,
+            subtitle: s.hasData ? tr('Ton solde : ${s.data} FCFA', 'Your balance: ${s.data} FCFA') : '',
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _tableBody(Map<String, dynamic> v) {
     final tiah = v['game'] == 'tiah';
     final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
     final over = v['over'] == true;
