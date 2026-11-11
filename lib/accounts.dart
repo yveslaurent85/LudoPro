@@ -294,6 +294,24 @@ class Wallet {
   static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
 
+  /// Mes limites : conditions acceptées, limite de recharge, auto-exclusion.
+  static Future<Map<String, dynamic>> myLimits() => _call('myLimits', <String, dynamic>{});
+
+  /// J'ai 18 ans ou plus et j'accepte les conditions.
+  static Future<Map<String, dynamic>> acceptTerms() =>
+      _call('acceptTerms', <String, dynamic>{'age18': true, 'terms': true});
+
+  /// Limite de recharge par 24 h (0 = aucune) et/ou auto-exclusion (en jours).
+  static Future<Map<String, dynamic>> setLimits({int? depositLimitDay, int? excludeDays}) =>
+      _call('setLimits', <String, dynamic>{
+        if (depositLimitDay != null) 'depositLimitDay': depositLimitDay,
+        if (excludeDays != null) 'excludeDays': excludeDays,
+      });
+
+  /// Administrateur : journal des validations des caissières.
+  static Future<Map<String, dynamic>> adminCashierLog({String? uid}) =>
+      _call('adminCashierLog', <String, dynamic>{if (uid != null) 'uid': uid});
+
   /// Mon rôle : { admin, cashier }.
   static Future<Map<String, dynamic>> myRole() => _call('myRole', <String, dynamic>{});
 
