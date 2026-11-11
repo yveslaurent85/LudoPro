@@ -285,6 +285,15 @@ class Wallet {
     return _call('adminBackfillStats', <String, dynamic>{'before': before});
   }
 
+  /// Historique des transactions (recharges, retraits, transferts).
+  /// [uid] : réservé à l'administrateur pour consulter un joueur.
+  static Future<Map<String, dynamic>> txHistory({String? uid}) =>
+      _call('txHistory', <String, dynamic>{if (uid != null) 'uid': uid});
+
+  /// Administrateur : annule une partie ouverte ou en cours (mises remboursées).
+  static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
+      _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
+
   /// Mon rôle : { admin, cashier }.
   static Future<Map<String, dynamic>> myRole() => _call('myRole', <String, dynamic>{});
 
