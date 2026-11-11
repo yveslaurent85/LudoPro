@@ -7,6 +7,7 @@ import 'admin_manual.dart';
 import 'courses_screen.dart';
 import 'lang.dart';
 import 'promo_screen.dart';
+import 'terms_screen.dart';
 
 /// Rôle du compte connecté (mémorisé pour éviter de le redemander).
 class StaffRole {
@@ -53,8 +54,33 @@ class _CashierGateState extends State<CashierGate> {
         _uid = u.uid;
         await StaffRole.refresh();
         if (mounted) setState(() => _cashier = StaffRole.cashier);
+        // Conditions d'utilisation et 18 ans : écran bloquant tant que non acceptées.
+        try {
+          final l = await Wallet.myLimits();
+          final need = ((l['termsV'] as num?)?.toInt() ?? 0) < ((l['termsVersion'] as num?)?.toInt() ?? 0);
+          if (need && mounted) _showTerms();
+        } catch (_) {}
       });
     } catch (_) {}
+  }
+
+  bool _termsOpen = false;
+
+  void _showTerms() {
+    if (_termsOpen) return;
+    _termsOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _termsOpen = false;
+        return;
+      }
+      Navigator.of(context, rootNavigator: true)
+          .push(MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (ctx) => TermsScreen(onAccepted: () => Navigator.of(ctx).pop()),
+          ))
+          .then((_) => _termsOpen = false);
+    });
   }
 
   @override
