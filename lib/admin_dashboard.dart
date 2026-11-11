@@ -24,6 +24,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   static const Color _gold = Color(0xFFFFC21A);
 
   bool loading = true;
+  bool showHistory = false; // historique des parties replié par défaut
+  String? cancelBusy;
   String? error;
   List<Map<String, dynamic>> rows = [];
   int pool = 0;
@@ -198,6 +200,44 @@ class _AdminDashboardState extends State<AdminDashboard> {
     } finally {
       if (mounted) setState(() => statsBusy = false);
     }
+  }
+
+  static const _cancelKinds = {'ludo', 'deuxdes', 'songo', 'damier', 'pileface', 'tiah', 'boubayah'};
+
+  /// Partie en ligne ouverte ou en cours : l'administrateur peut l'annuler.
+  bool _cancellable(Map<String, dynamic> r) =>
+      r['mode'] == 'online' &&
+      _cancelKinds.contains('${r['kind']}') &&
+      ('${r['state']}' == 'waiting' || '${r['state']}' == 'playing');
+
+  Future<void> _cancelGame(Map<String, dynamic> r) async {
+    final id = '${r['id']}';
+    final stake = _i(r['stake']);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Annuler cette partie ?'),
+        content: Text(
+          stake > 0
+              ? 'La partie sera arrêtée et les mises (${_money(stake)} par joueur) seront remboursées.'
+              : 'La partie sera arrêtée.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Oui, annuler')),
+        ],
+      ),
+    );
+    if (ok != true || cancelBusy != null) return;
+    setState(() => cancelBusy = id);
+    try {
+      await Wallet.adminCancelGame(id);
+      _snack('Partie annulée, mises remboursées.');
+      await _load();
+    } catch (e) {
+      _snack(Wallet.errorText(e));
+    }
+    if (mounted) setState(() => cancelBusy = null);
   }
 
   void _snack(String m) {
@@ -917,6 +957,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
             ],
           ),
+          if (_cancellable(r))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFFF8A80),
+                    side: const BorderSide(color: Color(0xFFFF8A80)),
+                  ),
+                  onPressed: cancelBusy == null ? () => _cancelGame(r) : null,
+                  icon: const Icon(Icons.cancel_outlined, size: 18),
+                  label: Text(cancelBusy == '${r['id']}' ? 'Annulation…' : 'Annuler la partie'),
+                ),
+              ),
+            ),
         ],
       ),
       ),
@@ -1166,19 +1222,47 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ],
               ),
             ),
-          _title('Toutes les parties'),
-          const Text(
-            'Touche une partie en ligne pour la revoir.',
-            style: TextStyle(color: Colors.white54, fontSize: 12),
-          ),
-          const SizedBox(height: 6),
-          for (final r in shown) _gameTile(r),
-          if (shown.isEmpty)
+          _title('Parties ouvertes et en cours'),
+          if (!rows.any(_cancellable))
             const Text(
-              'Aucune partie pour ces filtres.',
+              'Aucune partie ouverte ou en cours.',
               style: TextStyle(color: Colors.white70),
             ),
-          if (limit < 500 &&
+          for (final r in rows.where(_cancellable)) _gameTile(r),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 50,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.16),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => setState(() => showHistory = !showHistory),
+              icon: Icon(showHistory ? Icons.expand_less : Icons.history),
+              label: Text(
+                showHistory
+                    ? 'Masquer l\'historique des parties'
+                    : 'Historique des parties (${shown.length})',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          if (showHistory) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Touche une partie en ligne pour la revoir.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 6),
+            for (final r in shown) _gameTile(r),
+            if (shown.isEmpty)
+              const Text(
+                'Aucune partie pour ces filtres.',
+                style: TextStyle(color: Colors.white70),
+              ),
+          ],
+          if (showHistory &&
+              limit < 500 &&
               (_i(fetched['ludo']) >= limit ||
                   _i(fetched['deuxdes']) >= limit ||
                   _i(fetched['songo']) >= limit ||
