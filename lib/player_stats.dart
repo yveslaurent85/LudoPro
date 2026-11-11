@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'tx_history_screen.dart';
 
 /// Statistiques d'un joueur : solde, inscription, parties, montants.
 /// Les compteurs viennent du serveur (users/{uid}) et sont mis à jour à la
@@ -11,6 +12,7 @@ import 'lang.dart';
 class PlayerStats {
   PlayerStats({
     required this.name,
+    this.uid = '',
     this.balance = 0,
     this.createdAt,
     this.played = 0,
@@ -22,6 +24,7 @@ class PlayerStats {
   });
 
   final String name;
+  final String uid;
   final int balance;
   final DateTime? createdAt;
   final int played; // parties jouées
@@ -50,6 +53,7 @@ class PlayerStats {
       name: pseudo.isNotEmpty
           ? pseudo
           : (uid.length > 8 ? '${uid.substring(0, 8)}…' : uid),
+      uid: uid,
       balance: _i(r['balance']),
       createdAt: _date(r['createdAt']),
       played: _i(r['played']),
@@ -78,6 +82,24 @@ class PlayerStats {
     );
   }
 }
+
+Widget _txButton(BuildContext context, {String? uid, String? name}) => Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SizedBox(
+        height: 50,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6A1B9A)),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => TxHistoryScreen(uid: uid, name: name)),
+          ),
+          icon: const Icon(Icons.receipt_long),
+          label: Text(
+            tr('Recharges, retraits et transferts', 'Deposits, withdrawals and transfers'),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
 
 String _two(int n) => n < 10 ? '0$n' : '$n';
 
@@ -290,7 +312,10 @@ class MyDetailsScreen extends StatelessWidget {
                           );
                           return ListView(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-                            children: [PlayerStatsView(stats: stats)],
+                            children: [
+                              PlayerStatsView(stats: stats),
+                              _txButton(context),
+                            ],
                           );
                         },
                       ),
@@ -323,7 +348,10 @@ class PlayerDetailScreen extends StatelessWidget {
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-                  children: [PlayerStatsView(stats: stats)],
+                  children: [
+                    PlayerStatsView(stats: stats),
+                    if (stats.uid.isNotEmpty) _txButton(context, uid: stats.uid, name: stats.name),
+                  ],
                 ),
               ),
             ],
