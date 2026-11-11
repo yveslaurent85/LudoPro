@@ -1,0 +1,25 @@
+name: Sauvegarde Firestore
+
+# Sauvegarde automatique de toute la base chaque jour à 02:00 (UTC).
+# À configurer UNE fois (voir la liste de tests / guide de mise en service) :
+#   1. Console Google Cloud > Cloud Storage : créer un bucket, ex. katika-backups
+#   2. IAM : créer un compte de service avec les rôles
+#      « Cloud Datastore Import Export Admin » et « Storage Admin » (sur ce bucket)
+#   3. GitHub > Settings > Secrets > Actions : ajouter GCP_SA_KEY (clé JSON du compte de service)
+#      et la variable GCS_BACKUP_BUCKET (nom du bucket)
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Export Firestore
+        run: |
+          gcloud firestore export "gs://${{ vars.GCS_BACKUP_BUCKET }}/$(date +%F)" --project ludopro-cameroun-2026
