@@ -210,6 +210,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
       _cancelKinds.contains('${r['kind']}') &&
       ('${r['state']}' == 'waiting' || '${r['state']}' == 'playing');
 
+  Future<void> _resolve(Map<String, dynamic> r, String action) async {
+    final id = '${r['id']}';
+    if (cancelBusy != null) return;
+    final pay = action == 'approve';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(pay ? 'Payer le gagnant ?' : 'Rembourser tout le monde ?'),
+        content: Text('Raison du signalement : ${r['reviewReason']}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Oui')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => cancelBusy = id);
+    try {
+      await Wallet.adminResolveGame(id, action);
+      _snack(pay ? 'Gagnant payé.' : 'Mises remboursées.');
+      await _load();
+    } catch (e) {
+      _snack(Wallet.errorText(e));
+    }
+    if (mounted) setState(() => cancelBusy = null);
+  }
+
   Future<void> _cancelGame(Map<String, dynamic> r) async {
     final id = '${r['id']}';
     final stake = _i(r['stake']);
@@ -824,6 +851,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return const Color(0xFFFFA000);
       case 'refund':
         return const Color(0xFF1E6BFF);
+      case 'review':
+        return const Color(0xFFE5262B);
       default:
         return Colors.white54;
     }
@@ -837,6 +866,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return 'En cours';
       case 'refund':
         return 'Remboursée';
+      case 'review':
+        return 'À vérifier';
       default:
         return 'En attente';
     }
@@ -957,6 +988,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
             ],
           ),
+          if ('${r['state']}' == 'review')
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('⚠️ ${r['reviewReason']}', style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: cancelBusy == null ? () => _resolve(r, 'refund') : null,
+                      child: const Text('Rembourser'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: cancelBusy == null ? () => _resolve(r, 'approve') : null,
+                      child: const Text('Payer le gagnant'),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
           if (_cancellable(r))
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -1222,6 +1276,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ],
               ),
             ),
+          if (rows.any((r) => '${r['state']}' == 'review')) ...[
+            _title('⚠️ Parties à vérifier'),
+            for (final r in rows.where((r) => '${r['state']}' == 'review')) _gameTile(r),
+          ],
           _title('Parties ouvertes et en cours'),
           if (!rows.any(_cancellable))
             const Text(
