@@ -294,6 +294,10 @@ class Wallet {
   static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
 
+  /// Administrateur : tranche une partie « à vérifier » (action : approve | refund).
+  static Future<Map<String, dynamic>> adminResolveGame(String gameId, String action) =>
+      _call('adminResolveGame', <String, dynamic>{'gameId': gameId, 'action': action});
+
   /// Mes limites : conditions acceptées, limite de recharge, auto-exclusion.
   static Future<Map<String, dynamic>> myLimits() => _call('myLimits', <String, dynamic>{});
 
