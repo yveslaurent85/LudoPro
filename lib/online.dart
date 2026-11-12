@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'accounts.dart';
 import 'game_chat.dart';
 import 'lang.dart';
+import 'share_menu.dart';
 import 'lobby_widgets.dart';
 import 'main.dart';
 import 'stake_field.dart';
@@ -1254,9 +1255,13 @@ class OnlineGameRoom extends StatelessWidget {
         int seat,
         List<int> partners,
         List<Map<String, int>> invites,
-      ) change,
-    ) {
-      _teamTx(gameId, uid, change).catchError((_) {
+      ) change, {
+      bool notify = false,
+    }) {
+      _teamTx(gameId, uid, change).then((_) {
+        // Notification push à l'invité (sans effet s'il n'a pas activé les notifications).
+        if (notify) Wallet.notifyInvite(gameId).catchError((_) => <String, dynamic>{});
+      }).catchError((_) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Action impossible. Réessaie.')),
@@ -1357,7 +1362,7 @@ class OnlineGameRoom extends StatelessWidget {
                       // Une seule invitation envoyée à la fois.
                       i.removeWhere((x) => x['from'] == seat);
                       i.add({'from': seat, 'to': s});
-                    }),
+                    }, notify: true),
                     child: const Text('Inviter'),
                   ),
           ]),
@@ -1502,6 +1507,7 @@ class OnlineGameRoom extends StatelessWidget {
                   paidCount: paid.length,
                 ),
                 if (d['code'] != null) _codeCard(context, d),
+                ShareMenuButton(collection: 'games', gameId: gameId),
                 const SizedBox(height: 20),
                 for (int i = 0; i < max; i++)
                   Container(
