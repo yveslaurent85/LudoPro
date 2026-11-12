@@ -294,6 +294,10 @@ class Wallet {
   static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
 
+  /// Administrateur : marque un joueur comme vérifié (on) ou le remet sous surveillance (off).
+  static Future<Map<String, dynamic>> adminRiskClear(String uid, bool on) =>
+      _call('adminRiskClear', <String, dynamic>{'uid': uid, 'on': on});
+
   /// Prévient par notification push le joueur que je viens d'inviter comme binôme.
   static Future<Map<String, dynamic>> notifyInvite(String gameId) =>
       _call('notifyInvite', <String, dynamic>{'gameId': gameId});
