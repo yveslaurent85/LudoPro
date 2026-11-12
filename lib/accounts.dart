@@ -294,6 +294,17 @@ class Wallet {
   static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
 
+  /// Ludo « serveur » : act = roll | move | pass | forfeit.
+  static Future<Map<String, dynamic>> ludoAct(String gameId, String act,
+          {int? pawn, int? seat, bool proxy = false}) =>
+      _call('ludoAct', <String, dynamic>{
+        'gameId': gameId,
+        'act': act,
+        if (pawn != null) 'pawn': pawn,
+        if (seat != null) 'seat': seat,
+        if (proxy) 'proxy': true,
+      });
+
   /// Administrateur : marque un joueur comme vérifié (on) ou le remet sous surveillance (off).
   static Future<Map<String, dynamic>> adminRiskClear(String uid, bool on) =>
       _call('adminRiskClear', <String, dynamic>{'uid': uid, 'on': on});
