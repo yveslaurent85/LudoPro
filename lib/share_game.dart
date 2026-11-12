@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'accounts.dart';
+import 'cartes.dart';
 import 'damier.dart';
 import 'deux_des.dart';
 import 'lang.dart';
@@ -16,7 +17,7 @@ import 'songo.dart';
 
 /// Adresse du site (utilisée pour les liens partagés depuis l'appli Android).
 /// Sur le site web, c'est l'adresse réelle du site qui est utilisée.
-const String kSiteUrl = 'https://katikagames.com';
+const String kSiteUrl = 'https://katikagames.ychachouang.workers.dev';
 
 String _gameName(String col) {
   switch (col) {
@@ -26,6 +27,8 @@ String _gameName(String col) {
       return 'Songô';
     case 'damier':
       return tr('Damier', 'Draughts');
+    case 'cards':
+      return 'TIAH / BOUBAYAH';
     default:
       return 'Ludo';
   }
@@ -92,6 +95,45 @@ String buildShareMessage(String col, String id, Map<String, dynamic> d) {
   return lines.join('\n');
 }
 
+/// Lien pour rejoindre la partie.
+String shareJoinLink(String col, String id) => _link(col, id, 'join');
+
+/// Message à partager pour une salle de cartes (TIAH / BOUBAYAH, gérée par le serveur).
+String buildCardsShareMessage(String id, Map<String, dynamic> v) {
+  final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : 'TIAH';
+  final players = ((v['players'] as List?) ?? const []);
+  final max = (v['maxPlayers'] as num?)?.toInt() ?? 6;
+  final stake = (v['stake'] as num?)?.toInt() ?? 0;
+  final host = players.isNotEmpty ? '${(players.first as Map)['name']}' : '';
+  return [
+    tr('🃏 Rejoins ma partie de $name sur Katika !', '🃏 Join my $name game on Katika!'),
+    '',
+    if (host.isNotEmpty) tr('👤 Créateur : $host', '👤 Host: $host'),
+    tr('👥 Joueurs : $max', '👥 Players: $max'),
+    if (stake > 0)
+      tr('💰 Mise/joueur : ${Wallet.format(stake)}', '💰 Stake/player: ${Wallet.format(stake)}')
+    else
+      tr('💰 Partie gratuite', '💰 Free game'),
+    '',
+    tr('🔗 Rejoindre : ${_link('cards', id, 'join')}', '🔗 Join: ${_link('cards', id, 'join')}'),
+  ].join('\n');
+}
+
+/// Charge le message de partage d'une partie (Firestore ou serveur selon le jeu).
+Future<String?> loadShareMessage(String col, String id) async {
+  try {
+    if (col == 'cards') {
+      final v = await Wallet.cardsGet(id);
+      return buildCardsShareMessage(id, v);
+    }
+    final s = await FirebaseFirestore.instance.collection(col).doc(id).get();
+    final d = s.data();
+    return d == null ? null : buildShareMessage(col, id, d);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Fenêtre de partage d'une partie (WhatsApp ou copie du message).
 Future<void> showShareSheet(
   BuildContext context, {
@@ -155,7 +197,7 @@ Future<void> showShareSheet(
 // Ouverture d'un lien partagé : ?g=<jeu>.<id>&m=join|live
 // ----------------------------------------------------------------------
 
-const List<String> _cols = ['games', 'deuxdes', 'songo', 'damier'];
+const List<String> _cols = ['games', 'deuxdes', 'songo', 'damier', 'cards'];
 
 class SharedLink {
   static String? _col;
@@ -213,6 +255,11 @@ class SharedLink {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
       }
+    }
+
+    if (col == 'cards') {
+      await _handleCards(context, id);
+      return;
     }
 
     final ref = FirebaseFirestore.instance.collection(col).doc(id);
@@ -314,6 +361,59 @@ class SharedLink {
       if (context.mounted) _push(context, _room(col, id, spectate: false));
     } catch (_) {
       toast(tr('Impossible de rejoindre la partie.', 'Could not join the game.'));
+    }
+  }
+
+  /// Lien vers une salle TIAH / BOUBAYAH : rejoindre via le serveur.
+  static Future<void> _handleCards(BuildContext context, String id) async {
+    void toast(String m) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+      }
+    }
+
+    final me = FirebaseAuth.instance.currentUser;
+    Map<String, dynamic> v;
+    try {
+      v = await Wallet.cardsGet(id);
+    } catch (_) {
+      toast(tr('Cette partie n\'existe plus.', 'This game no longer exists.'));
+      return;
+    }
+    if (!context.mounted) return;
+    final players = ((v['players'] as List?) ?? const []);
+    final mine = players.any((p) => p is Map && p['uid'] == me?.uid);
+    final max = (v['maxPlayers'] as num?)?.toInt() ?? 6;
+    final waiting = v['status'] == 'waiting';
+    if (mine) {
+      _push(context, CardsOnlineRoom(gameId: id));
+      return;
+    }
+    if (!waiting || players.length >= max) {
+      toast(tr('Cette salle est complète ou déjà commencée.', 'This room is full or already started.'));
+      return;
+    }
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : 'TIAH';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr('Rejoindre la partie ?', 'Join the game?')),
+        content: Text(stake > 0
+            ? tr('$name · Mise : ${Wallet.format(stake)}', '$name · Stake: ${Wallet.format(stake)}')
+            : tr('$name · Partie gratuite', '$name · Free game')),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(tr('Non', 'No'))),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text(tr('Rejoindre', 'Join'))),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await Wallet.cardsJoin(gameId: id);
+      if (context.mounted) _push(context, CardsOnlineRoom(gameId: id));
+    } catch (e) {
+      toast(Wallet.errorText(e));
     }
   }
 
