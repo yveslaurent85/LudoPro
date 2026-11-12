@@ -2093,7 +2093,15 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     }
   }
 
+  bool _srv = false; // partie « serveur » : le serveur lance les dés
+
   Future<void> _roll(int seat) async {
+    if (_srv) {
+      try {
+        await Wallet.deuxDesAct(widget.roomId, 'roll', seat);
+      } catch (_) {}
+      return;
+    }
     final r = Random();
     final a = r.nextInt(6) + 1;
     final b = r.nextInt(6) + 1;
@@ -2126,6 +2134,12 @@ class _OnlineRoomState extends State<_OnlineRoom> {
   }
 
   Future<void> _next(int seat) async {
+    if (_srv) {
+      try {
+        await Wallet.deuxDesAct(widget.roomId, 'next', seat);
+      } catch (_) {}
+      return;
+    }
     try {
       await FirebaseFirestore.instance.runTransaction<void>((tx) async {
         final snap = await tx.get(_ref);
@@ -2346,6 +2360,7 @@ class _OnlineRoomState extends State<_OnlineRoom> {
             myName: '${players[seat]['name']}',
           );
         }
+        _srv = d['srv'] == true;
         final over = d['over'] == true;
         if (over && seat >= 0) _settle();
         final cur = (d['cur'] as num?)?.toInt() ?? 0;
