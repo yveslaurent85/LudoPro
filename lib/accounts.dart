@@ -294,6 +294,12 @@ class Wallet {
   static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
 
+  /// Deux dés « serveur » : act = roll | next.
+  static Future<Map<String, dynamic>> deuxDesAct(
+          String gameId, String act, int seat) =>
+      _call('deuxDesAct',
+          <String, dynamic>{'gameId': gameId, 'act': act, 'seat': seat});
+
   /// Ludo « serveur » : act = roll | move | pass | forfeit.
   static Future<Map<String, dynamic>> ludoAct(String gameId, String act,
           {int? pawn, int? seat, bool proxy = false}) =>
