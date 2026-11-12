@@ -13,6 +13,8 @@ class PlayerStats {
   PlayerStats({
     required this.name,
     this.uid = '',
+    this.risk = const <String>[],
+    this.cleared = false,
     this.balance = 0,
     this.createdAt,
     this.played = 0,
@@ -25,6 +27,8 @@ class PlayerStats {
 
   final String name;
   final String uid;
+  final List<String> risk; // signaux de compte suspect (administrateur)
+  final bool cleared; // compte marqué comme vérifié
   final int balance;
   final DateTime? createdAt;
   final int played; // parties jouées
@@ -54,6 +58,8 @@ class PlayerStats {
           ? pseudo
           : (uid.length > 8 ? '${uid.substring(0, 8)}…' : uid),
       uid: uid,
+      risk: [for (final x in (r['risk'] as List? ?? const [])) '$x'],
+      cleared: r['cleared'] == true,
       balance: _i(r['balance']),
       createdAt: _date(r['createdAt']),
       played: _i(r['played']),
@@ -349,6 +355,8 @@ class PlayerDetailScreen extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   children: [
+                    if (stats.uid.isNotEmpty && (stats.risk.isNotEmpty || stats.cleared))
+                      _RiskBox(uid: stats.uid, risk: stats.risk, cleared: stats.cleared),
                     PlayerStatsView(stats: stats),
                     if (stats.uid.isNotEmpty) _txButton(context, uid: stats.uid, name: stats.name),
                   ],
@@ -358,6 +366,78 @@ class PlayerDetailScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Compte suspect : raisons du signalement et bouton « marquer comme vérifié ».
+class _RiskBox extends StatefulWidget {
+  const _RiskBox({required this.uid, required this.risk, required this.cleared});
+
+  final String uid;
+  final List<String> risk;
+  final bool cleared;
+
+  @override
+  State<_RiskBox> createState() => _RiskBoxState();
+}
+
+class _RiskBoxState extends State<_RiskBox> {
+  late bool _cleared = widget.cleared;
+  bool _busy = false;
+
+  Future<void> _toggle() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await Wallet.adminRiskClear(widget.uid, !_cleared);
+      if (mounted) setState(() => _cleared = !_cleared);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+      }
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bad = !_cleared && widget.risk.isNotEmpty;
+    final color = bad ? const Color(0xFFFF6B6B) : const Color(0xFF4CAF50);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          bad ? '⚠️ Compte suspect' : '✅ Compte vérifié',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15),
+        ),
+        if (bad)
+          for (final r in widget.risk)
+            Text('• $r', style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
+        if (bad)
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              'Ses retraits automatiques (International) sont bloqués : il doit passer par le retrait Local, que tu valides à la main.',
+              style: TextStyle(color: Colors.white54, fontSize: 11.5),
+            ),
+          ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54)),
+            onPressed: _busy ? null : _toggle,
+            child: Text(_cleared ? 'Remettre sous surveillance' : 'Marquer comme vérifié'),
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -421,6 +501,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
     final q = searchCtrl.text.trim().toLowerCase();
     final l = players
         .where((p) => q.isEmpty || p.name.toLowerCase().contains(q))
+        .where((p) => sort != 'risk' || p.risk.isNotEmpty)
         .toList();
     int cmpDate(PlayerStats a, PlayerStats b) {
       final x = a.createdAt, y = b.createdAt;
@@ -480,7 +561,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    p.name,
+                    p.risk.isNotEmpty ? '⚠️ ${p.name}' : p.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -592,6 +673,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                     _chip('Solde', 'balance'),
                                     _chip('Parties', 'played'),
                                     _chip('Victoires', 'won'),
+                                    _chip('⚠️ Suspects', 'risk'),
                                   ],
                                 ),
                                 const SizedBox(height: 6),
