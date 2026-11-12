@@ -460,3 +460,119 @@ class _SharedLinkGateState extends State<SharedLinkGate> {
   @override
   Widget build(BuildContext context) => widget.child;
 }
+
+
+/// Bandeau d'accueil « Reprendre ma partie » : liste les parties en ligne de
+/// l'utilisateur encore en cours (Ludo, Deux dés, Damier, Songo), par exemple
+/// après une coupure de réseau ou un retour à l'accueil.
+class ResumeBanner extends StatefulWidget {
+  const ResumeBanner({super.key});
+
+  @override
+  State<ResumeBanner> createState() => _ResumeBannerState();
+}
+
+class _ResumeBannerState extends State<ResumeBanner> {
+  static const _cols = ['games', 'deuxdes', 'songo', 'damier'];
+  static const _names = {
+    'games': 'Ludo',
+    'deuxdes': 'Deux dés',
+    'songo': 'Songo',
+    'damier': 'Damier',
+  };
+  final List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _subs = [];
+  final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _live = {};
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    for (final col in _cols) {
+      _subs.add(FirebaseFirestore.instance
+          .collection(col)
+          .where('uids', arrayContains: uid)
+          .snapshots()
+          .listen((snap) {
+        if (!mounted) return;
+        setState(() {
+          _live[col] = snap.docs.where((d) {
+            final x = d.data();
+            return x['status'] == 'playing' &&
+                x['over'] != true &&
+                x['settled'] != true;
+          }).toList();
+        });
+      }, onError: (_) {}));
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <MapEntry<String, QueryDocumentSnapshot<Map<String, dynamic>>>>[
+      for (final col in _cols)
+        for (final d in _live[col] ?? const []) MapEntry(col, d),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        for (final it in items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Material(
+              color: const Color(0xFFE5262B),
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        SharedLink._room(it.key, it.value.id, spectate: false),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.play_circle_fill, color: Colors.white, size: 30),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              tr('Reprendre ma partie de ${_names[it.key]}',
+                                  'Resume my ${_names[it.key]} game'),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Text(
+                              tr('Partie en cours : touche pour revenir',
+                                  'Game in progress: tap to go back'),
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.white),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
