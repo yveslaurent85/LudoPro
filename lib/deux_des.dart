@@ -10,6 +10,7 @@ import 'accounts.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
 import 'lang.dart';
+import 'share_menu.dart';
 import 'lobby_widgets.dart';
 import 'main.dart';
 import 'jackpot_live.dart';
@@ -2264,6 +2265,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
               ],
             ),
           ),
+          ShareMenuButton(collection: 'deuxdes', gameId: widget.roomId),
+          const SizedBox(height: 14),
           for (int i = 0; i < max; i++)
             Container(
               margin: const EdgeInsets.only(bottom: 10),
