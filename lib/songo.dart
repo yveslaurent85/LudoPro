@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'accounts.dart';
 import 'game_chat.dart';
 import 'lang.dart';
+import 'share_menu.dart';
 import 'lobby_widgets.dart';
 import 'main.dart';
 import 'online_screen.dart';
@@ -2787,6 +2788,8 @@ class _SongoRoomState extends State<_SongoRoom> {
               ],
             ),
           ),
+          ShareMenuButton(collection: 'songo', gameId: widget.roomId),
+          const SizedBox(height: 14),
           for (int i = 0; i < 2; i++)
             Container(
               margin: const EdgeInsets.only(bottom: 10),
