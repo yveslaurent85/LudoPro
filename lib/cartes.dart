@@ -2758,7 +2758,10 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
       }
     }
     // Distribution déjà passée si la manche est déjà entamée à l'arrivée
-    if (_v == null && (v['status'] != 'playing' || pl.any((p) => (p as Map)['opened'] == true))) {
+    // (en salle d'attente, elle n'est PAS passée : elle jouera au lancement)
+    if (_v == null &&
+        v['status'] != 'waiting' &&
+        (v['status'] != 'playing' || pl.any((p) => (p as Map)['opened'] == true))) {
       _dealtFor = '${v['id']}';
     }
     setState(() {
