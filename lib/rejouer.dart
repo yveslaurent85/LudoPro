@@ -60,6 +60,32 @@ Future<void> _payOrRollback(String id) async {
   }
 }
 
+/// Uid du gagnant d'une partie de Ludo finie (null si inconnu) : abandon
+/// (champ « winner ») ou premier camp dont tous les pions sont arrivés.
+String? _ludoWinnerUid(Map<String, dynamic> d) {
+  final uids = ((d['uids'] as List?) ?? const []).map((e) => '$e').toList();
+  final max = (d['maxPlayers'] as num?)?.toInt() ?? uids.length;
+  final colors = max == 2 ? [0, 2] : (max == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
+  final forfeited = ((d['forfeited'] as List?) ?? const [])
+      .map((e) => (e as num).toInt())
+      .toList();
+  var w = (d['winner'] as num?)?.toInt() ?? -1;
+  if (w < 0) {
+    for (final c in colors) {
+      final p = d['p$c'];
+      if (!forfeited.contains(c) &&
+          p is List &&
+          p.isNotEmpty &&
+          p.every((x) => x == 56)) {
+        w = c;
+        break;
+      }
+    }
+  }
+  final seat = colors.indexOf(w);
+  return (seat >= 0 && seat < uids.length) ? uids[seat] : null;
+}
+
 /// Crée la salle de revanche du Ludo (mêmes réglages que la partie finie).
 /// La salle est privée : seuls ceux qui ont accepté la rejoignent.
 Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async {
@@ -72,8 +98,10 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
   final startOut = old['startOut'] == true;
   final team = old['teamMode'] == true && count == 4;
   final ref = FirebaseFirestore.instance.collection('games').doc();
+  final starter = _ludoWinnerUid(old);
   try {
     await ref.set({
+      if (starter != null) 'starterUid': starter, // le gagnant commence
       'hostUid': user.uid,
       'hostName': _userName(user),
       'maxPlayers': count,
@@ -81,6 +109,8 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
       'doorSafe': old['doorSafe'] != false,
       'starSafe': old['starSafe'] != false,
       'startOut': startOut,
+      'startDoor': old['startDoor'] == true,
+      'autoSecs': (old['autoSecs'] as num?)?.toInt() ?? 10,
       'private': true,
       'teamMode': team,
       'stake': stake,
