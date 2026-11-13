@@ -498,11 +498,13 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     });
     try {
       final ref = _games.doc(id);
+      // La partie et mon solde sont lus en même temps (un seul temps d'attente).
+      final balanceF = _myBalance();
       final pre = await ref.get();
       final stakeNeed = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
       final captNeed = (pre.data()?['capturePay'] as num?)?.toInt() ?? 0;
       final need = stakeNeed + captNeed;
-      if (pre.exists && need > 0 && await _myBalance() < need) {
+      if (pre.exists && need > 0 && await balanceF < need) {
         if (mounted) {
           setState(() => error = captNeed > 0
               ? tr('Solde insuffisant : il te faut au moins '
