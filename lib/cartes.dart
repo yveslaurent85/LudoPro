@@ -2106,6 +2106,10 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
     });
     if (_isFomekou(seat)) _sfx.win();
     if (_revealed.length < _n) return;
+    // Le résultat du dernier joueur reste visible quelques secondes avant
+    // l'annonce du vainqueur.
+    await Future<void>.delayed(const Duration(milliseconds: 2800));
+    if (!mounted || _over) return;
     // Calcul du résultat
     final fom = [for (final s in _revealed) if (_isFomekou(s)) s]; // dans l'ordre de révélation
     List<int> w;
@@ -2739,13 +2743,59 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
 
   @override
   void dispose() {
+    _holdTimer?.cancel();
     _tick?.cancel();
     _timer?.cancel();
     super.dispose();
   }
 
+  // Fin de manche : le résultat du dernier joueur s'affiche d'abord, puis le
+  // vainqueur est annoncé quelques secondes plus tard.
+  static const Duration _verdictDelay = Duration(milliseconds: 3200);
+  final Set<String> _overShown = {};
+  String? _holdId;
+  DateTime? _holdUntil;
+  Timer? _holdTimer;
+  Map<String, dynamic>? _fullV;
+
+  Map<String, dynamic> _heldCopy(Map<String, dynamic> v) => Map<String, dynamic>.from(v)
+    ..['over'] = false
+    ..['status'] = 'playing'
+    ..['winnerUids'] = <dynamic>[]
+    ..['prize'] = 0
+    ..['turnUid'] = ''
+    ..['turnLeftMs'] = 0;
+
   void _set(Map<String, dynamic> v) {
     if (!mounted) return;
+    _fullV = v;
+    if (v['over'] == true) {
+      final oid = '${v['id']}';
+      if (_holdId == oid) {
+        if (_holdUntil != null && DateTime.now().isBefore(_holdUntil!)) {
+          v = _heldCopy(v);
+        } else {
+          _holdId = null;
+          _overShown.add(oid);
+        }
+      } else if (!_overShown.contains(oid)) {
+        if (_v != null && _v!['over'] != true) {
+          _holdId = oid;
+          _holdUntil = DateTime.now().add(_verdictDelay);
+          _holdTimer?.cancel();
+          _holdTimer = Timer(_verdictDelay, () {
+            if (!mounted) return;
+            _holdId = null;
+            _overShown.add(oid);
+            final full = _fullV;
+            if (full != null) _set(full);
+          });
+          v = _heldCopy(v);
+        } else {
+          _overShown.add(oid);
+        }
+      }
+    }
     // « TIAH ! » / « FOMEKOU ! » : son dès qu'une main spéciale apparaît
     final pl = v['players'] as List? ?? [];
     for (final p in pl) {
