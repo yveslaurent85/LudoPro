@@ -17,7 +17,7 @@ const List<String> kBaseLogos = [
 /// À placer dans le Stack du plateau, AVANT les pions (ils passent dessus).
 /// [labels] : texte à écrire en haut de chaque base (ex. « landry (35%) »),
 /// dans l'ordre Rouge, Vert, Bleu, Jaune ; null = pas de texte (joueur absent).
-List<Widget> buildBaseLogos(double c, {List<String?>? labels}) {
+List<Widget> buildBaseLogos(double c, {List<String?>? labels, int rot = 0}) {
   const double size = 3.4; // taille du logo, en cases (la base fait 6 cases)
   const double offset = (6 - size) / 2; // centré dans la base
 
@@ -26,8 +26,8 @@ List<Widget> buildBaseLogos(double c, {List<String?>? labels}) {
       for (int p = 0; p < 4; p++)
         if (p < labels.length && labels[p] != null && labels[p]!.isNotEmpty)
           Positioned(
-            left: (((p == 0 || p == 3) ? 0 : 9) + 0.25) * c,
-            top: ((p < 2 ? 0 : 9) + 0.2) * c,
+            left: ((((p + rot) % 4 == 0 || (p + rot) % 4 == 3) ? 0 : 9) + 0.25) * c,
+            top: (((p + rot) % 4 < 2 ? 0 : 9) + 0.2) * c,
             width: 5.5 * c,
             height: 1.0 * c,
             child: IgnorePointer(
@@ -50,8 +50,8 @@ List<Widget> buildBaseLogos(double c, {List<String?>? labels}) {
           ),
     for (int p = 0; p < 4; p++)
       Positioned(
-        left: (((p == 0 || p == 3) ? 0 : 9) + offset) * c,
-        top: ((p < 2 ? 0 : 9) + offset) * c,
+        left: ((((p + rot) % 4 == 0 || (p + rot) % 4 == 3) ? 0 : 9) + offset) * c,
+        top: (((p + rot) % 4 < 2 ? 0 : 9) + offset) * c,
         width: size * c,
         height: size * c,
         child: IgnorePointer(
