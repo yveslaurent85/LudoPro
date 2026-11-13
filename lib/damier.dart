@@ -393,8 +393,10 @@ class DamierBoardView extends StatefulWidget {
     required this.lastPath,
     required this.lastCaps,
     required this.onSettled,
+    this.queued,
   });
 
+  final DMove? queued; // coup anticipé en attente (affiché en bleu)
   final List<int> board;
   final bool flip; // plateau retourné (les noirs en bas)
   final List<DMove> legal; // vide si ce n'est pas à moi de jouer
@@ -624,6 +626,10 @@ class _DamierBoardViewState extends State<DamierBoardView>
                   targets: targets,
                   picks: picks,
                   last: last,
+                  queued: {
+                    if (widget.queued != null) widget.queued!.from,
+                    if (widget.queued != null) ...widget.queued!.path,
+                  },
                   moverPiece: moverPiece,
                   moverPos: moverPos,
                   hidden: hidden,
@@ -649,8 +655,10 @@ class _DBoardPainter extends CustomPainter {
     required this.moverPiece,
     required this.moverPos,
     required this.hidden,
+    this.queued = const {},
   });
 
+  final Set<int> queued;
   final List<int> board;
   final bool flip;
   final int sel;
@@ -694,6 +702,12 @@ class _DBoardPainter extends CustomPainter {
           canvas.drawRect(
             rect,
             Paint()..color = const Color(0xFFFFE082).withOpacity(0.45),
+          );
+        }
+        if (queued.contains(idx)) {
+          canvas.drawRect(
+            rect,
+            Paint()..color = const Color(0xFF29B6F6).withOpacity(0.55),
           );
         }
         if (idx == sel || steps.contains(idx)) {
@@ -883,9 +897,28 @@ List<Map<String, dynamic>> _dPlayersOf(Map<String, dynamic> d) =>
 List<int> _dIntsOf(dynamic l, List<int> fb) =>
     l is List ? l.map((e) => (e as num).toInt()).toList() : fb;
 
+/// Ma mise dans cette partie : celle du créateur, ou « stakeOpp » pour l'adversaire.
+int _dMyStake(Map<String, dynamic> d, String uid) {
+  final s = (d['stake'] as num?)?.toInt() ?? 0;
+  final o = (d['stakeOpp'] as num?)?.toInt();
+  if (o == null || d['hostUid'] == uid) return s;
+  return o;
+}
+
+/// Cagnotte totale prévue (mise du créateur + mise de l'adversaire).
+int _dTotalPot(Map<String, dynamic> d) {
+  final s = (d['stake'] as num?)?.toInt() ?? 0;
+  final o = (d['stakeOpp'] as num?)?.toInt() ?? s;
+  return s + o;
+}
+
 String _dStakeText(Map<String, dynamic> d) {
   final s = (d['stake'] as num?)?.toInt();
   if (s == null) return '';
+  final o = (d['stakeOpp'] as num?)?.toInt();
+  if (o != null && o != s && s > 0) {
+    return tr(' • mises $s / $o', ' • stakes $s / $o');
+  }
   return s > 0
       ? tr(' • mise $s', ' • stake $s')
       : tr(' • gratuite', ' • free');
@@ -1389,6 +1422,7 @@ class _DResultPanel extends StatelessWidget {
     required this.counts,
     required this.winners,
     required this.stake,
+    this.pot = 0,
     this.reason = '',
     this.forfeit = -1,
     this.timeout = false,
@@ -1402,6 +1436,7 @@ class _DResultPanel extends StatelessWidget {
   final List<int> counts;
   final List<int> winners;
   final int stake;
+  final int pot; // cagnotte réelle (mises différentes) ; 0 = stake * 2
   final String reason;
   final int forfeit;
   final bool timeout;
@@ -1475,8 +1510,8 @@ class _DResultPanel extends StatelessWidget {
                   ? tr('Égalité : mises remboursées, aucune commission.',
                       'Draw: stakes refunded, no commission.')
                   : tr(
-                      'Gain : ${Wallet.format(Wallet.prize(stake * 2))} (commission ${Wallet.commissionPercent} %)',
-                      'Prize: ${Wallet.format(Wallet.prize(stake * 2))} (${Wallet.commissionPercent} % commission)'),
+                      'Gain : ${Wallet.format(Wallet.prize(pot > 0 ? pot : stake * 2))} (commission ${Wallet.commissionPercent} %)',
+                      'Prize: ${Wallet.format(Wallet.prize(pot > 0 ? pot : stake * 2))} (${Wallet.commissionPercent} % commission)'),
               style: const TextStyle(color: _dGoldSoft, fontSize: 13),
             ),
           if (jackpot > 0)
@@ -2310,6 +2345,9 @@ class _DamierHub extends StatefulWidget {
 
 class _DamierHubState extends State<_DamierHub> {
   int stake = Wallet.minStake;
+  int stakeOpp = Wallet.minStake; // mise de l'adversaire
+  bool oppEdited = false; // l'adversaire a une mise choisie à part
+  bool premove = false; // coups anticipés autorisés
   int timeMin = 5; // mon temps de réflexion (minutes)
   int timeOpp = 5; // temps de l'adversaire (minutes)
   int incSec = 2; // secondes ajoutées après chaque coup
@@ -2356,9 +2394,11 @@ class _DamierHubState extends State<_DamierHub> {
     return b is num ? b.toInt() : 0;
   }
 
+  bool get _stakesOk => stake == 0 || (stake > 0 && stakeOpp > 0);
+
   Future<void> _create() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || busy || stake < 0) return;
+    if (user == null || busy || !_stakesOk) return;
     setState(() {
       busy = true;
       error = null;
@@ -2380,6 +2420,8 @@ class _DamierHubState extends State<_DamierHub> {
         'maxPlayers': 2,
         'private': privateRoom,
         'stake': stake,
+        'stakeOpp': stake > 0 ? stakeOpp : 0,
+        'premove': premove,
         'paid': <String>[],
         'pot': 0,
         'code': _dNewCode(),
@@ -2434,8 +2476,8 @@ class _DamierHubState extends State<_DamierHub> {
     try {
       final ref = _dRooms.doc(id);
       final pre = await ref.get();
-      final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
       final pd = pre.data();
+      final need = pd == null ? 0 : _dMyStake(pd, user.uid);
       if (pd != null && _dSpecialRules(pd) && !_dPlayersOf(pd).any((p) => p['uid'] == user.uid)) {
         final ok = await showDialog<bool>(
           context: context,
@@ -2782,8 +2824,8 @@ class _DamierHubState extends State<_DamierHub> {
             stream: Wallet.watch(uid),
             builder: (context, s) => Text(
               tr(
-                'Mise de chaque joueur · ton solde : ${Wallet.format(s.data ?? 0)}',
-                "Each player's stake · your balance: ${Wallet.format(s.data ?? 0)}",
+                'Ma mise · ton solde : ${Wallet.format(s.data ?? 0)}',
+                "My stake · your balance: ${Wallet.format(s.data ?? 0)}",
               ),
               style: const TextStyle(
                 color: Colors.white,
@@ -2796,8 +2838,37 @@ class _DamierHubState extends State<_DamierHub> {
           StakeField(
             stake: stake,
             players: 2,
-            onChanged: (v) => setState(() => stake = v),
+            onChanged: (v) => setState(() {
+              stake = v;
+              if (!oppEdited || stakeOpp <= 0) stakeOpp = v;
+              if (v == 0) stakeOpp = 0;
+            }),
           ),
+          if (stake != 0) ...[
+            const SizedBox(height: 10),
+            _dLabel(tr("Mise de l'adversaire", "Opponent's stake")),
+            const SizedBox(height: 6),
+            StakeField(
+              stake: stakeOpp,
+              players: 2,
+              onChanged: (v) => setState(() {
+                oppEdited = true;
+                // L'adversaire ne peut pas jouer gratuitement si ma mise est payante.
+                stakeOpp = v == 0 ? -1 : v;
+              }),
+            ),
+            if (stake > 0 && stakeOpp > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  tr(
+                    'Cagnotte : ${Wallet.format(stake + stakeOpp)} • gain du vainqueur : ${Wallet.format(Wallet.prize(stake + stakeOpp))}',
+                    'Pot: ${Wallet.format(stake + stakeOpp)} • winner gets: ${Wallet.format(Wallet.prize(stake + stakeOpp))}',
+                  ),
+                  style: const TextStyle(color: _dGoldSoft, fontSize: 12),
+                ),
+              ),
+          ],
           _dClockPicker(
             timeMin: timeMin,
             timeOpp: timeOpp,
@@ -2823,6 +2894,21 @@ class _DamierHubState extends State<_DamierHub> {
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             activeColor: _dGold,
+            title: Text(tr('Coups anticipés', 'Premoves'),
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800)),
+            subtitle: Text(
+              tr(
+                  "Pendant que l'adversaire réfléchit, on peut jouer son prochain coup à l'avance. Il est annulé si l'adversaire capture ou si le coup n'est plus possible.",
+                  "While the opponent is thinking, you can play your next move in advance. It is cancelled if the opponent captures or the move is no longer legal."),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: premove,
+            onChanged: (v) => setState(() => premove = v),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeColor: _dGold,
             title: Text(tr('Partie privée', 'Private game'),
                 style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.w800)),
@@ -2841,7 +2927,7 @@ class _DamierHubState extends State<_DamierHub> {
                 backgroundColor: const Color(0xFF22B14C),
                 foregroundColor: Colors.white,
               ),
-              onPressed: (busy || stake < 0) ? null : _create,
+              onPressed: (busy || !_stakesOk) ? null : _create,
               child: Text(busy
                   ? tr('Patiente...', 'Please wait...')
                   : tr('Créer la partie', 'Create the game')),
@@ -2903,6 +2989,7 @@ class _DamierRoomState extends State<_DamierRoom> {
   bool _autoBusy = false;
   Map<String, dynamic>? _last;
   int _jackpotShown = 0;
+  DMove? _queued; // coup anticipé en attente (option « coups anticipés »)
 
   // --- Photos instantanées (anti-triche) ---------------------------------
   CameraController? _cam;
@@ -3213,8 +3300,8 @@ class _DamierRoomState extends State<_DamierRoom> {
   Widget _waiting(Map<String, dynamic> d, List<Map<String, dynamic>> players,
       String uid) {
     final isHost = d['hostUid'] == uid;
-    final stake = (d['stake'] as num?)?.toInt() ?? 0;
-    final pot = stake * 2;
+    final stake = _dMyStake(d, uid);
+    final pot = _dTotalPot(d);
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
 
     return _DShell(
@@ -3236,10 +3323,10 @@ class _DamierRoomState extends State<_DamierRoom> {
           Text(
             stake > 0
                 ? tr(
-                    'Mise : ${Wallet.format(stake)} • '
+                    'Ta mise : ${Wallet.format(stake)} • '
                         'Cagnotte : ${Wallet.format(pot)} '
                         '(gain ${Wallet.format(Wallet.prize(pot))})',
-                    'Stake: ${Wallet.format(stake)} • '
+                    'Your stake: ${Wallet.format(stake)} • '
                         'Pot: ${Wallet.format(pot)} '
                         '(prize ${Wallet.format(Wallet.prize(pot))})',
                   )
@@ -3485,6 +3572,46 @@ class _DamierRoomState extends State<_DamierRoom> {
         final mustCapture =
             myTurn && legal.isNotEmpty && legal.first.caps.isNotEmpty;
 
+        // --- Coups anticipés ---------------------------------------------
+        final premoveOn = d['premove'] == true;
+        if (!premoveOn || over || seat < 0) _queued = null;
+        if (_queued != null && myTurn) {
+          // L'adversaire vient de jouer : on joue mon coup d'avance, sauf si
+          // l'adversaire a capturé ou si ce coup n'est plus possible.
+          final q = _queued!;
+          _queued = null;
+          DMove? ok;
+          if (g.lastCaps.isEmpty) {
+            for (final m in g.legal) {
+              if (m.sameAs(q)) {
+                ok = m;
+                break;
+              }
+            }
+          }
+          final mv = g.moveN;
+          final play = ok;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (play != null) {
+              _play(seat, play, mv);
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(tr('Coup anticipé annulé.', 'Premove cancelled.')),
+                duration: const Duration(seconds: 2),
+              ));
+            }
+          });
+        }
+        final canPre = premoveOn &&
+            seat >= 0 &&
+            !over &&
+            d['status'] == 'playing' &&
+            g.cur != seat &&
+            !busy;
+        final preLegal =
+            canPre ? DamierEngine.legal(g.board, seat) : const <DMove>[];
+
         final tl = clock != null
             ? (g.moveN < 2
                 ? tr('l\'horloge démarre après le 1er coup',
@@ -3572,6 +3699,28 @@ class _DamierRoomState extends State<_DamierRoom> {
                               fontWeight: FontWeight.w700),
                         ),
                       ),
+                    if (_queued != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                tr('Coup anticipé en attente (annulé si l\'adversaire capture)',
+                                    'Premove queued (cancelled if the opponent captures)'),
+                                style: const TextStyle(
+                                    color: Color(0xFF81D4FA),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => setState(() => _queued = null),
+                              child: Text(tr('Annuler', 'Cancel')),
+                            ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     Expanded(
                       child: Padding(
@@ -3579,9 +3728,18 @@ class _DamierRoomState extends State<_DamierRoom> {
                         child: DamierBoardView(
                           board: g.board,
                           flip: seat == 1,
-                          legal: legal,
-                          onMove: (m) => _play(seat, m, g.moveN,
-                              elapsedMs: DateTime.now().difference(_stamp).inMilliseconds),
+                          legal: myTurn ? legal : preLegal,
+                          queued: _queued,
+                          onMove: (m) {
+                            if (!myTurn) {
+                              setState(() => _queued = m);
+                              return;
+                            }
+                            _play(seat, m, g.moveN,
+                                elapsedMs: DateTime.now()
+                                    .difference(_stamp)
+                                    .inMilliseconds);
+                          },
                           moveN: g.moveN,
                           lastFrom: g.lastFrom,
                           lastPath: g.lastPath,
@@ -3635,6 +3793,7 @@ class _DamierRoomState extends State<_DamierRoom> {
                             counts: [g.count(0), g.count(1)],
                             winners: g.winners,
                             stake: stake,
+                            pot: _dTotalPot(d),
                             reason: g.reason,
                             forfeit: forfeit,
                             timeout: d['timeout'] == true,
