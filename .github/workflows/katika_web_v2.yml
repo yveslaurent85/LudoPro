@@ -36,6 +36,9 @@ jobs:
       - name: Compiler Katika Web
         run: flutter build web --release --base-href /jouer/
 
+      - name: Accélérer le démarrage (écran Katika, mise en mémoire)
+        run: python3 web_boost.py build/web
+
       - name: Sauvegarder les fichiers compilés
         uses: actions/upload-artifact@v4
         with:
