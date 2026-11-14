@@ -92,11 +92,13 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) throw RematchException('Connexion requise.');
   final stake = (old['stake'] as num?)?.toInt() ?? 0;
-  await _checkBalance(user.uid, stake);
-
   final pawns = (old['pawnCount'] as num?)?.toInt() ?? 4;
   final startOut = old['startOut'] == true;
   final team = old['teamMode'] == true && count == 4;
+  // Joueur à 2 places (Ludo par équipes) : il garde ses 2 places s'il relance.
+  final dbl = team && old['dbl'] == true && old['hostUid'] == user.uid;
+  await _checkBalance(user.uid, stake * (dbl ? 2 : 1));
+
   final ref = FirebaseFirestore.instance.collection('games').doc();
   final starter = _ludoWinnerUid(old);
   try {
@@ -116,14 +118,16 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
       'stake': stake,
       'paid': <String>[],
       'pot': 0,
-      'partners': [-1, -1, -1, -1],
+      'partners': dbl ? [1, 0, -1, -1] : [-1, -1, -1, -1],
+      'dbl': dbl,
       'invites': <Map<String, int>>[],
       'code': _newCode(),
       'status': 'waiting',
       'players': [
         {'uid': user.uid, 'name': _userName(user)},
+        if (dbl) {'uid': user.uid, 'name': _userName(user)},
       ],
-      'uids': [user.uid],
+      'uids': [user.uid, if (dbl) user.uid],
       'createdAt': FieldValue.serverTimestamp(),
       'p0': _startPawns(pawns, startOut),
       'p1': _startPawns(pawns, startOut),
@@ -218,9 +222,11 @@ Future<String?> joinRoom(String collection, String id) async {
         return 'La nouvelle partie est déjà complète.';
       }
       players.add({'uid': user.uid, 'name': _userName(user)});
+      final dblRoom = d['dbl'] == true && d['teamMode'] == true;
       tx.update(ref, {
         'players': players,
         'uids': FieldValue.arrayUnion([user.uid]),
+        if (dblRoom && players.length == 4) 'partners': [1, 0, 3, 2],
       });
       return null;
     });
