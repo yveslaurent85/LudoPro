@@ -163,7 +163,8 @@ Future<void> _teamTx(
     change(seat, partners, invites);
 
     final max = (d['maxPlayers'] as num).toInt();
-    final paidCount = ((d['paid'] as List?) ?? const []).length;
+    final paidList = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
+    final paidCount = players.where((p) => paidList.contains(p['uid'])).length;
     final ready = players.length >= max &&
         paidCount >= max &&
         partners.every((p) => p != -1);
@@ -357,6 +358,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   int autoSecs = 10; // délai du pilotage automatique (5, 10 ou 15 s)
   bool privateRoom = false;
   bool teamMode = false; // 2 contre 2 (4 joueurs seulement)
+  bool doubleSeat = false; // équipe : je paie et je joue 2 places
   bool capturePay = false; // captures payantes
   int captureAmount = Wallet.minCapture; // montant par capture
   bool busy = false;
@@ -416,7 +418,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
     });
     try {
       // Captures payantes : il faut aussi pouvoir payer au moins une capture.
-      final needCreate = stake + (capturePay ? captureAmount : 0);
+      final dbl = teamMode && numPlayers == 4 && doubleSeat;
+      final needCreate = stake * (dbl ? 2 : 1) + (capturePay ? captureAmount : 0);
       if (await _myBalance() < needCreate) {
         if (mounted) {
           setState(() => error = capturePay
@@ -430,6 +433,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         return;
       }
       final team = teamMode && numPlayers == 4;
+      final dbl2 = team && doubleSeat; // je joue 2 places (je paie 2 mises)
       // Position 54 : toujours 2 pions chacun.
       final pawns = startOut ? 2 : pawnCount;
       final ref = _games.doc();
@@ -449,14 +453,16 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         'stake': stake,
         'paid': <String>[],
         'pot': 0,
-        'partners': [-1, -1, -1, -1],
+        'partners': dbl2 ? [1, 0, -1, -1] : [-1, -1, -1, -1],
+        'dbl': dbl2,
         'invites': <Map<String, int>>[],
         'code': _newCode(),
         'status': 'waiting',
         'players': [
           {'uid': user.uid, 'name': _displayName(user)},
+          if (dbl2) {'uid': user.uid, 'name': _displayName(user)},
         ],
-        'uids': [user.uid],
+        'uids': [user.uid, if (dbl2) user.uid],
         'createdAt': FieldValue.serverTimestamp(),
         'p0': _startPawns(pawns, startOut, startDoor),
         'p1': _startPawns(pawns, startOut, startDoor),
@@ -536,9 +542,12 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         players.add({'uid': user.uid, 'name': _displayName(user)});
         // La partie démarre quand tout le monde a payé sa mise (voir le
         // serveur) et, en équipe, quand les binômes sont formés.
+        // Équipe avec un joueur à 2 places : les 2 autres sont binômes d'office.
+        final dblRoom = d['dbl'] == true && d['teamMode'] == true;
         tx.update(ref, {
           'players': players,
           'uids': FieldValue.arrayUnion([user.uid]),
+          if (dblRoom && players.length == 4) 'partners': [1, 0, 3, 2],
         });
         return null;
       });
@@ -1066,7 +1075,18 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
                   'Les binômes se choisissent par invitation et ne se '
                       'capturent pas',
                   teamMode,
-                  (v) => setState(() => teamMode = v),
+                  (v) => setState(() {
+                    teamMode = v;
+                    if (!v) doubleSeat = false;
+                  }),
+                ),
+              if (numPlayers == 4 && teamMode)
+                _switchRow(
+                  'Je joue les 2 cases de mon équipe',
+                  'Tu paies 2 mises et tu joues toi-même les 2 couleurs de '
+                      'ton équipe. Les 2 autres places sont pour 2 autres joueurs.',
+                  doubleSeat,
+                  (v) => setState(() => doubleSeat = v),
                 ),
               _switchRow(
                 'Partie privée',
@@ -1303,14 +1323,15 @@ class OnlineGameRoom extends StatelessWidget {
               style: white(),
             ),
           ),
-          TextButton(
-            onPressed: () => run((seat, p, inv) {
-              final m = p[seat];
-              p[seat] = -1;
-              if (m != -1) p[m] = -1;
-            }),
-            child: const Text('Annuler'),
-          ),
+          if (d['dbl'] != true) // joueur à 2 places : binôme fixe
+            TextButton(
+              onPressed: () => run((seat, p, inv) {
+                final m = p[seat];
+                p[seat] = -1;
+                if (m != -1) p[m] = -1;
+              }),
+              child: const Text('Annuler'),
+            ),
         ]),
       );
     } else {
@@ -1410,6 +1431,9 @@ class OnlineGameRoom extends StatelessWidget {
     final pot = stake * max;
     final capturePay = (d['capturePay'] as num?)?.toInt() ?? 0;
     final paid = ((d['paid'] as List?) ?? const []).map((e) => '$e').toList();
+    final mySeats = players.where((p) => p['uid'] == uid).length;
+    final myStake = stake * (mySeats > 0 ? mySeats : 1); // 2 places = 2 mises
+    final paidSeats = players.where((p) => paid.contains(p['uid'])).length;
     final createdLabel =
         _createdText(d['createdAt']).replaceFirst(' • ', '');
 
@@ -1501,8 +1525,8 @@ class OnlineGameRoom extends StatelessWidget {
                         },
                         child: Text(
                           stake > 0
-                              ? tr('Payer ma mise (${Wallet.format(stake)})',
-                                  'Pay my stake (${Wallet.format(stake)})')
+                              ? tr('Payer ma mise (${Wallet.format(myStake)})',
+                                  'Pay my stake (${Wallet.format(myStake)})')
                               : 'Valider ma participation',
                         ),
                       ),
@@ -1513,7 +1537,7 @@ class OnlineGameRoom extends StatelessWidget {
                   gameId: gameId,
                   isHost: d['hostUid'] == uid,
                   playerCount: players.length,
-                  paidCount: paid.length,
+                  paidCount: paidSeats,
                 ),
                 if (d['code'] != null) _codeCard(context, d),
                 ShareMenuButton(collection: 'games', gameId: gameId),
@@ -1542,6 +1566,7 @@ class OnlineGameRoom extends StatelessWidget {
                             i < players.length
                                 ? '${players[i]['name']}'
                                     '${paid.contains(players[i]['uid']) ? ' ✅' : ''}'
+                                    '${d['dbl'] == true && i < 2 ? tr('  (2 cases)', '  (2 seats)') : ''}'
                                     '${teamOn && partners[i] != -1 && partners[i] < players.length ? '  🤝 ${players[partners[i]]['name']}' : ''}'
                                 : "En attente d'un joueur...",
                             style: TextStyle(
