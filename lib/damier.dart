@@ -18,6 +18,7 @@ import 'lobby_widgets.dart';
 import 'main.dart';
 import 'online_screen.dart';
 import 'stake_field.dart';
+import 'replay_core.dart';
 
 // ----------------------------------------------------------------------
 // Damier : dames internationales 10x10 pour 2 joueurs.
@@ -2961,16 +2962,20 @@ Widget damierRoomPage(String id) => _DamierRoom(roomId: id);
 
 /// Revoir une partie de Damier en ligne (lecture seule) : tableau de bord admin.
 class DamierSpectator extends StatelessWidget {
-  const DamierSpectator({super.key, required this.roomId});
+  const DamierSpectator({super.key, required this.roomId, this.replay});
   final String roomId;
+  final ReplayController? replay;
 
   @override
   Widget build(BuildContext context) =>
-      _DamierRoom(roomId: roomId, spectate: true);
+      _DamierRoom(roomId: roomId, spectate: true, replay: replay);
 }
 
 class _DamierRoom extends StatefulWidget {
-  const _DamierRoom({required this.roomId, this.spectate = false});
+  const _DamierRoom(
+      {required this.roomId, this.spectate = false, this.replay});
+
+  final ReplayController? replay; // revue d'une partie (lecture seule)
 
   final String roomId;
   final bool spectate;
@@ -3096,7 +3101,7 @@ class _DamierRoomState extends State<_DamierRoom> {
 
   void _tick() {
     final d = _last;
-    if (!mounted || d == null) return;
+    if (!mounted || d == null || widget.replay != null) return;
     if (d['status'] != 'playing' || d['over'] == true) return;
     final clock = _clockOf(d);
     if (clock != null) {
@@ -3212,6 +3217,9 @@ class _DamierRoomState extends State<_DamierRoom> {
           return;
         }
         final firstMove = g.moveN < 2;
+        // Enregistrement de la partie (pour la revoir du début à la fin).
+        final mvLog = ((d['mv'] as List?) ?? const []).map((e) => '$e').toList()
+          ..add([chosen.from, ...chosen.path].join('>'));
         g.play(chosen);
         final clock = _clockOf(d);
         if (clock != null && !firstMove) {
@@ -3222,6 +3230,7 @@ class _DamierRoomState extends State<_DamierRoom> {
         tx.update(_ref, {
           ...g.toDoc(),
           'miss': miss,
+          'mv': mvLog.length > 600 ? mvLog.sublist(mvLog.length - 600) : mvLog,
           if (clock != null) 'clockMs': clock,
           if (g.over) 'status': 'finished',
         });
@@ -3485,7 +3494,7 @@ class _DamierRoomState extends State<_DamierRoom> {
     }
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _ref.snapshots(),
+      stream: widget.replay?.docs(widget.roomId) ?? _ref.snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
           return _info(tr('Erreur de connexion à la partie.',
@@ -3500,7 +3509,9 @@ class _DamierRoomState extends State<_DamierRoom> {
         _last = d;
 
         final players = _dPlayersOf(d);
-        final seat = players.indexWhere((p) => p['uid'] == user.uid);
+        final seat = widget.replay != null
+            ? -1
+            : players.indexWhere((p) => p['uid'] == user.uid);
         if (seat < 0 && !widget.spectate) {
           return _info(tr('Tu ne fais pas partie de cette partie.',
               'You are not part of this game.'));
