@@ -724,6 +724,62 @@ class _MyGamesScreenState extends State<MyGamesScreen> {
   List<Map<String, dynamic>> _rows = [];
   bool _loading = true;
   String? _err;
+  String? _open; // jeu dont la liste est déroulée
+
+  Widget _group(String kind) {
+    final list = [for (final r in _rows) if (r['kind'] == kind) r];
+    final open = _open == kind;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _open = open ? null : kind),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+              color: open ? const Color(0xFF1E8E5A) : Colors.white.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: open ? _rpGold : Colors.white24),
+            ),
+            child: Row(
+              children: [
+                Text(_rpKindIcon(kind), style: const TextStyle(fontSize: 24)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(rpKindName(kind),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text('${list.length}',
+                      style: const TextStyle(
+                          color: _rpGold, fontWeight: FontWeight.w900, fontSize: 14)),
+                ),
+                const SizedBox(width: 6),
+                Icon(open ? Icons.expand_less : Icons.expand_more, color: Colors.white),
+              ],
+            ),
+          ),
+        ),
+        if (open && list.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 0, 6, 12),
+            child: Text(
+              tr('Aucune partie de ce jeu.', 'No games of this kind.'),
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ),
+        if (open) for (final r in list) _tile(r),
+        if (open) const SizedBox(height: 4),
+      ],
+    );
+  }
 
   @override
   void initState() {
@@ -805,7 +861,15 @@ class _MyGamesScreenState extends State<MyGamesScreen> {
                                         style: const TextStyle(color: Colors.white60, fontSize: 12),
                                       ),
                                     ),
-                                    for (final r in _rows) _tile(r),
+                                    for (final k in const [
+                                      'ludo',
+                                      'deuxdes',
+                                      'songo',
+                                      'damier',
+                                      'tiah',
+                                      'boubayah',
+                                    ])
+                                      _group(k),
                                   ],
                                 ),
                               ),
