@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'player_info.dart';
 import 'replay.dart';
 import 'tx_history_screen.dart';
 
@@ -379,7 +380,8 @@ class PlayerDetailScreen extends StatelessWidget {
                       _RiskBox(uid: stats.uid, risk: stats.risk, cleared: stats.cleared),
                     PlayerStatsView(stats: stats),
                     if (stats.uid.isNotEmpty) _txButton(context, uid: stats.uid, name: stats.name),
-                    if (stats.uid.isNotEmpty) _gamesButton(context, uid: stats.uid, name: stats.name),
+                    if (stats.uid.isNotEmpty) _gamesButton(context, uid: stats.uid, name: stats.name)
+                    if (stats.uid.isNotEmpty) PlayerInfoBox(uid: stats.uid),
                   ],
                 ),
               ),
