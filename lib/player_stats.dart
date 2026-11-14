@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
 import 'lang.dart';
+import 'replay.dart';
 import 'tx_history_screen.dart';
 
 /// Statistiques d'un joueur : solde, inscription, parties, montants.
@@ -101,6 +102,24 @@ Widget _txButton(BuildContext context, {String? uid, String? name}) => Padding(
           icon: const Icon(Icons.receipt_long),
           label: Text(
             tr('Recharges, retraits et transferts', 'Deposits, withdrawals and transfers'),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
+
+Widget _gamesButton(BuildContext context, {String? uid, String? name}) => Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        height: 50,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00695C)),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => MyGamesScreen(uid: uid, name: name)),
+          ),
+          icon: const Icon(Icons.play_circle_outline),
+          label: Text(
+            tr('Parties en ligne (revoir)', 'Online games (replay)'),
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
         ),
@@ -321,6 +340,7 @@ class MyDetailsScreen extends StatelessWidget {
                             children: [
                               PlayerStatsView(stats: stats),
                               _txButton(context),
+                              _gamesButton(context),
                             ],
                           );
                         },
@@ -359,6 +379,7 @@ class PlayerDetailScreen extends StatelessWidget {
                       _RiskBox(uid: stats.uid, risk: stats.risk, cleared: stats.cleared),
                     PlayerStatsView(stats: stats),
                     if (stats.uid.isNotEmpty) _txButton(context, uid: stats.uid, name: stats.name),
+                    if (stats.uid.isNotEmpty) _gamesButton(context, uid: stats.uid, name: stats.name),
                   ],
                 ),
               ),
