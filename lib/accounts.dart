@@ -289,6 +289,9 @@ class Wallet {
   /// [uid] : réservé à l'administrateur pour consulter un joueur.
   static Future<Map<String, dynamic>> txHistory({String? uid}) =>
       _call('txHistory', <String, dynamic>{if (uid != null) 'uid': uid});
+  /// Administrateur : fiche complète d'un joueur (parrain, filleuls, parties en cours...).
+  static Future<Map<String, dynamic>> adminPlayerInfo(String uid) =>
+      _call('adminPlayerInfo', <String, dynamic>{'uid': uid});
 
   /// Les parties en ligne d'un joueur (le mien, ou celui d'un joueur pour l'administrateur).
   static Future<Map<String, dynamic>> playerGames({String? uid}) =>
