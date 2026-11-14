@@ -76,14 +76,14 @@ class Wallet {
 
   static String format(int amount) => '$amount $currency';
 
-  static DocumentReference<Map<String, dynamic>> _ref(
+  static DocumentReference> _ref(
     FirebaseFirestore db,
     String uid,
   ) =>
       db.collection('users').doc(uid);
 
   /// Appelle une fonction du Worker avec le jeton de connexion du joueur.
-  static Future<Map<String, dynamic>> _call(
+  static Future> _call(
     String name,
     Map<String, dynamic> body, {
     User? user,
@@ -228,7 +228,7 @@ class Wallet {
 
   /// Présentiel : fin de partie avec les scores (règle aussi les paris).
   /// Renvoie { jackpot, bets }.
-  static Future<Map<String, dynamic>> settleLocalFull(
+  static Future> settleLocalFull(
     String id,
     List<String> winnerUids,
     List<int> scores, {
@@ -249,75 +249,70 @@ class Wallet {
 
   /// Tableau de bord administrateur : le serveur refuse tout compte qui
   /// n'est pas dans ADMIN_UIDS.
-  static Future<Map<String, dynamic>> adminStats({int limit = 150}) {
+  static Future> adminStats({int limit = 150}) {
     return _call('adminStats', <String, dynamic>{'limit': limit});
   }
 
   /// Administrateur : transfère les commissions de Katika vers son solde
   /// principal (possible à partir de 2500 FCFA). Renvoie { amount, balance }.
-  static Future<Map<String, dynamic>> adminHouseWithdraw() {
+  static Future> adminHouseWithdraw() {
     return _call('adminHouseWithdraw', <String, dynamic>{});
   }
 
   /// Administrateur : tous les joueurs inscrits avec leurs statistiques.
-  /// Renvoie { players: [ { uid, pseudo, balance, createdAt, played, won,
-  /// lost, staked, wonAmt, lostAmt, winRate } ], total }.
-  static Future<Map<String, dynamic>> adminPlayers({int limit = 1000}) {
+  static Future> adminPlayers({int limit = 1000}) {
     return _call('adminPlayers', <String, dynamic>{'limit': limit});
   }
 
   /// Administrateur : donne ou retire le statut de partenaire (code promo).
-  static Future<Map<String, dynamic>> adminSetPartner(String code, bool on) {
+  static Future> adminSetPartner(String code, bool on) {
     return _call('adminSetPartner', <String, dynamic>{'code': code, 'on': on});
   }
 
   /// Administrateur : liste des partenaires et de leurs gains.
-  static Future<Map<String, dynamic>> adminPartners() {
+  static Future> adminPartners() {
     return _call('adminPartners', <String, dynamic>{});
   }
 
   /// Transfère [amount] vers un autre joueur (pseudo ou code promo).
-  /// Renvoie { amount, toName, balance }.
-  static Future<Map<String, dynamic>> transfer(String to, int amount) {
+  static Future> transfer(String to, int amount) {
     return _call('transfer', <String, dynamic>{'to': to, 'amount': amount});
   }
 
   /// Administrateur : compte dans les statistiques les parties en ligne
-  /// terminées avant [before] (ISO UTC). Renvoie { counted, processed,
-  /// remaining } : à relancer tant que remaining > 0.
-  static Future<Map<String, dynamic>> adminBackfillStats(String before) {
+  /// terminées avant [before] (ISO UTC).
+  static Future> adminBackfillStats(String before) {
     return _call('adminBackfillStats', <String, dynamic>{'before': before});
   }
 
   /// Historique des transactions (recharges, retraits, transferts).
-  /// [uid] : réservé à l'administrateur pour consulter un joueur.
-  static Future<Map<String, dynamic>> txHistory({String? uid}) =>
+  static Future> txHistory({String? uid}) =>
       _call('txHistory', <String, dynamic>{if (uid != null) 'uid': uid});
 
-  /// Administrateur : fiche complète d'un joueur (parrain, filleuls, parties en cours...).
-  static Future<Map<String, dynamic>> adminPlayerInfo(String uid) =>
+  /// Administrateur : fiche complète d'un joueur.
+  static Future> adminPlayerInfo(String uid) =>
       _call('adminPlayerInfo', <String, dynamic>{'uid': uid});
 
-  /// Les parties en ligne d'un joueur (le mien, ou celui d'un joueur pour l'administrateur).
-  static Future<Map<String, dynamic>> playerGames({String? uid}) =>
+  /// Les parties en ligne d'un joueur.
+  static Future> playerGames({String? uid}) =>
       _call('playerGames', <String, dynamic>{if (uid != null) 'uid': uid});
 
   /// Tiah / Boubayah : déroulé complet d'une manche terminée.
-  static Future<Map<String, dynamic>> cardsReplay(String gameId) =>
+  static Future> cardsReplay(String gameId) =>
       _call('cardsReplay', <String, dynamic>{'gameId': gameId});
 
   /// Administrateur : annule une partie ouverte ou en cours (mises remboursées).
-  static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
+  static Future> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
 
   /// Deux dés « serveur » : act = roll | next.
-  static Future<Map<String, dynamic>> deuxDesAct(
+  static Future> deuxDesAct(
           String gameId, String act, int seat) =>
       _call('deuxDesAct',
           <String, dynamic>{'gameId': gameId, 'act': act, 'seat': seat});
 
   /// Ludo « serveur » : act = roll | move | pass | forfeit.
-  static Future<Map<String, dynamic>> ludoAct(String gameId, String act,
+  static Future> ludoAct(String gameId, String act,
           {int? pawn, int? seat, bool proxy = false}) =>
       _call('ludoAct', <String, dynamic>{
         'gameId': gameId,
@@ -327,55 +322,54 @@ class Wallet {
         if (proxy) 'proxy': true,
       });
 
-  /// Administrateur : marque un joueur comme vérifié (on) ou le remet sous surveillance (off).
-  static Future<Map<String, dynamic>> adminRiskClear(String uid, bool on) =>
+  /// Administrateur : marque un joueur comme vérifié (on) ou sous surveillance (off).
+  static Future> adminRiskClear(String uid, bool on) =>
       _call('adminRiskClear', <String, dynamic>{'uid': uid, 'on': on});
 
   /// Prévient par notification push le joueur que je viens d'inviter comme binôme.
-  static Future<Map<String, dynamic>> notifyInvite(String gameId) =>
+  static Future> notifyInvite(String gameId) =>
       _call('notifyInvite', <String, dynamic>{'gameId': gameId});
 
-  /// Administrateur : tranche une partie « à vérifier » (action : approve | refund).
-  static Future<Map<String, dynamic>> adminResolveGame(String gameId, String action) =>
+  /// Administrateur : tranche une partie « à vérifier ».
+  static Future> adminResolveGame(String gameId, String action) =>
       _call('adminResolveGame', <String, dynamic>{'gameId': gameId, 'action': action});
 
   /// Mes limites : conditions acceptées, limite de recharge, auto-exclusion.
-  static Future<Map<String, dynamic>> myLimits() => _call('myLimits', <String, dynamic>{});
+  static Future> myLimits() => _call('myLimits', <String, dynamic>{});
 
   /// J'ai 18 ans ou plus et j'accepte les conditions.
-  static Future<Map<String, dynamic>> acceptTerms() =>
+  static Future> acceptTerms() =>
       _call('acceptTerms', <String, dynamic>{'age18': true, 'terms': true});
 
-  /// Limite de recharge par 24 h (0 = aucune) et/ou auto-exclusion (en jours).
-  static Future<Map<String, dynamic>> setLimits({int? depositLimitDay, int? excludeDays}) =>
+  /// Limite de recharge par 24 h et/ou auto-exclusion.
+  static Future> setLimits({int? depositLimitDay, int? excludeDays}) =>
       _call('setLimits', <String, dynamic>{
         if (depositLimitDay != null) 'depositLimitDay': depositLimitDay,
         if (excludeDays != null) 'excludeDays': excludeDays,
       });
 
   /// Administrateur : journal des validations des caissières.
-  static Future<Map<String, dynamic>> adminCashierLog({String? uid}) =>
+  static Future> adminCashierLog({String? uid}) =>
       _call('adminCashierLog', <String, dynamic>{if (uid != null) 'uid': uid});
 
   /// Mon rôle : { admin, cashier }.
-  static Future<Map<String, dynamic>> myRole() => _call('myRole', <String, dynamic>{});
+  static Future> myRole() => _call('myRole', <String, dynamic>{});
 
-  /// Administrateur : active ou retire un compte caissière (par code promo).
-  static Future<Map<String, dynamic>> adminSetCashier(String code, bool on) =>
+  /// Administrateur : active ou retire un compte caissière.
+  static Future> adminSetCashier(String code, bool on) =>
       _call('adminSetCashier', <String, dynamic>{'code': code, 'on': on});
 
   /// Administrateur : liste des caissières.
-  static Future<Map<String, dynamic>> adminCashiers() =>
+  static Future> adminCashiers() =>
       _call('adminCashiers', <String, dynamic>{});
 
-  /// Administrateur : donne ou retire le statut d'hôtesse (par code promo).
-  static Future<Map<String, dynamic>> adminSetHostess(String code, bool on) {
+  /// Administrateur : donne ou retire le statut d'hôtesse.
+  static Future> adminSetHostess(String code, bool on) {
     return _call('adminSetHostess', <String, dynamic>{'code': code, 'on': on});
   }
 
-  /// Administrateur : les hôtesses et leurs inscrits sur la période
-  /// ([from] inclus, [to] exclu, en ISO UTC ; null = sans limite).
-  static Future<Map<String, dynamic>> adminHostesses({
+  /// Administrateur : les hôtesses et leurs inscrits sur la période.
+  static Future> adminHostesses({
     String? from,
     String? to,
   }) {
@@ -385,9 +379,8 @@ class Wallet {
     });
   }
 
-  /// Hôtesse : mes inscrits sur la période (l'administrateur peut donner le
-  /// [code] d'une hôtesse pour la consulter).
-  static Future<Map<String, dynamic>> hostessStats({
+  /// Hôtesse : mes inscrits sur la période.
+  static Future> hostessStats({
     String? from,
     String? to,
     String? code,
@@ -400,32 +393,30 @@ class Wallet {
   }
 
   /// Partenaire : mes gains, mes filleuls et mon historique.
-  static Future<Map<String, dynamic>> partnerStats() {
+  static Future> partnerStats() {
     return _call('partnerStats', <String, dynamic>{});
   }
 
   /// Partenaire : transfère mes gains vers mon solde principal.
-  static Future<Map<String, dynamic>> partnerWithdraw() {
+  static Future> partnerWithdraw() {
     return _call('partnerWithdraw', <String, dynamic>{});
   }
 
-  /// Code promo : mon code (= pseudo), mon parrain, mes filleuls et mes gains.
-  static Future<Map<String, dynamic>> referralInfo({String? pseudo}) {
+  /// Code promo : mon code, mon parrain, mes filleuls et mes gains.
+  static Future> referralInfo({String? pseudo}) {
     return _call('referralInfo', <String, dynamic>{
       'pseudo':
           pseudo ?? FirebaseAuth.instance.currentUser?.displayName ?? '',
     });
   }
 
-  /// Saisit le code promo (pseudo) de mon parrain. Possible une seule fois.
-  static Future<Map<String, dynamic>> applyPromo(String code) {
+  /// Saisit le code promo de mon parrain.
+  static Future> applyPromo(String code) {
     return _call('applyPromo', <String, dynamic>{'code': code});
   }
 
-  /// Code promo : transfère les gains de parrainage vers le solde principal
-  /// (possible à partir de 100 FCFA). Renvoie { amount, balance }.
-  /// Le solde affiché se met à jour tout seul (voir [watch]).
-  static Future<Map<String, dynamic>> referralWithdraw() {
+  /// Code promo : transfère les gains de parrainage vers le solde principal.
+  static Future> referralWithdraw() {
     return _call('referralWithdraw', <String, dynamic>{});
   }
 
@@ -433,10 +424,8 @@ class Wallet {
   static const int minCapture = 100;
   static const List<int> captureAmounts = [100, 200, 500, 1000, 2000];
 
-  /// Capture payante (partie en ligne) : le serveur prend le montant de la
-  /// capture sur le solde du joueur capturé et le verse au joueur qui capture.
-  /// [eventId] évite de payer deux fois la même capture. Renvoie { amount }.
-  static Future<Map<String, dynamic>> captureFee({
+  /// Capture payante (partie en ligne).
+  static Future> captureFee({
     required String gameId,
     required String capturerUid,
     required String victimUid,
@@ -450,10 +439,8 @@ class Wallet {
     });
   }
 
-  /// Dépôt Mobile Money (Campay) : le joueur reçoit une demande de paiement
-  /// sur son téléphone. [phone] = numéro MTN ou Orange (ex : 670000000).
-  /// Renvoie { depositId, reference }.
-  static Future<Map<String, dynamic>> campayDeposit({
+  /// Dépôt Mobile Money (Campay).
+  static Future> campayDeposit({
     required int amount,
     required String phone,
   }) {
@@ -463,15 +450,13 @@ class Wallet {
     });
   }
 
-  /// Paiement AUTOMATIQUE SebPay (Orange Money / MTN MoMo).
-  /// Renvoie { enabled, operators: [{id,label}], depositMin, depositMax, withdrawMin, withdrawMax }.
-  static Future<Map<String, dynamic>> sebpayInfo() {
+  /// Paiement AUTOMATIQUE SebPay.
+  static Future> sebpayInfo() {
     return _call('sebpayInfo', <String, dynamic>{});
   }
 
-  /// Recharge automatique : le joueur valide sur son téléphone.
-  /// [operator] = 'orange' ou 'mtn'. Renvoie { id, status, providerLink }.
-  static Future<Map<String, dynamic>> sebpayDeposit({
+  /// Recharge automatique.
+  static Future> sebpayDeposit({
     required int amount,
     required String phone,
     required String operator,
@@ -483,13 +468,13 @@ class Wallet {
     });
   }
 
-  /// État d'une recharge automatique (crédite le solde si SebPay a confirmé).
-  static Future<Map<String, dynamic>> sebpayDepositStatus(String id) {
+  /// État d'une recharge automatique.
+  static Future> sebpayDepositStatus(String id) {
     return _call('sebpayDepositStatus', <String, dynamic>{'id': id});
   }
 
-  /// Retrait automatique : le solde est débité, SebPay envoie l'argent.
-  static Future<Map<String, dynamic>> sebpayWithdraw({
+  /// Retrait automatique.
+  static Future> sebpayWithdraw({
     required int amount,
     required String phone,
     required String operator,
@@ -501,28 +486,28 @@ class Wallet {
     });
   }
 
-  /// Mes recharges et retraits automatiques : { deposits, withdrawals, balance }.
-  static Future<Map<String, dynamic>> sebpayMine() {
+  /// Mes recharges et retraits automatiques.
+  static Future> sebpayMine() {
     return _call('sebpayMine', <String, dynamic>{});
   }
 
   // ---------------------------------------------------------------- Tournois
-  static Future<Map<String, dynamic>> tournamentList() =>
+  static Future> tournamentList() =>
       _call('tournamentList', <String, dynamic>{});
 
-  static Future<Map<String, dynamic>> tournamentRegister(String tid) =>
+  static Future> tournamentRegister(String tid) =>
       _call('tournamentRegister', <String, dynamic>{'tid': tid});
 
-  static Future<Map<String, dynamic>> tournamentTeamCreate(String tid, String teamName) =>
+  static Future> tournamentTeamCreate(String tid, String teamName) =>
       _call('tournamentTeamCreate', <String, dynamic>{'tid': tid, 'teamName': teamName});
 
-  static Future<Map<String, dynamic>> tournamentTeamJoin(String code) =>
+  static Future> tournamentTeamJoin(String code) =>
       _call('tournamentTeamJoin', <String, dynamic>{'code': code});
 
-  static Future<Map<String, dynamic>> tournamentLeave(String tid) =>
+  static Future> tournamentLeave(String tid) =>
       _call('tournamentLeave', <String, dynamic>{'tid': tid});
 
-  static Future<Map<String, dynamic>> adminTournamentCreate({
+  static Future> adminTournamentCreate({
     required String type,
     required int startAt,
     required int regDeadline,
@@ -536,22 +521,22 @@ class Wallet {
       });
 
   // ---- Paris par derrière : Sports (P2P)
-  static Future<Map<String, dynamic>> sportsList() => _call('sportsList', <String, dynamic>{});
+  static Future> sportsList() => _call('sportsList', <String, dynamic>{});
 
-  static Future<Map<String, dynamic>> sportBetCreate({
+  static Future> sportBetCreate({
     required String eventId,
     required String side,
     required int amount,
   }) =>
       _call('sportBetCreate', <String, dynamic>{'eventId': eventId, 'side': side, 'amount': amount});
 
-  static Future<Map<String, dynamic>> sportBetAccept(String betId) =>
+  static Future> sportBetAccept(String betId) =>
       _call('sportBetAccept', <String, dynamic>{'betId': betId});
 
-  static Future<Map<String, dynamic>> sportBetCancel(String betId) =>
+  static Future> sportBetCancel(String betId) =>
       _call('sportBetCancel', <String, dynamic>{'betId': betId});
 
-  static Future<Map<String, dynamic>> adminSportEventSave({
+  static Future> adminSportEventSave({
     required String category,
     required String subcategory,
     required String teamA,
@@ -566,16 +551,16 @@ class Wallet {
         'startsAt': startsAt,
       });
 
-  static Future<Map<String, dynamic>> adminSportEventCancel(String id) =>
+  static Future> adminSportEventCancel(String id) =>
       _call('adminSportEventCancel', <String, dynamic>{'id': id});
 
-  static Future<Map<String, dynamic>> adminSportEventResult(String id, String result) =>
+  static Future> adminSportEventResult(String id, String result) =>
       _call('adminSportEventResult', <String, dynamic>{'id': id, 'result': result});
 
-  // ---- Paris par derrière : Courses (pari mutuel)
-  static Future<Map<String, dynamic>> racesList() => _call('racesList', <String, dynamic>{});
+  // ---- Paris par derrière : Courses
+  static Future> racesList() => _call('racesList', <String, dynamic>{});
 
-  static Future<Map<String, dynamic>> raceBetCreate({
+  static Future> raceBetCreate({
     required String raceId,
     required String formula,
     required List<int> picks,
@@ -583,59 +568,59 @@ class Wallet {
   }) =>
       _call('raceBetCreate', <String, dynamic>{'raceId': raceId, 'formula': formula, 'picks': picks, 'coef': coef});
 
-  static Future<Map<String, dynamic>> adminRaceSave({
+  static Future> adminRaceSave({
     required String name,
     required int runners,
     required int startsAt,
   }) =>
       _call('adminRaceSave', <String, dynamic>{'name': name, 'runners': runners, 'startsAt': startsAt});
 
-  static Future<Map<String, dynamic>> adminRaceCancel(String id) =>
+  static Future> adminRaceCancel(String id) =>
       _call('adminRaceCancel', <String, dynamic>{'id': id});
 
-  static Future<Map<String, dynamic>> adminRaceResult(String id, List<int> arrival) =>
+  static Future> adminRaceResult(String id, List<int> arrival) =>
       _call('adminRaceResult', <String, dynamic>{'id': id, 'arrival': arrival});
 
-  static Future<Map<String, dynamic>> adminTournamentCancel(String tid) =>
+  static Future> adminTournamentCancel(String tid) =>
       _call('adminTournamentCancel', <String, dynamic>{'tid': tid});
 
-  static Future<Map<String, dynamic>> adminTournamentEntries(String tid) =>
+  static Future> adminTournamentEntries(String tid) =>
       _call('adminTournamentEntries', <String, dynamic>{'tid': tid});
 
-  // -------------------------------------------------- Damier « Deux buts sort »
-  static Future<Map<String, dynamic>> dbList([String? rid]) =>
+  // -------------------------------------------------- Damier
+  static Future> dbList([String? rid]) =>
       _call('dbList', <String, dynamic>{if (rid != null) 'rid': rid});
 
-  static Future<Map<String, dynamic>> dbCreate({required int stake, required int timeMin}) =>
+  static Future> dbCreate({required int stake, required int timeMin}) =>
       _call('dbCreate', <String, dynamic>{'stake': stake, 'timeMin': timeMin});
 
-  static Future<Map<String, dynamic>> dbJoin(String rid) =>
+  static Future> dbJoin(String rid) =>
       _call('dbJoin', <String, dynamic>{'rid': rid});
 
-  static Future<Map<String, dynamic>> dbLeave(String rid) =>
+  static Future> dbLeave(String rid) =>
       _call('dbLeave', <String, dynamic>{'rid': rid});
 
-  static Future<Map<String, dynamic>> dbClose(String rid) =>
+  static Future> dbClose(String rid) =>
       _call('dbClose', <String, dynamic>{'rid': rid});
 
   // ------------------------------------------------------------ Pile ou Face
-  static Future<Map<String, dynamic>> pfList() =>
+  static Future> pfList() =>
       _call('pfList', <String, dynamic>{});
 
-  static Future<Map<String, dynamic>> pfCreate({required int stake, required String side}) =>
+  static Future> pfCreate({required int stake, required String side}) =>
       _call('pfCreate', <String, dynamic>{'stake': stake, 'side': side});
 
-  static Future<Map<String, dynamic>> pfJoin(String gameId) =>
+  static Future> pfJoin(String gameId) =>
       _call('pfJoin', <String, dynamic>{'gameId': gameId});
 
-  static Future<Map<String, dynamic>> pfCancel(String gameId) =>
+  static Future> pfCancel(String gameId) =>
       _call('pfCancel', <String, dynamic>{'gameId': gameId});
 
   // ------------------------------------------------------------ Cartes en ligne
-  static Future<Map<String, dynamic>> cardsList(String game) =>
+  static Future> cardsList(String game) =>
       _call('cardsList', <String, dynamic>{'game': game});
 
-  static Future<Map<String, dynamic>> cardsCreate({
+  static Future> cardsCreate({
     required String game,
     required int stake,
     required int maxPlayers,
@@ -648,27 +633,25 @@ class Wallet {
         'isPublic': isPublic,
       });
 
-  static Future<Map<String, dynamic>> cardsJoin({String? gameId, String? code}) =>
+  static Future> cardsJoin({String? gameId, String? code}) =>
       _call('cardsJoin', <String, dynamic>{
         if (gameId != null) 'gameId': gameId,
         if (code != null) 'code': code,
       });
 
-  static Future<Map<String, dynamic>> cardsGet(String gameId) =>
+  static Future> cardsGet(String gameId) =>
       _call('cardsGet', <String, dynamic>{'gameId': gameId});
 
-  static Future<Map<String, dynamic>> cardsStart(String gameId) =>
+  static Future> cardsStart(String gameId) =>
       _call('cardsStart', <String, dynamic>{'gameId': gameId});
 
-  /// Fap-Fap : jouer une carte (0..43 : valeur * 4 + famille).
-  static Future<Map<String, dynamic>> cardsPlay(String gameId, int card) =>
+  static Future> cardsPlay(String gameId, int card) =>
       _call('cardsPlay', <String, dynamic>{'gameId': gameId, 'card': card});
 
-  static Future<Map<String, dynamic>> cardsOpen(String gameId) =>
+  static Future> cardsOpen(String gameId) =>
       _call('cardsOpen', <String, dynamic>{'gameId': gameId});
 
-  /// Paris aux cartes : 'duel' (TIAH, BOUBAYAH) ou 'fetiche' (BOUBAYAH, plus ou moins que 13).
-  static Future<Map<String, dynamic>> cardsBetPropose({
+  static Future> cardsBetPropose({
     required String gameId,
     required String type,
     required int amount,
@@ -683,26 +666,22 @@ class Wallet {
         'side': over ? 'over' : 'under',
       });
 
-  static Future<Map<String, dynamic>> cardsBetAccept(String gameId, String betId) =>
+  static Future> cardsBetAccept(String gameId, String betId) =>
       _call('cardsBetAccept', <String, dynamic>{'gameId': gameId, 'betId': betId});
 
-  static Future<Map<String, dynamic>> cardsBetCancel(String gameId, String betId) =>
+  static Future> cardsBetCancel(String gameId, String betId) =>
       _call('cardsBetCancel', <String, dynamic>{'gameId': gameId, 'betId': betId});
 
-  static Future<Map<String, dynamic>> cardsLeave(String gameId) =>
+  static Future> cardsLeave(String gameId) =>
       _call('cardsLeave', <String, dynamic>{'gameId': gameId});
 
-  static Future<Map<String, dynamic>> cardsRematch(String gameId) =>
+  static Future> cardsRematch(String gameId) =>
       _call('cardsRematch', <String, dynamic>{'gameId': gameId});
 
-  /// Recharge / retrait manuels par code marchand Orange Money.
-  /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
-  static Future<Map<String, dynamic>> manualInfo() {
+  static Future> manualInfo() {
     return _call('manualInfo', <String, dynamic>{});
   }
 
-  /// Le joueur a payé au code marchand : demande de recharge en attente de
-  /// confirmation. [txRef] = identifiant de transaction reçu par SMS.
   static Future<void> manualDeposit({
     required int amount,
     required String phone,
@@ -717,8 +696,6 @@ class Wallet {
     });
   }
 
-  /// Demande de retrait : le montant est retiré du solde, l'administrateur
-  /// envoie l'argent puis confirme.
   static Future<void> manualWithdraw({
     required int amount,
     required String phone,
@@ -729,19 +706,14 @@ class Wallet {
     });
   }
 
-  /// Mes demandes : { deposits: [...], withdrawals: [...] }.
-  static Future<Map<String, dynamic>> manualMine() {
+  static Future> manualMine() {
     return _call('manualMine', <String, dynamic>{});
   }
 
-  /// Administrateur : demandes en attente et dernières traitées.
-  static Future<Map<String, dynamic>> adminManualList() {
+  static Future> adminManualList() {
     return _call('adminManualList', <String, dynamic>{});
   }
 
-  /// Administrateur : confirme ou refuse une demande.
-  /// [kind] = 'deposit' ou 'withdrawal', [approve] = confirmer ou refuser.
-  /// Administrateur : remet tous les soldes à zéro (irréversible).
   static Future<int> adminResetBalances() async {
     final r = await _call('adminResetBalances', <String, dynamic>{
       'confirm': 'ZERO',
@@ -761,16 +733,12 @@ class Wallet {
     });
   }
 
-  /// Où en est un dépôt : 'pending', 'credited', 'failed' ou 'mismatch'.
-  /// Renvoie { status, balance }.
-  static Future<Map<String, dynamic>> campayDepositStatus(String depositId) {
+  static Future> campayDepositStatus(String depositId) {
     return _call('campayDepositStatus', <String, dynamic>{
       'depositId': depositId,
     });
   }
 
-  /// Présentiel : crée un pari entre deux joueurs (les deux mises sont
-  /// débitées tout de suite). Les jetons prouvent les deux comptes.
   static Future<void> localBet({
     required String id,
     required String type,
@@ -789,7 +757,6 @@ class Wallet {
     });
   }
 
-  /// Montant actuel du jackpot (le seuil de déclenchement reste secret).
   static Stream<int> watchJackpot() {
     return FirebaseFirestore.instance
         .collection('app')
@@ -801,8 +768,6 @@ class Wallet {
     });
   }
 
-  /// Connexion d'un joueur "invité" sur le même téléphone, SANS déconnecter
-  /// le joueur principal : on utilise une 2e instance Firebase.
   static Future<PlayerAccount> signInGuest(String email, String password) async {
     FirebaseApp app;
     try {
@@ -826,9 +791,7 @@ class Wallet {
         user,
         app: app,
       );
-    } catch (_) {
-      // Solde illisible : on laisse quand même jouer, solde affiché à 0.
-    }
+    } catch (_) {}
     String? token;
     try {
       token = await user.getIdToken();
@@ -843,13 +806,11 @@ class Wallet {
       balance: balance,
       idToken: token,
     );
-    await auth.signOut(); // la session invité n'est pas gardée
+    await auth.signOut();
     return account;
   }
 }
 
-/// Bandeau « Jackpot » affiché dans le salon et avant la partie.
-/// Jackpot désactivé : les bandeaux ne s'affichent plus.
 const bool kJackpotEnabled = false;
 
 class JackpotBanner extends StatelessWidget {
@@ -890,12 +851,9 @@ class JackpotBanner extends StatelessWidget {
   }
 }
 
-/// Bandeau « Jackpot » compact, affiché pendant la partie.
-/// Le montant est mis à jour en direct et défile quand il change.
 class JackpotStrip extends StatefulWidget {
   const JackpotStrip({super.key, this.stake = 1});
 
-  /// Mise de la partie (0 = partie gratuite : pas de jackpot à gagner).
   final int stake;
 
   @override
@@ -903,8 +861,6 @@ class JackpotStrip extends StatefulWidget {
 }
 
 class _JackpotStripState extends State<JackpotStrip> {
-  // Le flux n'est créé qu'une fois : sinon il serait relancé (et le montant
-  // retomberait à 0) à chaque coup joué.
   late final Stream<int> _stream = Wallet.watchJackpot();
   int _last = 0;
 
@@ -971,7 +927,6 @@ String _authError(String code) {
   }
 }
 
-/// Fenêtre de connexion d'un joueur. Renvoie son compte, ou null si annulé.
 Future<PlayerAccount?> showPlayerLogin(
   BuildContext context, {
   required String colorName,
