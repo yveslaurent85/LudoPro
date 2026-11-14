@@ -290,6 +290,14 @@ class Wallet {
   static Future<Map<String, dynamic>> txHistory({String? uid}) =>
       _call('txHistory', <String, dynamic>{if (uid != null) 'uid': uid});
 
+  /// Les parties en ligne d'un joueur (le mien, ou celui d'un joueur pour l'administrateur).
+  static Future<Map<String, dynamic>> playerGames({String? uid}) =>
+      _call('playerGames', <String, dynamic>{if (uid != null) 'uid': uid});
+
+  /// Tiah / Boubayah : déroulé complet d'une manche terminée.
+  static Future<Map<String, dynamic>> cardsReplay(String gameId) =>
+      _call('cardsReplay', <String, dynamic>{'gameId': gameId});
+
   /// Administrateur : annule une partie ouverte ou en cours (mises remboursées).
   static Future<Map<String, dynamic>> adminCancelGame(String gameId) =>
       _call('adminCancelGame', <String, dynamic>{'gameId': gameId});
