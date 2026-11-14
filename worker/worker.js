@@ -7379,8 +7379,89 @@ async function cardsReplay({ uid, data, env }) {
     refunded: g.refunded === true,
   };
 }
+/** Administrateur : fiche complète d'un joueur. data : { uid } */
+async function adminPlayerInfo({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const target = typeof data.uid === 'string' ? data.uid : '';
+  if (!target) throw new HttpError('invalid-argument', 'Joueur invalide.');
+  const u = await readDoc(env, `users/${target}`);
+  if (!u) throw new HttpError('not-found', 'Joueur introuvable.');
+  const nameOf = (x) => (x && typeof x.pseudo === 'string' && x.pseudo ? x.pseudo : '');
+
+  let referrer = null;
+  if (typeof u.referrerUid === 'string' && u.referrerUid) {
+    const r = await readDoc(env, `users/${u.referrerUid}`);
+    referrer = {
+      uid: u.referrerUid,
+      pseudo: nameOf(r),
+      code: typeof u.referrerCode === 'string' ? u.referrerCode : '',
+    };
+  }
+
+  const kids = await queryDocs(env, 'users', eqFilter('referrerUid', target), 300);
+  const referrals = kids
+    .map((k) => ({
+      uid: k.id,
+      pseudo: nameOf(k),
+      createdAt: typeof k.createdAt === 'string' ? k.createdAt : null,
+      played: intOr(k.statPlayed, 0),
+      wagered: intOr(k.wagered, 0),
+      balance: balanceOf(k),
+    }))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+  const live = [];
+  await Promise.all(
+    REPLAY_COLS.map(async ([col, kind]) => {
+      let docs = [];
+      try {
+        docs = await queryDocs(env, col, arrayContainsFilter('uids', target), 30);
+      } catch (_) {
+        return;
+      }
+      for (const d of docs) {
+        if (d.over === true || (d.status !== 'playing' && d.status !== 'waiting')) continue;
+        live.push({
+          id: d.id,
+          kind: col === 'cards' ? (d.game === 'boubayah' ? 'boubayah' : 'tiah') : kind,
+          status: d.status,
+          t: docTimeMs(d),
+          names: playersOf(d).map((p) => p.name || 'Joueur'),
+          stake: col === 'damier' ? stakeFor(d, target) : Math.max(0, intOr(d.stake, 0)),
+        });
+      }
+    }),
+  );
+  live.sort((a, b) => b.t - a.t);
+
+  let phone = '';
+  try {
+    const dep = await queryDocs(env, 'deposits', eqFilter('uid', target), 5);
+    const withPhone = dep.find((x) => typeof x.phone === 'string' && x.phone);
+    if (withPhone) phone = withPhone.phone;
+  } catch (_) {}
+
+  return {
+    uid: target,
+    pseudo: nameOf(u),
+    promoCode: typeof u.promoCode === 'string' ? u.promoCode : '',
+    referrer,
+    referrals,
+    referralEarned: intOr(u.referralEarned, 0),
+    referralBalance: intOr(u.referralBalance, 0),
+    referralWithdrawn: intOr(u.referralWithdrawn, 0),
+    partner: u.partner === true,
+    partnerEarned: intOr(u.partnerEarned, 0),
+    partnerBalance: intOr(u.partnerBalance, 0),
+    hostess: u.hostess === true,
+    wagered: intOr(u.wagered, 0),
+    phone,
+    live,
+  };
+}
 
 const HANDLERS = {
+  adminPlayerInfo,
   playerGames,
   cardsReplay,
   deuxDesAct,
