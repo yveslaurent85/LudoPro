@@ -199,6 +199,7 @@ class Wallet {
     List<String> names = const [],
     String game = 'unknown',
     int capturePay = 0,
+    bool team = false,
   }) async {
     final res = await _call(
       'startLocalGame',
@@ -208,6 +209,7 @@ class Wallet {
         'names': names,
         'game': game,
         'capturePay': capturePay,
+        'team': team,
       },
     );
     return res['id'] as String;
@@ -289,6 +291,7 @@ class Wallet {
   /// [uid] : réservé à l'administrateur pour consulter un joueur.
   static Future<Map<String, dynamic>> txHistory({String? uid}) =>
       _call('txHistory', <String, dynamic>{if (uid != null) 'uid': uid});
+
   /// Administrateur : fiche complète d'un joueur (parrain, filleuls, parties en cours...).
   static Future<Map<String, dynamic>> adminPlayerInfo(String uid) =>
       _call('adminPlayerInfo', <String, dynamic>{'uid': uid});
