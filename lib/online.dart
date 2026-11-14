@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'replay_core.dart';
 import 'game_chat.dart';
 import 'lang.dart';
 import 'share_menu.dart';
@@ -56,7 +57,11 @@ class OnlineSession {
     required this.names,
     this.uids = const [],
     this.spectator = false,
+    this.replay,
   });
+
+  /// Revue d'une partie : les états viennent de ce contrôleur (lecture seule).
+  final ReplayController? replay;
 
   /// uid des joueurs, dans l'ordre des places (détection des déconnexions).
   final List<String> uids;
@@ -1121,8 +1126,10 @@ class OnlineGameRoom extends StatelessWidget {
     required this.gameId,
     this.spectate = false,
     this.adminView = false,
+    this.replay,
   });
 
+  final ReplayController? replay;
   final String gameId;
 
   /// Vrai : on regarde la partie sans y participer.
@@ -1599,7 +1606,9 @@ class OnlineGameRoom extends StatelessWidget {
         if (d == null) return _info(context, "Cette partie n'existe plus.");
 
         final players = _playersOf(d);
-        final seat = players.indexWhere((p) => p['uid'] == user.uid);
+        final seat = replay != null
+            ? -1
+            : players.indexWhere((p) => p['uid'] == user.uid);
 
         if (spectate && seat < 0) {
           final okStatus = d['status'] == 'playing' ||
@@ -1623,6 +1632,7 @@ class OnlineGameRoom extends StatelessWidget {
               uid: user.uid,
               mySeat: -1,
               spectator: true,
+              replay: replay,
               names: [for (final p in players) '${p['name']}'],
               uids: [for (final p in players) '${p['uid']}'],
             ),
