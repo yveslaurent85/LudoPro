@@ -60,6 +60,7 @@ class _Card {
   final int suit;
 
   String get label => v == 11 ? 'A' : '$v';
+  int get code => v * 4 + suit; // même codage que le serveur
   String get symbol => const ['♠', '♥', '♦', '♣'][suit];
   bool get red => suit == 1 || suit == 2;
 }
@@ -718,6 +719,10 @@ class CartesPage extends StatelessWidget {
                         Icons.filter_5, const Color(0xFF7B1FA2),
                         () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'boubayah')), badge: tr('NOUVEAU', 'NEW')),
                     const SizedBox(height: 14),
+                    _card('FAP-FAP', tr('En ligne uniquement · plis et Corat · 2 à 4 joueurs', 'Online only · tricks and Corat · 2-4 players'),
+                        Icons.style, const Color(0xFFEF6C00),
+                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'fapfap')), badge: tr('NOUVEAU', 'NEW')),
+                    const SizedBox(height: 14),
                     _card('TCHEK GAMES', tr('En ligne uniquement · bientôt disponible', 'Online only · coming soon'),
                         Icons.location_on, const Color(0xFF0277BD),
                         () => _go(context, const _TchekPage())),
@@ -793,7 +798,7 @@ class _CardModePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tiah = game == 'tiah';
-    final title = tiah ? 'TIAH' : 'BOUBAYAH';
+    final title = _gameTitle(game);
     Widget tile(IconData i, String t, String s, Color c, VoidCallback? f) => Padding(
           padding: const EdgeInsets.only(bottom: 14),
           child: GestureDetector(
@@ -919,7 +924,7 @@ class _Table {
 
   /// Verse la cagnotte. Égalité générale / à 2 : remboursement sans commission
   /// (géré par le serveur). Renvoie le jackpot éventuel.
-  Future<int> settle(List<int> winSeats, {List<int>? scores, List<int>? fscores}) async {
+  Future<int> settle(List<int> winSeats, {List<int>? scores, List<int>? fscores, bool corat = false}) async {
     final id = localId;
     if (id == null || settled || !staked) return 0;
     settled = true;
@@ -929,6 +934,7 @@ class _Table {
         [for (final s in winSeats) accounts[s]!.uid],
         scores ?? [for (var i = 0; i < n; i++) winSeats.contains(i) ? 1 : 0],
         fscores: fscores,
+        corat: corat,
       );
       return (res['jackpot'] as num?)?.toInt() ?? 0;
     } catch (_) {
@@ -1212,7 +1218,7 @@ class _CardsSetupState extends State<_CardsSetup> {
     if (!_paid) return null;
     for (var s = 0; s < _n; s++) {
       final a = _acc[s];
-      if (a != null && a.balance < _stake) return a.name;
+      if (a != null && a.balance < _stake * (widget.game == 'fapfap' ? 2 : 1)) return a.name;
     }
     return null;
   }
@@ -1342,7 +1348,7 @@ class _CardsSetupState extends State<_CardsSetup> {
         Wrap(
           spacing: 8,
           children: [
-            for (var k = 2; k <= 6; k++)
+            for (var k = 2; k <= (widget.game == 'fapfap' ? 4 : 6); k++)
               ChoiceChip(
                 label: Text('$k'),
                 selected: _n == k,
@@ -1379,6 +1385,15 @@ class _CardsSetupState extends State<_CardsSetup> {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(tr('Solde insuffisant : $broke', 'Insufficient balance: $broke'),
                 style: const TextStyle(color: Color(0xFFFF8A80), fontWeight: FontWeight.w700)),
+          ),
+        if (_paid && widget.game == 'fapfap')
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              tr('Chaque joueur bloque ${_fcfa(_stake * 2)} (2 × la mise). Victoire normale : chacun récupère sa mise et le vainqueur gagne les mises adverses. Corat : gain doublé, les perdants ne récupèrent rien.',
+                  'Each player locks ${_fcfa(_stake * 2)} (2 × stake). Normal win: everyone gets one stake back and the winner takes the others. Corat: double win, losers get nothing back.'),
+              style: const TextStyle(color: Color(0xFFFFE082), fontSize: 12, fontWeight: FontWeight.w700),
+            ),
           ),
         if (_paid)
           Padding(
@@ -2440,7 +2455,7 @@ List<_Card> _cardsOf(dynamic l) =>
 
 String? _firstOf(Iterable<String> i) => i.isEmpty ? null : i.first;
 
-String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : 'BOUBAYAH';
+String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : (g == 'fapfap' ? 'FAP-FAP' : 'BOUBAYAH');
 
 class CardsOnlineHub extends StatefulWidget {
   const CardsOnlineHub({super.key, required this.game});
@@ -2494,7 +2509,8 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
 
   Future<void> _enter(String id) async {
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CardsOnlineRoom(gameId: id)));
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id) : CardsOnlineRoom(gameId: id)));
     if (mounted) _load();
   }
 
@@ -2654,6 +2670,15 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
               Text(tr('Mise de chaque joueur (0 = gratuit)', "Each player's stake (0 = free)"),
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
               StakeField(stake: _stake, players: _max, onChanged: (v) => setState(() => _stake = v)),
+              if (widget.game == 'fapfap' && _stake > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    tr('Chaque joueur doit avoir ${_fcfa(_stake * 2)} (2 × la mise) : bloqués pendant la manche, rendus selon le résultat.',
+                        'Each player needs ${_fcfa(_stake * 2)} (2 × stake): locked during the round, returned according to the result.'),
+                    style: const TextStyle(color: _goldSoft, fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
@@ -2665,7 +2690,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
               Text(tr('Nombre de joueurs maximum', 'Maximum players'),
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
               Wrap(spacing: 8, children: [
-                for (var k = 2; k <= 6; k++)
+                for (var k = 2; k <= (widget.game == 'fapfap' ? 4 : 6); k++)
                   ChoiceChip(
                     label: Text('$k'),
                     selected: _max == k,
@@ -2766,8 +2791,22 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     ..['turnUid'] = ''
     ..['turnLeftMs'] = 0;
 
+  bool _redirected = false;
+
   void _set(Map<String, dynamic> v) {
     if (!mounted) return;
+    if (v['game'] == 'fapfap') {
+      if (!_redirected) {
+        _redirected = true;
+        _timer?.cancel();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Navigator.of(context).pushReplacement(
+              MaterialPageRoute<void>(builder: (_) => FapFapOnlineRoom(gameId: widget.gameId)));
+        });
+      }
+      return;
+    }
     _fullV = v;
     if (v['over'] == true) {
       final oid = '${v['id']}';
@@ -3250,323 +3289,3 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         border: Border.all(
             color: win ? const Color(0xFF7CFFB0) : (isTurn ? _gold : Colors.white24), width: isTurn || win ? 2 : 1.2),
       ),
-      child: Column(children: [
-        Row(children: [
-          CircleAvatar(radius: 12, backgroundColor: _seatColors[idx % 6]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text('${p['name']}${mine ? ' (${tr('toi', 'you')})' : ''}${dealer ? '  🃏' : ''}',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-          ),
-          if (total != null)
-            Text('$total',
-                style: TextStyle(color: special ? _gold : Colors.white, fontSize: 24, fontWeight: FontWeight.w900)),
-        ]),
-        const SizedBox(height: 8),
-        if (tiah) _tiahCards(p, opened || over) else _boubaCards(p, opened || over),
-        if (special)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(tiah ? (toucx ? 'TOUCX !' : 'TIAH !') : 'FOMEKOU !',
-                style: const TextStyle(color: _gold, fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 18)),
-          ),
-        if (tiah && total != null && total > 21 && !toucx)
-          Text(tr('dépasse 21', 'over 21'), style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12)),
-      ]),
-    );
-  }
-
-  /// Cartes du milieu, classées dans l'ordre : elles partent toutes seules vers le joueur qui ouvre.
-  Widget _middlePile(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool myTurn) {
-    final cards = [for (final x in (v['pileCards'] as List? ?? [])) _decode((x as num).toInt())];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(
-          tr('10 cartes ouvertes au milieu, dans l\'ordre (${cards.length})', '10 open cards in the middle, in order (${cards.length})'),
-          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          tr('Dès qu\'un joueur ouvre ses cartes, celles qui lui conviennent (sans dépasser 21) partent vers lui, une par une.',
-              'As soon as a player opens, the cards that fit (without going over 21) go to him, one by one.'),
-          style: const TextStyle(color: Colors.white54, fontSize: 11),
-        ),
-        const SizedBox(height: 8),
-        _MiddleStrip(cards: cards, w: 36),
-      ]),
-    );
-  }
-
-  // ---------------------------------------------------------------- paris
-
-  Widget _betsPanel(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool tiah) {
-    final bets = [for (final b in (v['bets'] as List? ?? [])) Map<String, dynamic>.from(b as Map)];
-    final over = v['over'] == true;
-    final stake = (v['stake'] as num?)?.toInt() ?? 0;
-    if (stake <= 0 && bets.isEmpty) return const SizedBox.shrink();
-    final myP = players.where((p) => p['uid'] == _me).toList();
-    final iOpened = myP.isNotEmpty && myP.first['opened'] == true;
-    String nameOf(String u) => _firstOf(players.where((p) => p['uid'] == u).map((p) => '${p['name']}')) ?? '?';
-    String label(Map<String, dynamic> b) {
-      final amt = _fcfa((b['amount'] as num).toInt());
-      final who = '${b['proposerName']}';
-      if (b['type'] == 'fetiche') {
-        final side = b['side'] == 'under' ? tr('moins', 'under') : tr('plus', 'over');
-        return '$who : $side ${tr('de', 'than')} 13 · $amt';
-      }
-      final tgt = '${b['targetName']}'.isEmpty ? tr('tous ses adversaires', 'all rivals') : '${b['targetName']}';
-      return '$who ⚔ $tgt · $amt';
-    }
-
-    String status(Map<String, dynamic> b) {
-      switch ('${b['status']}') {
-        case 'open':
-          return tr('en attente', 'waiting');
-        case 'accepted':
-          return '${tr('accepté par', 'accepted by')} ${b['opponentName']}';
-        case 'cancelled':
-          return tr('annulé', 'cancelled');
-        case 'declined':
-          return tr('refusé', 'declined');
-        case 'expired':
-          return tr('expiré · remboursé', 'expired · refunded');
-        case 'settled':
-          final w = '${b['winnerUid']}';
-          if (b['result'] == 'refund' || w.isEmpty) return tr('égalité · remboursé', 'tie · refunded');
-          return '${tr('gagné par', 'won by')} ${nameOf(w)}';
-        default:
-          return '${b['status']}';
-      }
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.casino, color: _goldSoft, size: 18),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(tr('Paris entre joueurs', 'Bets between players'),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-          ),
-          if (!over && stake > 0 && !iOpened)
-            TextButton(
-              onPressed: _busy ? null : () => _newBet(v, players, tiah),
-              child: Text(tr('+ Parier', '+ Bet'), style: const TextStyle(color: _gold, fontWeight: FontWeight.w900)),
-            ),
-        ]),
-        if (bets.isEmpty)
-          Text(
-            iOpened
-                ? tr('Tu as ouvert tes cartes : plus de nouveau pari pour toi.', 'You opened your cards: no new bets for you.')
-                : tr('Défie un adversaire avant qu\'il ouvre ses cartes.', 'Challenge a rival before he opens his cards.'),
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
-          ),
-        for (final b in bets)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(label(b), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-                  Text(status(b), style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                ]),
-              ),
-              if ('${b['status']}' == 'open' && !over) ...[
-                if (b['proposerUid'] == _me)
-                  TextButton(
-                    onPressed: _busy ? null : () => _do(() => Wallet.cardsBetCancel(widget.gameId, '${b['id']}')),
-                    child: Text(tr('Annuler', 'Cancel')),
-                  )
-                else if (!iOpened && ('${b['targetUid']}'.isEmpty || b['targetUid'] == _me)) ...[
-                  TextButton(
-                    onPressed: _busy ? null : () => _do(() => Wallet.cardsBetAccept(widget.gameId, '${b['id']}')),
-                    child: Text(tr('Relever', 'Accept'),
-                        style: const TextStyle(color: Color(0xFF7CFFB0), fontWeight: FontWeight.w900)),
-                  ),
-                  if ('${b['targetUid']}' == _me)
-                    TextButton(
-                      onPressed: _busy ? null : () => _do(() => Wallet.cardsBetCancel(widget.gameId, '${b['id']}')),
-                      child: Text(tr('Refuser', 'Decline')),
-                    ),
-                ],
-              ],
-            ]),
-          ),
-      ]),
-    );
-  }
-
-  Future<void> _newBet(Map<String, dynamic> v, List<Map<String, dynamic>> players, bool tiah) async {
-    final stake = (v['stake'] as num?)?.toInt() ?? 0;
-    final amountCtrl = TextEditingController(text: '${stake > Wallet.minStake ? stake : Wallet.minStake}');
-    final targets = [
-      for (final p in players)
-        if (p['uid'] != _me && p['opened'] != true) p,
-    ];
-    String type = 'duel';
-    String target = ''; // '' = tous
-    bool over = true;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF062E1C),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
-        return Padding(
-          padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + MediaQuery.of(ctx).viewInsets.bottom),
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(tr('Nouveau pari', 'New bet'),
-                  style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w900)),
-              const SizedBox(height: 8),
-              Wrap(spacing: 8, children: [
-                ChoiceChip(
-                  label: Text(tr('Défier ses adversaires', 'Challenge rivals')),
-                  selected: type == 'duel',
-                  selectedColor: _gold,
-                  onSelected: (_) => setS(() => type = 'duel'),
-                ),
-                if (!tiah)
-                  ChoiceChip(
-                    label: Text(tr('Défi Fétiche (13)', 'Fetish challenge (13)')),
-                    selected: type == 'fetiche',
-                    selectedColor: _gold,
-                    onSelected: (_) => setS(() => type = 'fetiche'),
-                  ),
-              ]),
-              const SizedBox(height: 6),
-              Text(
-                type == 'duel'
-                    ? tr(tiah ? 'Le meilleur total (21 max) gagne. Égalité : mises rendues.' : 'Le plus gros score gagne (FOMEKOU bat tout). Égalité : mises rendues.',
-                        tiah ? 'Best total (21 max) wins. Tie: stakes refunded.' : 'Highest score wins (FOMEKOU beats all). Tie: stakes refunded.')
-                    : tr('Ton total BOUBAYAH est comparé à 13. FOMEKOU compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
-                        'Your BOUBAYAH total is compared with 13. FOMEKOU counts as 6 (so under 13). Exactly 13: stakes refunded.'),
-                style: const TextStyle(color: Colors.white60, fontSize: 12),
-              ),
-              if (type == 'duel') ...[
-                const SizedBox(height: 8),
-                DropdownButton<String>(
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF0B4A2C),
-                  value: target,
-                  items: [
-                    DropdownMenuItem<String>(
-                        value: '',
-                        child: Text(tr('Tous mes adversaires', 'All my rivals'), style: const TextStyle(color: Colors.white))),
-                    for (final p in targets)
-                      DropdownMenuItem<String>(
-                          value: '${p['uid']}', child: Text('${p['name']}', style: const TextStyle(color: Colors.white))),
-                  ],
-                  onChanged: (x) => setS(() => target = x ?? ''),
-                ),
-              ] else ...[
-                const SizedBox(height: 8),
-                Row(children: [
-                  ChoiceChip(
-                    label: Text(tr('Plus de 13', 'Over 13')),
-                    selected: over,
-                    selectedColor: _gold,
-                    onSelected: (_) => setS(() => over = true),
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: Text(tr('Moins de 13', 'Under 13')),
-                    selected: !over,
-                    selectedColor: _gold,
-                    onSelected: (_) => setS(() => over = false),
-                  ),
-                ]),
-              ],
-              const SizedBox(height: 8),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
-                decoration: InputDecoration(
-                  labelText: tr('Mise du pari (FCFA)', 'Bet amount (FCFA)'),
-                  labelStyle: const TextStyle(color: Colors.white60),
-                  filled: true,
-                  fillColor: Colors.white.withOpacity(0.1),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFE5262B),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  onPressed: () {
-                    final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
-                    if (amount < Wallet.minStake) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                          content: Text(tr('Mise minimum : ${_fcfa(Wallet.minStake)}', 'Minimum: ${_fcfa(Wallet.minStake)}'))));
-                      return;
-                    }
-                    Navigator.of(ctx).pop();
-                    _do(() => Wallet.cardsBetPropose(
-                          gameId: widget.gameId,
-                          type: type,
-                          amount: amount,
-                          targetUid: type == 'duel' && target.isNotEmpty ? target : null,
-                          over: over,
-                        ));
-                  },
-                  child: Text(tr('Proposer le pari', 'Offer the bet'), style: const TextStyle(fontWeight: FontWeight.w900)),
-                ),
-              ),
-            ]),
-          ),
-        );
-      }),
-    );
-    amountCtrl.dispose();
-  }
-
-  Widget _tiahCards(Map<String, dynamic> p, bool show) {
-    final cards = _cardsOf(p['cards']);
-    if (show && cards.isNotEmpty) {
-      return Wrap(spacing: 5, runSpacing: 5, children: [
-        for (var i = 0; i < cards.length; i++)
-          _PopIn(
-            key: ValueKey('${p['uid']}-${cards[i].v}-${cards[i].suit}'),
-            delayMs: i >= 2 ? i * 450 - 900 : 0,
-            child: _CardView(card: cards[i], w: 40),
-          ),
-      ]);
-    }
-    final n = (p['count'] as num?)?.toInt() ?? 2;
-    return Row(children: [for (var i = 0; i < n; i++) Padding(padding: const EdgeInsets.only(right: 5), child: _CardView(card: null, up: false, w: 40))]);
-  }
-
-  Widget _boubaCards(Map<String, dynamic> p, bool open) {
-    final plain = _cardsOf(p['plain']);
-    final bouba = _cardsOf(p['bouba']);
-    final mine = '${p['uid']}' == _me;
-    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      for (var i = 0; i < ((p['count'] as num?)?.toInt() ?? 3); i++)
-        Padding(
-          padding: const EdgeInsets.only(right: 3),
-          child: _CardView(card: i < plain.length ? plain[i] : null, up: i < plain.length, w: 28),
-        ),
-      const Spacer(),
-      for (var i = 0; i < 2; i++)
-        Padding(
-          padding: const EdgeInsets.only(left: 6),
-          child: Opacity(
-            opacity: mine && !open ? 0.8 : 1,
-            child: _CardView(card: i < bouba.length ? bouba[i] : null, up: i < bouba.length, w: 50),
-          ),
-        ),
-    ]);
-  }
-}
