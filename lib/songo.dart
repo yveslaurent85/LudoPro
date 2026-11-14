@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'replay_core.dart';
 import 'game_chat.dart';
 import 'lang.dart';
 import 'share_menu.dart';
@@ -2498,19 +2499,22 @@ class _SongoHubState extends State<_SongoHub> {
 Widget songoRoomPage(String id) => _SongoRoom(roomId: id);
 
 class SongoSpectator extends StatelessWidget {
-  const SongoSpectator({super.key, required this.roomId});
+  const SongoSpectator({super.key, required this.roomId, this.replay});
   final String roomId;
+  final ReplayController? replay;
 
   @override
   Widget build(BuildContext context) =>
-      _SongoRoom(roomId: roomId, spectate: true);
+      _SongoRoom(roomId: roomId, spectate: true, replay: replay);
 }
 
 class _SongoRoom extends StatefulWidget {
-  const _SongoRoom({required this.roomId, this.spectate = false});
+  const _SongoRoom(
+      {required this.roomId, this.spectate = false, this.replay});
 
   final String roomId;
   final bool spectate;
+  final ReplayController? replay; // revue d'une partie (lecture seule)
 
   @override
   State<_SongoRoom> createState() => _SongoRoomState();
@@ -2554,7 +2558,7 @@ class _SongoRoomState extends State<_SongoRoom> {
 
   void _tick() {
     final d = _last;
-    if (!mounted || d == null) return;
+    if (!mounted || d == null || widget.replay != null) return;
     if (d['status'] != 'playing' || d['over'] == true) return;
     final left = kSongoTurnSecs - DateTime.now().difference(_stamp).inSeconds;
     setState(() => _left = max(0, left));
@@ -2637,10 +2641,13 @@ class _SongoRoomState extends State<_SongoRoom> {
           });
           return;
         }
+        final mvLog = ((d['mv'] as List?) ?? const []).map((e) => (e as num).toInt()).toList()
+          ..add(p);
         g.play(p);
         tx.update(_ref, {
           ...g.toDoc(),
           'miss': miss,
+          'mv': mvLog.length > 600 ? mvLog.sublist(mvLog.length - 600) : mvLog,
           if (g.over) 'status': 'finished',
         });
       });
@@ -2842,7 +2849,7 @@ class _SongoRoomState extends State<_SongoRoom> {
     if (user == null) return _info('Tu dois être connecté.');
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _ref.snapshots(),
+      stream: widget.replay?.docs(widget.roomId) ?? _ref.snapshots(),
       builder: (context, snap) {
         if (snap.hasError) return _info('Erreur de connexion à la partie.');
         if (!snap.hasData) return _info('', loading: true);
@@ -2851,7 +2858,9 @@ class _SongoRoomState extends State<_SongoRoom> {
         _last = d;
 
         final players = _playersOf(d);
-        final seat = players.indexWhere((p) => p['uid'] == user.uid);
+        final seat = widget.replay != null
+            ? -1
+            : players.indexWhere((p) => p['uid'] == user.uid);
         if (seat < 0 && !widget.spectate) {
           return _info('Tu ne fais pas partie de cette partie.');
         }
