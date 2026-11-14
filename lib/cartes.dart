@@ -60,7 +60,7 @@ class _Card {
   final int suit;
 
   String get label => v == 11 ? 'A' : '$v';
-  int get code => v * 4 + suit; // même codage que le serveur
+  int get code => v * 4 + suit;
   String get symbol => const ['♠', '♥', '♦', '♣'][suit];
   bool get red => suit == 1 || suit == 2;
 }
@@ -69,7 +69,7 @@ List<_Card> _newDeck({required bool withAce}) {
   final d = <_Card>[];
   for (var s = 0; s < 4; s++) {
     for (var v = 3; v <= (withAce ? 11 : 10); v++) {
-      if (withAce && v == 11 && s == 2) continue; // TIAH : pas d'as de carreau (3 as seulement)
+      if (withAce && v == 11 && s == 2) continue; // TIAH : pas d'as de carreau
       d.add(_Card(v, s));
     }
   }
@@ -137,7 +137,6 @@ class _CardView extends StatelessWidget {
   }
 }
 
-/// Ouvre [page] seulement si le joueur est connecté ; sinon écran de connexion d'abord.
 void _pushLoggedIn(BuildContext context, Widget Function(BuildContext) page) {
   final loggedIn = !firebaseReady || FirebaseAuth.instance.currentUser != null;
   Navigator.of(context).push(MaterialPageRoute<void>(
@@ -145,7 +144,6 @@ void _pushLoggedIn(BuildContext context, Widget Function(BuildContext) page) {
   ));
 }
 
-/// Une carte qui apparaît (prise, distribuée) : elle grossit et se fond.
 class _PopIn extends StatelessWidget {
   const _PopIn({super.key, required this.child, this.delayMs = 0});
 
@@ -171,13 +169,12 @@ class _PopIn extends StatelessWidget {
   }
 }
 
-/// Animation de fin de manche : confettis, nom du gagnant et montant total des gains qui défile.
 class _WinBurst extends StatefulWidget {
   const _WinBurst({super.key, required this.title, required this.amount, this.subtitle = ''});
 
   final String title;
   final String subtitle;
-  final int amount; // 0 : partie gratuite, pas de montant
+  final int amount;
 
   @override
   State<_WinBurst> createState() => _WinBurstState();
@@ -196,7 +193,7 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
     _bits = [
       for (var i = 0; i < 70; i++)
         [rnd.nextDouble(), 0.5 + rnd.nextDouble() * 0.9, rnd.nextDouble() * 6.28, 6 + rnd.nextDouble() * 8,
-        rnd.nextInt(5).toDouble(), rnd.nextDouble() * 6.28]
+         rnd.nextInt(5).toDouble(), rnd.nextDouble() * 6.28]
     ];
     _c = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
     _auto = Timer(const Duration(seconds: 10), () {
@@ -313,7 +310,6 @@ class _ConfettiPainter extends CustomPainter {
   bool shouldRepaint(covariant _ConfettiPainter old) => old.t != t;
 }
 
-/// Cartes du milieu, classées dans l'ordre : la 1re est celle du dessus.
 class _MiddleStrip extends StatelessWidget {
   const _MiddleStrip({required this.cards, this.w = 38});
 
@@ -349,7 +345,6 @@ class _MiddleStrip extends StatelessWidget {
   }
 }
 
-/// Sabot : boîte de distribution avec la pile de cartes et la fente de sortie.
 class _Shoe extends StatelessWidget {
   const _Shoe({this.left});
 
@@ -511,42 +506,79 @@ class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderSta
       onTap: _finish,
       child: Container(
         color: const Color(0xD9021A0E),
-        child: AnimatedBuilder(animation: _c, builder: (context, _) => LayoutBuilder(builder: (context, box) {
-          final w = box.maxWidth;
-          final h = box.maxHeight;
-          final center = Offset(w / 2, h * 0.44);
-          final rx = w * 0.36;
-          final ry = h * 0.27;
-          Offset seatPos(int i) {
-            final a = pi / 2 + 2 * pi * i / n;
-            return Offset(center.dx + rx * cos(a), center.dy + ry * sin(a));
-          }
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) => LayoutBuilder(
+            builder: (context, box) {
+              final w = box.maxWidth;
+              final h = box.maxHeight;
+              final center = Offset(w / 2, h * 0.44);
+              final rx = w * 0.36;
+              final ry = h * 0.27;
 
-          final elapsed = _c.value * _totalMs;
-          final cur = (elapsed / _gap).floor().clamp(0, _deals.length - 1);
-          final label = widget.labels[min(_deals[cur][1], widget.labels.length - 1)];
-          final children = <Widget>[];
-          for (var i = 0; i < n; i++) {
-            final p = seatPos(i);
-            children.add(Positioned(
-              left: p.dx - 40,
-              top: p.dy - 34,
-              width: 80,
-              child: Column(children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: _seatColors[i % 6],
-                  child: Text(widget.names[i].isEmpty ? '?' : widget.names[i].substring(0, 1).toUpperCase(),
-                      style: const TextStyle(color: Color(0xFF1A1200), fontWeight: FontWeight.w900)),
-                ),
-                Text(widget.names[i],
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
-              ]),
-            ));
-          }
-          final slot = Offset(center.dx, center.dy + 36);
-          final seatCount = List.filled(n, 0);
-          var dealt = 0;
-          final flying =
+              Offset seatPos(int i) {
+                final a = pi / 2 + 2 * pi * i / n;
+                return Offset(center.dx + rx * cos(a), center.dy + ry * sin(a));
+              }
+
+              final elapsed = _c.value * _totalMs;
+              final cur = (elapsed / _gap).floor().clamp(0, _deals.length - 1);
+              final label = widget.labels[min(_deals[cur][1], widget.labels.length - 1)];
+              final children = <Widget>[];
+
+              for (var i = 0; i < n; i++) {
+                final p = seatPos(i);
+                children.add(Positioned(
+                  left: p.dx - 40,
+                  top: p.dy - 34,
+                  width: 80,
+                  child: Column(children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: _seatColors[i % 6],
+                      child: Text(
+                        widget.names[i].isEmpty ? '?' : widget.names[i].substring(0, 1).toUpperCase(),
+                        style: const TextStyle(color: Color(0xFF1A1200), fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                    Text(
+                      widget.names[i],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                    ),
+                  ]),
+                ));
+              }
+
+              final seatCount = List.filled(n, 0);
+              var dealt = 0;
+              final flying = <Widget>[];
+
+              for (var k = 0; k < _deals.length; k++) {
+                final seat = _deals[k][0];
+                final m = seatCount[seat]++;
+                final t = ((elapsed - k * _gap) / _fly).clamp(0.0, 1.0);
+                if (t <= 0) continue;
+                dealt++;
+                final e = Curves.easeOutCubic.transform(t);
+                final target = seatPos(seat) + Offset((m - 2) * 11.0, 46 + (m % 2) * 3.0);
+                final pos = Offset.lerp(slot = Offset(center.dx, center.dy + 36), target, e)!;
+                flying.add(Positioned(
+                  left: pos.dx - 17,
+                  top: pos.dy - 24,
+                  child: Transform.rotate(
+                    angle: (1 - e) * (k.isEven ? 0.5 : -0.5),
+                    child: const _CardView(card: null, up: false, w: 34),
+                  ),
+                ));
+              }
+
+              final slot = Offset(center.dx, center.dy + 36);
+              final phase = (elapsed % _gap) / _gap;
+              final kick = dealt > 0 && dealt <= _deals.length ? (1 - phase).clamp(0.0, 1.0) * 3 : 0.0;
+
+              children.add(Positioned(
+                left: center.dx - 40 + kick,
+                top: center.dy - 52,
+                child: _Shoe(left: widget.deckSize > 0 ? max(0,
