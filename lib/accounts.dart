@@ -233,6 +233,7 @@ class Wallet {
     List<String> winnerUids,
     List<int> scores, {
     List<int>? fscores,
+    bool corat = false,
   }) {
     return _call(
       'settleLocalGame',
@@ -240,6 +241,7 @@ class Wallet {
         'id': id,
         'winnerUids': winnerUids,
         'scores': scores,
+        if (corat) 'corat': true,
         if (fscores != null) 'fscores': fscores,
       },
     );
@@ -657,6 +659,10 @@ class Wallet {
 
   static Future<Map<String, dynamic>> cardsStart(String gameId) =>
       _call('cardsStart', <String, dynamic>{'gameId': gameId});
+
+  /// Fap-Fap : jouer une carte (0..43 : valeur * 4 + famille).
+  static Future<Map<String, dynamic>> cardsPlay(String gameId, int card) =>
+      _call('cardsPlay', <String, dynamic>{'gameId': gameId, 'card': card});
 
   static Future<Map<String, dynamic>> cardsOpen(String gameId) =>
       _call('cardsOpen', <String, dynamic>{'gameId': gameId});
