@@ -7,6 +7,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'replay_core.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
 import 'lang.dart';
@@ -2026,17 +2027,21 @@ class _OnlineHubState extends State<_OnlineHub> {
 Widget deuxDesRoomPage(String id) => _OnlineRoom(roomId: id);
 
 class DeuxDesSpectator extends StatelessWidget {
-  const DeuxDesSpectator({super.key, required this.roomId});
+  const DeuxDesSpectator({super.key, required this.roomId, this.replay});
 
   final String roomId;
+  final ReplayController? replay;
 
   @override
   Widget build(BuildContext context) =>
-      _OnlineRoom(roomId: roomId, spectate: true);
+      _OnlineRoom(roomId: roomId, spectate: true, replay: replay);
 }
 
 class _OnlineRoom extends StatefulWidget {
-  const _OnlineRoom({required this.roomId, this.spectate = false});
+  const _OnlineRoom(
+      {required this.roomId, this.spectate = false, this.replay});
+
+  final ReplayController? replay; // revue d'une partie (lecture seule)
 
   final String roomId;
   final bool spectate;
@@ -2116,7 +2121,10 @@ class _OnlineRoomState extends State<_OnlineRoom> {
         if (seat >= scores.length) return;
         scores[seat] += a + b;
         final isLast = seat == _playersOf(d).length - 1;
+        final mvLog = ((d['mv'] as List?) ?? const []).map((e) => '$e').toList()
+          ..add('$a,$b');
         tx.update(_ref, {
+          'mv': mvLog,
           'd1': a,
           'd2': b,
           'spin1': _randomSpin(r),
@@ -2155,6 +2163,7 @@ class _OnlineRoomState extends State<_OnlineRoom> {
   /// 30 s écoulées : lance les dés (si besoin) puis passe au joueur suivant,
   /// à la place du joueur [seat] (n'importe quel appareil peut le faire).
   Future<void> _autoTurn(int seat, bool rolled) async {
+    if (widget.replay != null) return;
     if (!rolled) {
       await _roll(seat);
       await Future.delayed(const Duration(milliseconds: 2800));
@@ -2333,7 +2342,7 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     if (user == null) return _info('Tu dois être connecté.');
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _ref.snapshots(),
+      stream: widget.replay?.docs(widget.roomId) ?? _ref.snapshots(),
       builder: (context, snap) {
         if (snap.hasError) return _info('Erreur de connexion à la partie.');
         if (!snap.hasData) return _info('', loading: true);
@@ -2342,7 +2351,9 @@ class _OnlineRoomState extends State<_OnlineRoom> {
         if (d == null) return _info("Cette partie n'existe plus.");
 
         final players = _playersOf(d);
-        final seat = players.indexWhere((p) => p['uid'] == user.uid);
+        final seat = widget.replay != null
+            ? -1
+            : players.indexWhere((p) => p['uid'] == user.uid);
         if (seat < 0 && !widget.spectate) {
           return _info('Tu ne fais pas partie de cette partie.');
         }
