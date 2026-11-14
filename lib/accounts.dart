@@ -233,7 +233,7 @@ class Wallet {
     List<String> winnerUids,
     List<int> scores, {
     List<int>? fscores,
-    Object? corat,
+    bool corat = false,
   }) {
     return _call(
       'settleLocalGame',
@@ -242,7 +242,7 @@ class Wallet {
         'winnerUids': winnerUids,
         'scores': scores,
         if (fscores != null) 'fscores': fscores,
-        if (corat != null) 'corat': corat,
+        if (corat) 'corat': true,
       },
     );
   }
