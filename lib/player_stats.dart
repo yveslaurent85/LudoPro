@@ -380,7 +380,7 @@ class PlayerDetailScreen extends StatelessWidget {
                       _RiskBox(uid: stats.uid, risk: stats.risk, cleared: stats.cleared),
                     PlayerStatsView(stats: stats),
                     if (stats.uid.isNotEmpty) _txButton(context, uid: stats.uid, name: stats.name),
-                    if (stats.uid.isNotEmpty) _gamesButton(context, uid: stats.uid, name: stats.name)
+                    if (stats.uid.isNotEmpty) _gamesButton(context, uid: stats.uid, name: stats.name),
                     if (stats.uid.isNotEmpty) PlayerInfoBox(uid: stats.uid),
                   ],
                 ),
