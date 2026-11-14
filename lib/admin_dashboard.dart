@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'replay.dart';
 import 'accounts.dart';
 import 'admin_manual.dart';
 import 'deux_des.dart';
@@ -886,18 +887,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
       _snack("Cette partie n'a pas encore commencé.");
       return;
     }
-    if (const ['pileface', 'tiah', 'boubayah', 'sports', 'courses'].contains(r['kind'])) {
+    if (const ['pileface', 'sports', 'courses'].contains(r['kind'])) {
       _snack('Pas de revue pour ce jeu : consulte les mises et les commissions ici.');
       return;
     }
-    final Widget page = r['kind'] == 'deuxdes'
-        ? DeuxDesSpectator(roomId: id)
-        : r['kind'] == 'songo'
-            ? SongoSpectator(roomId: id)
-            : r['kind'] == 'damier'
-                ? DamierSpectator(roomId: id)
-                : OnlineGameRoom(gameId: id, spectate: true, adminView: true);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+    // Revue du début à la fin (coup par coup) ; les anciennes parties sans
+    // enregistrement proposent seulement le plateau final.
+    final k = '${r['kind']}';
+    final kind = const ['deuxdes', 'songo', 'damier', 'tiah', 'boubayah'].contains(k) ? k : 'ludo';
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => ReplayScreen(kind: kind, id: id, title: rpKindName(kind)),
+    ));
   }
 
   Widget _gameTile(Map<String, dynamic> r) {
@@ -1308,7 +1308,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (showHistory) ...[
             const SizedBox(height: 8),
             const Text(
-              'Touche une partie en ligne pour la revoir.',
+              'Touche une partie en ligne pour la revoir du début à la fin.',
               style: TextStyle(color: Colors.white54, fontSize: 12),
             ),
             const SizedBox(height: 6),
