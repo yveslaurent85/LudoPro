@@ -445,6 +445,7 @@ class _DealOverlay extends StatefulWidget {
     this.sfx,
     this.grouped = false,
     this.deckSize = 0,
+    this.fast = false,
   });
 
   /// false : 1 carte par joueur à chaque tour de table (TIAH).
@@ -453,6 +454,9 @@ class _DealOverlay extends StatefulWidget {
 
   /// Nombre de cartes dans le sabot au départ (compteur affiché).
   final int deckSize;
+
+  /// Distribution rapide (jeux à 7 s par carte).
+  final bool fast;
 
   /// Joueurs, dans l'ordre de distribution.
   final List<String> names;
@@ -468,8 +472,8 @@ class _DealOverlay extends StatefulWidget {
 }
 
 class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderStateMixin {
-  static const int _gap = 260; // ms entre deux cartes
-  static const int _fly = 600; // durée d'un vol
+  int get _gap => widget.fast ? 70 : 260; // ms entre deux cartes
+  int get _fly => widget.fast ? 220 : 600; // durée d'un vol
   late final AnimationController _c;
   final List<List<int>> _deals = []; // [siège, lot]
   late final int _totalMs;
@@ -493,7 +497,7 @@ class _DealOverlayState extends State<_DealOverlay> with SingleTickerProviderSta
         }
       }
     }
-    _totalMs = _deals.length * _gap + _fly + 600;
+    _totalMs = _deals.length * _gap + _fly + (widget.fast ? 150 : 600);
     _c = AnimationController(vsync: this, duration: Duration(milliseconds: _totalMs))
       ..addStatusListener((st) {
         if (st == AnimationStatus.completed) _finish();
@@ -729,9 +733,9 @@ class CartesPage extends StatelessWidget {
                         Icons.casino, const Color(0xFF00897B),
                         () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'anticote')), badge: tr('NOUVEAU', 'NEW')),
                     const SizedBox(height: 14),
-                    _card('TCHEK GAMES', tr('En ligne uniquement · bientôt disponible', 'Online only · coming soon'),
+                    _card('TCHEK GAMES', tr('En ligne uniquement · défausse-toi de tes cartes · 2 à 4 joueurs', 'Online only · shed all your cards · 2-4 players'),
                         Icons.location_on, const Color(0xFF0277BD),
-                        () => _go(context, const _TchekPage())),
+                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'tchek')), badge: tr('NOUVEAU', 'NEW')),
                   ],
                 ),
               ),
@@ -2461,7 +2465,7 @@ List<_Card> _cardsOf(dynamic l) =>
 
 String? _firstOf(Iterable<String> i) => i.isEmpty ? null : i.first;
 
-String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : (g == 'fapfap' ? 'FAP-FAP' : (g == 'anticote' ? 'ANTI-COTE' : 'BOUBAYAH'));
+String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : (g == 'fapfap' ? 'FAP-FAP' : (g == 'anticote' ? 'ANTI-COTE' : (g == 'tchek' ? 'TCHEK GAMES' : 'BOUBAYAH')));
 
 class CardsOnlineHub extends StatefulWidget {
   const CardsOnlineHub({super.key, required this.game});
@@ -2516,7 +2520,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
 
   Future<void> _enter(String id) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id) : widget.game == 'anticote' ? AntiCoteOnlineRoom(gameId: id) : CardsOnlineRoom(gameId: id)));
+        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id) : widget.game == 'anticote' ? AntiCoteOnlineRoom(gameId: id) : widget.game == 'tchek' ? TchekOnlineRoom(gameId: id) : CardsOnlineRoom(gameId: id)));
     if (mounted) _load();
   }
 
@@ -2676,7 +2680,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
               Text(tr('Mise de chaque joueur (0 = gratuit)', "Each player's stake (0 = free)"),
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
               StakeField(stake: _stake, players: _max, onChanged: (v) => setState(() => _stake = v)),
-              if (widget.game == 'fapfap' || widget.game == 'anticote')
+              if (widget.game == 'fapfap' || widget.game == 'anticote' || widget.game == 'tchek')
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
@@ -2705,7 +2709,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
               Text(tr('Nombre de joueurs maximum', 'Maximum players'),
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
               Wrap(spacing: 8, children: [
-                for (var k = 2; k <= (widget.game == 'fapfap' ? 4 : widget.game == 'anticote' ? 5 : 6); k++)
+                for (var k = 2; k <= (widget.game == 'fapfap' || widget.game == 'tchek' ? 4 : widget.game == 'anticote' ? 5 : 6); k++)
                   ChoiceChip(
                     label: Text('$k'),
                     selected: _max == k,
@@ -2810,14 +2814,14 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
 
   void _set(Map<String, dynamic> v) {
     if (!mounted) return;
-    if (v['game'] == 'fapfap' || v['game'] == 'anticote') {
+    if (v['game'] == 'fapfap' || v['game'] == 'anticote' || v['game'] == 'tchek') {
       if (!_redirected) {
         _redirected = true;
         _timer?.cancel();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
-              MaterialPageRoute<void>(builder: (_) => v['game'] == 'anticote' ? AntiCoteOnlineRoom(gameId: widget.gameId) : FapFapOnlineRoom(gameId: widget.gameId)));
+              MaterialPageRoute<void>(builder: (_) => v['game'] == 'anticote' ? AntiCoteOnlineRoom(gameId: widget.gameId) : v['game'] == 'tchek' ? TchekOnlineRoom(gameId: widget.gameId) : FapFapOnlineRoom(gameId: widget.gameId)));
         });
       }
       return;
@@ -3864,7 +3868,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     _protect(true);
     _geoT = Timer.periodic(const Duration(seconds: 30), (_) => _geoRefresh());
     _fetch();
-    _pollT = Timer.periodic(const Duration(seconds: 2), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -4027,6 +4031,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
         batches: const [3],
         grouped: true,
         deckSize: 35,
+        fast: true,
         labels: [tr('Distribution · 3 cartes chacun', 'Deal · 3 cards each')],
         sfx: _sfx,
         onDone: () {
@@ -4484,6 +4489,804 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
   }
 }
 
+class TchekOnlineRoom extends StatefulWidget {
+  const TchekOnlineRoom({super.key, required this.gameId});
+
+  final String gameId;
+
+  @override
+  State<TchekOnlineRoom> createState() => _TchekOnlineRoomState();
+}
+
+class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingObserver {
+  final Sfx _sfx = Sfx();
+  Timer? _pollT;
+  Timer? _tickT;
+  Map<String, dynamic>? _v;
+  DateTime _rx = DateTime.now();
+  bool _busy = false;
+  String? _err;
+  String? _dealtFor;
+  int _lastCount = 0;
+  final Set<String> _sounded = {};
+  final String _me = FirebaseAuth.instance.currentUser?.uid ?? '';
+  Timer? _geoT;
+  String? _geoWarn; // problème de localisation à afficher
+  int _geoTick = 0;
+  bool _hidden = false; // appli en arrière-plan / onglet masqué : la main est cachée
+
+  /// Anti-triche : sur Android, la capture d'écran et l'enregistrement sont bloqués
+  /// tant que la salle est ouverte. (Sur le web, le navigateur ne le permet pas.)
+  Future<void> _protect(bool on) async {
+    try {
+      if (on) {
+        await ScreenProtector.preventScreenshotOn();
+      } else {
+        await ScreenProtector.preventScreenshotOff();
+      }
+    } catch (_) {}
+  }
+
+  /// Position à jour : toutes les 30 s dans la salle d'attente, toutes les 60 s en manche.
+  Future<void> _geoRefresh() async {
+    final v = _v;
+    if (v == null || v['over'] == true) return;
+    if (((v['maxPlayers'] as num?)?.toInt() ?? 4) < 3) return; // à 2 joueurs : pas de géolocalisation
+    final st = '${v['status']}';
+    if (st == 'playing') {
+      _geoTick++;
+      if (_geoTick % 2 != 0) return;
+    } else if (st != 'waiting') {
+      return;
+    }
+    try {
+      final loc = await GeoGuard.position();
+      await Wallet.cardsLoc(widget.gameId, loc);
+      if (mounted && _geoWarn != null) setState(() => _geoWarn = null);
+    } on GeoException catch (e) {
+      if (mounted) setState(() => _geoWarn = e.message);
+    } on WalletException catch (e) {
+      if (mounted && !e.message.contains('GEO_REQUIRED')) setState(() => _geoWarn = e.message);
+    } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final hide = state != AppLifecycleState.resumed;
+    if (hide != _hidden && mounted) setState(() => _hidden = hide);
+  }
+
+  String get _myName {
+    for (final p in (_v?['players'] as List? ?? [])) {
+      final m = p as Map;
+      if (m['uid'] == _me) return '${m['name']}';
+    }
+    return FirebaseAuth.instance.currentUser?.displayName ?? 'Katika';
+  }
+
+  /// Filigrane : ton nom sur tout l'écran, pour décourager le partage de captures.
+  Widget _watermark() {
+    final tag = '$_myName · TCHEK GAMES · ${_me.length > 6 ? _me.substring(0, 6) : _me}   ';
+    return IgnorePointer(
+      child: ClipRect(
+        child: Stack(children: [
+          for (var i = 0; i < 9; i++)
+            Positioned(
+              left: -60,
+              right: -60,
+              top: 10.0 + i * 100,
+              child: Transform.rotate(
+                angle: -0.35,
+                child: Center(
+                  child: Text(tag * 2,
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.10), fontSize: 15, fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _geoBanner() => _geoWarn == null
+      ? const SizedBox.shrink()
+      : Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: const Color(0xFF8E2A22), borderRadius: BorderRadius.circular(12)),
+          child: Text('📍 $_geoWarn', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
+        );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _protect(true);
+    _geoT = Timer.periodic(const Duration(seconds: 30), (_) => _geoRefresh());
+    _fetch();
+    _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
+    _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _v != null && _v!['over'] != true) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _protect(false);
+    _geoT?.cancel();
+    _pollT?.cancel();
+    _tickT?.cancel();
+    super.dispose();
+  }
+
+  int _tableCount(Map<String, dynamic> v) => (v['evt'] as List?)?.length ?? 0;
+
+  void _set(Map<String, dynamic> v) {
+    if (!mounted) return;
+    final cnt = _tableCount(v);
+    final id = '${v['id']}';
+    if (_v == null && v['status'] != 'waiting' && (cnt > 0 || v['over'] == true)) _dealtFor = id;
+    if (_v != null && cnt > _lastCount) _sfx.land();
+    if (v['over'] == true && _sounded.add(id) && _v != null) {
+      if (((v['winnerUids'] as List?) ?? const []).contains(_me)) _sfx.win();
+    }
+    _lastCount = cnt;
+    setState(() {
+      _v = v;
+      _rx = DateTime.now();
+      _err = null;
+    });
+  }
+
+  Future<void> _fetch() async {
+    if (_busy) return;
+    try {
+      _set(await Wallet.cardsGet(widget.gameId));
+    } catch (e) {
+      if (mounted && _v == null) setState(() => _err = Wallet.errorText(e));
+    }
+  }
+
+  Future<void> _do(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      _set(await f());
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _goNext(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final r = await f();
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => TchekOnlineRoom(gameId: r['id'] as String)),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+      }
+    }
+  }
+
+  Future<void> _leave() async {
+    final v = _v;
+    if (v != null && v['status'] == 'waiting') {
+      try {
+        await Wallet.cardsLeave(widget.gameId);
+      } catch (_) {}
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  Widget _shell(Widget child, {Widget? overlay}) => Scaffold(
+        body: Stack(children: [
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: _felt,
+            child: SafeArea(child: child),
+          ),
+          if (_v != null && _v!['status'] != 'waiting') Positioned.fill(child: _watermark()),
+          if (overlay != null) Positioned.fill(child: overlay),
+        ]),
+      );
+
+  Widget _bar(Map<String, dynamic> v) {
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    return Row(children: [
+      IconButton(
+        onPressed: () {
+          if (v['status'] == 'waiting') {
+            _leave();
+          } else {
+            Navigator.of(context).maybePop();
+          }
+        },
+        icon: const Icon(Icons.arrow_back, color: Colors.white),
+      ),
+      Expanded(
+        child: Text(
+          'TCHEK GAMES · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+          style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
+        ),
+      ),
+    ]);
+  }
+
+  int get _secLeft {
+    final ms = (_v!['turnLeftMs'] as num?)?.toInt() ?? 0;
+    final left = ms - DateTime.now().difference(_rx).inMilliseconds;
+    return left <= 0 ? 0 : (left / 1000).ceil();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _v;
+    if (v == null) {
+      return _shell(Center(
+        child: _err != null
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(_err!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
+                  TextButton(onPressed: _fetch, child: Text(tr('Réessayer', 'Retry'))),
+                ]),
+              )
+            : const CircularProgressIndicator(color: _gold),
+      ));
+    }
+    final status = '${v['status']}';
+    if (status == 'cancelled') {
+      return _shell(Center(child: Text(tr('Salle fermée', 'Room closed'), style: const TextStyle(color: Colors.white))));
+    }
+    if (status == 'waiting') return _shell(_lobby(v));
+    final id = '${v['id']}';
+    Widget? overlay;
+    if (_dealtFor != id) {
+      final plv = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+      final seq = [for (final u in (v['seq'] as List? ?? [])) '$u'];
+      final names = [
+        for (final u in seq) _firstOf(plv.where((p) => p['uid'] == u).map((p) => '${p['name']}')) ?? '?',
+      ];
+      overlay = _DealOverlay(
+        names: names.isEmpty ? [for (final p in plv) '${p['name']}'] : names,
+        batches: const [4],
+        grouped: true,
+        deckSize: 54,
+        fast: true,
+        labels: [tr('Distribution · 4 cartes chacun', 'Deal · 4 cards each')],
+        sfx: _sfx,
+        onDone: () {
+          if (mounted) setState(() => _dealtFor = id);
+        },
+      );
+    }
+    return _shell(_tableWithBurst(v), overlay: overlay);
+  }
+
+  // ------------------------------------------------------------ salle d'attente
+
+  Widget _lobby(Map<String, dynamic> v) {
+    final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final max = (v['maxPlayers'] as num?)?.toInt() ?? 4;
+    final dealer = '${v['dealerUid']}';
+    final canStart = v['canStart'] == true;
+    final dealerName = _firstOf(players.where((p) => p['uid'] == dealer).map((p) => '${p['name']}'));
+    return Column(children: [
+      _bar(v),
+      _geoBanner(),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
+              child: Column(children: [
+                Text(tr('Code de la salle', 'Room code'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: '${v['code']}'));
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(tr('Code copié', 'Code copied'))));
+                  },
+                  child: Text('${v['code']}',
+                      style: const TextStyle(color: _gold, fontSize: 36, fontWeight: FontWeight.w900, letterSpacing: 6)),
+                ),
+                Text(tr('Touche le code pour le copier et invite tes amis', 'Tap the code to copy it and invite friends'),
+                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                const SizedBox(height: 6),
+                if (max >= 3) ...[
+                  Text(
+                    tr('📍 Localisation obligatoire · 150 m minimum entre deux joueurs', '📍 Location required · at least 150 m between players'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: _goldSoft, fontSize: 11, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                Text(
+                  stake > 0
+                      ? tr('Mise ${_fcfa(stake)} par joueur · le vainqueur gagne les mises des autres',
+                          'Stake ${_fcfa(stake)} per player · the winner takes the others\' stakes')
+                      : tr('Partie gratuite', 'Free game'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+                if (stake > 0)
+                  Text(
+                    tr('Premier à poser toutes ses cartes. As : saut · 7 : +2 · Joker : +4 · J : choix de famille · annonce TCHEK à l\'avant-dernière carte.',
+                        'First to shed all cards. Ace: skip · 7: +2 · Joker: +4 · J: pick suit · call TCHEK on your second-to-last card.'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: _goldSoft, fontSize: 11),
+                  ),
+              ]),
+            ),
+            ShareMenuButton(collection: 'cards', gameId: widget.gameId),
+            const SizedBox(height: 12),
+            Text('${tr('Joueurs', 'Players')} ${players.length}/$max',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            for (var i = 0; i < players.length; i++)
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
+                child: Row(children: [
+                  CircleAvatar(radius: 12, backgroundColor: _seatColors[i % 6]),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text('${players[i]['name']}${players[i]['uid'] == _me ? ' (${tr('toi', 'you')})' : ''}',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  ),
+                  if (players[i]['uid'] == dealer) const Text('🃏', style: TextStyle(fontSize: 18)),
+                ]),
+              ),
+            const SizedBox(height: 8),
+            if (players.length < 2)
+              Text(tr('En attente d\'autres joueurs…', 'Waiting for more players…'),
+                  textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+            if (players.length >= 2 && !canStart)
+              Text(
+                tr('${dealerName ?? 'Le distributeur'} lance la manche.', '${dealerName ?? 'The dealer'} starts the round.'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+        child: Column(children: [
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFEF6C00),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: canStart && !_busy ? () => _do(() => Wallet.cardsStart(widget.gameId)) : null,
+              child: Text(
+                tr('Lancer la manche (${players.length} joueurs)', 'Start the round (${players.length} players)'),
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _leave,
+            child: Text(tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
+                style: const TextStyle(color: Colors.white70)),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  // ------------------------------------------------------------ table
+
+  Widget _tableWithBurst(Map<String, dynamic> v) {
+    final body = _tableBody(v);
+    if (v['over'] != true || _dealtFor != '${v['id']}') return body;
+    final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    if (winners.isEmpty || winners.length == players.length) return body;
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final prize = (v['prize'] as num?)?.toInt() ?? 0;
+    final won = winners.contains(_me);
+    String nm = '?';
+    for (final p in players) {
+      if (p['uid'] == winners.first) nm = '${p['name']}';
+    }
+    final corat = v['corat'] == true;
+    final title = won
+        ? (corat ? tr('CORAT ! Tu as gagné !', 'CORAT! You won!') : tr('Tu as gagné !', 'You won!'))
+        : (corat ? tr('CORAT pour $nm !', 'CORAT for $nm!') : tr('$nm gagne !', '$nm wins!'));
+    return Stack(children: [
+      body,
+      Positioned.fill(
+        child: StreamBuilder<int>(
+          stream: Wallet.watch(_me),
+          builder: (c, s) => _WinBurst(
+            key: ValueKey('acburst-${v['id']}'),
+            title: title,
+            amount: stake > 0 ? prize * winners.length : 0,
+            subtitle: s.hasData ? tr('Ton solde : ${s.data} FCFA', 'Your balance: ${s.data} FCFA') : '',
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _tableBody(Map<String, dynamic> v) {
+    final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
+    final over = v['over'] == true;
+    final turn = '${v['turnUid']}';
+    final myTurn = !over && turn == _me;
+    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    String nameOf(String uid) => _firstOf(players.where((p) => p['uid'] == uid).map((p) => '${p['name']}')) ?? '?';
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final iWon = over && winners.contains(_me);
+    final nextId = '${v['nextId']}';
+    final prize = (v['prize'] as num?)?.toInt() ?? 0;
+    final myHand = [for (final x in (v['myHand'] as List? ?? [])) (x as num).toInt()];
+    final legal = {for (final x in (v['legal'] as List? ?? [])) (x as num).toInt()};
+    final top = (v['top'] as num?)?.toInt() ?? -1;
+    final curSuit = (v['curSuit'] as num?)?.toInt() ?? -1;
+    final curColor = '${v['curColor']}';
+    final pen = (v['pen'] as num?)?.toInt() ?? 0;
+    final drawCount = (v['drawCount'] as num?)?.toInt() ?? 0;
+    final evt = [for (final e in (v['evt'] as List? ?? [])) Map<String, dynamic>.from(e as Map)];
+    final n = players.length;
+    final needTchek = myTurn && myHand.length == 2;
+
+    String evText(Map<String, dynamic> e) {
+      final who = nameOf('${e['u']}');
+      switch ('${e['k']}') {
+        case 'play':
+          return tr('$who a posé ${_tcLabel((e['c'] as num).toInt())}', '$who played ${_tcLabel((e['c'] as num).toInt())}');
+        case 'pen':
+          return tr('$who prend ${e['n']} cartes et passe son tour', '$who takes ${e['n']} cards and loses the turn');
+        case 'draw':
+          return tr('$who a pioché', '$who drew');
+        case 'tchek':
+          return tr('$who annonce TCHEK !', '$who calls TCHEK!');
+        case 'noTchek':
+          return tr('$who a oublié TCHEK : +1 carte', '$who forgot TCHEK: +1 card');
+        case 'skip':
+          return tr('$who passe son tour (As)', '$who skips (Ace)');
+      }
+      return '';
+    }
+
+    return Column(children: [
+      _bar(v),
+      _geoBanner(),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+          children: [
+            if (!over)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(
+                      myTurn ? tr('C\'est ton tour !', "It's your turn!") : tr('Au tour de ${nameOf(turn)}', "${nameOf(turn)}'s turn"),
+                      style: TextStyle(color: myTurn ? _gold : Colors.white, fontWeight: FontWeight.w900, fontSize: 17),
+                    ),
+                  ),
+                  Text('⏱ $_secLeft s', style: const TextStyle(color: Colors.white70)),
+                ]),
+              ),
+            if (over)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  color: iWon ? const Color(0xFF1B8A3A) : const Color(0xFF8E2A22),
+                ),
+                child: Column(children: [
+                  Text(
+                    iWon
+                        ? tr('Tu as gagné !', 'You won!')
+                        : tr('${winners.isEmpty ? '?' : nameOf(winners.first)} gagne', '${winners.isEmpty ? '?' : nameOf(winners.first)} wins'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w900),
+                  ),
+                  if (stake > 0 && iWon)
+                    Text(tr('+ ${_fcfa(prize)} sur ton compte', '+ ${_fcfa(prize)} to your account'),
+                        style: const TextStyle(color: Colors.white)),
+                  if (stake > 0 && !iWon)
+                    Text(tr('Perdu : − ${_fcfa(stake)}', 'Lost: − ${_fcfa(stake)}'), style: const TextStyle(color: Colors.white)),
+                  const SizedBox(height: 4),
+                  Text(tr('Classement', 'Ranking'), style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w800)),
+                  for (final p in ([...players]..sort((a, b) => ((a['count'] as num?) ?? 0).compareTo((b['count'] as num?) ?? 0))))
+                    Text('${p['name']} · ${p['count']} ${tr('carte(s)', 'card(s)')}',
+                        style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  Text(tr('Prochain distributeur : ${nameOf('${v['nextDealerUid']}')}', 'Next dealer: ${nameOf('${v['nextDealerUid']}')}'),
+                      style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            if (!over && pen > 0)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFF8E2A22), borderRadius: BorderRadius.circular(14)),
+                child: Text(
+                  tr('PÉNALITÉ : +$pen cartes ! Réplique avec un 7 ou un joker, sinon ${nameOf(turn)} pioche $pen cartes et perd son tour.',
+                      'PENALTY: +$pen cards! Reply with a 7 or a joker, otherwise ${nameOf(turn)} draws $pen cards and loses the turn.'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
+                ),
+              ),
+            // table : pioche + carte centrale
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
+              child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                Column(mainAxisSize: MainAxisSize.min, children: [
+                  _TcCard(code: -1, w: 62, back: true),
+                  const SizedBox(height: 4),
+                  Text('${tr('Pioche', 'Draw')} · $drawCount', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                ]),
+                Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (top >= 0) _TcCard(code: top, w: 62),
+                  const SizedBox(height: 4),
+                  Text(
+                    curSuit >= 0
+                        ? '${tr('Famille', 'Suit')} ${const ['♠', '♥', '♦', '♣'][curSuit % 4]}'
+                        : (curColor == 'r' ? tr('Couleur rouge', 'Red colour') : tr('Couleur noire', 'Black colour')),
+                    style: TextStyle(
+                        color: curColor == 'r' ? const Color(0xFFFF8A80) : Colors.white, fontWeight: FontWeight.w900, fontSize: 13),
+                  ),
+                ]),
+              ]),
+            ),
+            if (evt.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  for (final e in evt.reversed.take(3))
+                    if (evText(e).isNotEmpty) Text('• ${evText(e)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
+            for (var i = 0; i < n; i++) _seat(v, players[i], i, turn, winners, over),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+        child: over
+            ? Column(children: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF6C00),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    ),
+                    onPressed: _busy
+                        ? null
+                        : () => _goNext(() => nextId.isEmpty
+                            ? Wallet.cardsRematch(widget.gameId)
+                            : Wallet.cardsJoin(gameId: nextId)),
+                    child: Text(
+                      nextId.isEmpty
+                          ? tr('Manche suivante${stake > 0 ? ' · mise ${_fcfa(stake)}' : ''}', 'Next round${stake > 0 ? ' · stake ${_fcfa(stake)}' : ''}')
+                          : tr('Rejoindre la manche suivante${stake > 0 ? ' · mise ${_fcfa(stake)}' : ''}',
+                              'Join the next round${stake > 0 ? ' · stake ${_fcfa(stake)}' : ''}'),
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  child: Text(tr('Quitter la table', 'Leave the table'), style: const TextStyle(color: Colors.white70)),
+                ),
+              ])
+            : Column(mainAxisSize: MainAxisSize.min, children: [
+                if (myTurn)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white54)),
+                          onPressed: _busy ? null : () => _do(() => Wallet.cardsDraw(widget.gameId)),
+                          child: Text(
+                            pen > 0
+                                ? tr('Prendre la pénalité (+$pen)', 'Take the penalty (+$pen)')
+                                : tr('Piocher 1 carte', 'Draw 1 card'),
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      if (needTchek) ...[
+                        const SizedBox(width: 8),
+                        FilterChip(
+                          label: Text('TCHEK !', style: TextStyle(fontWeight: FontWeight.w900, color: _tchek ? Colors.black : Colors.white)),
+                          selected: _tchek,
+                          selectedColor: _gold,
+                          backgroundColor: const Color(0xFF8E2A22),
+                          onSelected: (x) => setState(() => _tchek = x),
+                        ),
+                      ],
+                    ]),
+                  ),
+                Text(
+                  myTurn
+                      ? (legal.isEmpty
+                          ? tr('Aucune carte jouable : pioche', 'No playable card: draw')
+                          : (needTchek
+                              ? tr('Active TCHEK avant de poser ton avant-dernière carte', 'Turn TCHEK on before playing your second-to-last card')
+                              : tr('Pose une carte', 'Play a card')))
+                      : tr('Ta main (${myHand.length})', 'Your hand (${myHand.length})'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
+                  for (final c in myHand)
+                    GestureDetector(
+                      onTap: myTurn && !_busy && legal.contains(c) ? () => _playCard(c) : null,
+                      child: Opacity(
+                        opacity: !myTurn || legal.contains(c) ? 1 : 0.35,
+                        child: Transform.translate(
+                          offset: Offset(0, myTurn && legal.contains(c) ? -6 : 0),
+                          child: _TcCard(code: _hidden ? -1 : c, w: 54, back: _hidden),
+                        ),
+                      ),
+                    ),
+                ]),
+              ]),
+      ),
+    ]);
+  }
+
+  bool _tchek = false;
+
+  Future<void> _playCard(int c) async {
+    var suit = -1;
+    if (c >> 2 == 11 && c > 3) {
+      final s = await showModalBottomSheet<int>(
+        context: context,
+        backgroundColor: const Color(0xFF14301F),
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(tr('Choisis la famille', 'Pick a suit'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17)),
+              const SizedBox(height: 12),
+              Wrap(spacing: 14, children: [
+                for (var k = 0; k < 4; k++)
+                  GestureDetector(
+                    onTap: () => Navigator.of(ctx).pop(k),
+                    child: Container(
+                      width: 64,
+                      height: 64,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                      child: Text(const ['♠', '♥', '♦', '♣'][k],
+                          style: TextStyle(fontSize: 34, color: (k == 1 || k == 2) ? const Color(0xFFD32F2F) : Colors.black)),
+                    ),
+                  ),
+              ]),
+            ]),
+          ),
+        ),
+      );
+      if (s == null) return;
+      suit = s;
+    }
+    final announce = _tchek;
+    _tchek = false;
+    await _do(() => Wallet.cardsPlay(widget.gameId, c, suit: suit, tchek: announce));
+  }
+
+  Widget _seat(Map<String, dynamic> v, Map<String, dynamic> p, int idx, String turn, List<String> winners, bool over) {
+    final uid = '${p['uid']}';
+    final mine = uid == _me;
+    final isTurn = !over && uid == turn;
+    final win = over && winners.contains(uid);
+    final left = (p['count'] as num?)?.toInt() ?? 0;
+    final revealed = [for (final x in (p['cards'] as List? ?? [])) (x as num).toInt()];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: win ? _gold : (isTurn ? Colors.white : Colors.transparent), width: 2),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          CircleAvatar(radius: 11, backgroundColor: _seatColors[idx % 6]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('${p['name']}${mine ? ' (${tr('toi', 'you')})' : ''}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          ),
+          if (isTurn) const Text('⏳', style: TextStyle(fontSize: 16)),
+          if (win) const Text('🏆', style: TextStyle(fontSize: 18)),
+          if (!over && left == 1)
+            const Text('TCHEK ', style: TextStyle(color: _gold, fontWeight: FontWeight.w900)),
+          Text('🂠 $left', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+        ]),
+        if (over && revealed.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(spacing: 4, runSpacing: 4, children: [for (final c in revealed) _TcCard(code: c, w: 34)]),
+        ],
+      ]),
+    );
+  }
+}
+
+String _tcLabel(int c) {
+  if (c == 0) return tr('le joker rouge', 'the red joker');
+  if (c == 1) return tr('le joker noir', 'the black joker');
+  final r = c >> 2;
+  final l = r == 1 ? 'A' : (r == 11 ? 'J' : (r == 12 ? 'Q' : (r == 13 ? 'K' : '$r')));
+  return '$l${const ['♠', '♥', '♦', '♣'][c & 3]}';
+}
+
+/// Carte de TCHEK GAMES (code = rang * 4 + famille ; 0 = joker rouge, 1 = joker noir ; -1 = dos).
+class _TcCard extends StatelessWidget {
+  const _TcCard({required this.code, this.w = 48, this.back = false});
+
+  final int code;
+  final double w;
+  final bool back;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = w * 1.4;
+    if (back || code < 0) {
+      return Container(
+        width: w,
+        height: h,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E4FA3),
+          borderRadius: BorderRadius.circular(w * 0.14),
+          border: Border.all(color: Colors.white, width: 2),
+        ),
+        child: Center(child: Text('K', style: TextStyle(color: Colors.white54, fontSize: w * 0.45, fontWeight: FontWeight.w900))),
+      );
+    }
+    final joker = code <= 1;
+    final r = code >> 2;
+    final s = code & 3;
+    final red = joker ? code == 0 : (s == 1 || s == 2);
+    final col = red ? const Color(0xFFD32F2F) : Colors.black;
+    final label = joker ? '🃏' : (r == 1 ? 'A' : (r == 11 ? 'J' : (r == 12 ? 'Q' : (r == 13 ? 'K' : '$r'))));
+    return Container(
+      width: w,
+      height: h,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(w * 0.14),
+        border: Border.all(color: Colors.black26),
+      ),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Text(label, style: TextStyle(color: col, fontSize: w * (joker ? 0.5 : 0.42), fontWeight: FontWeight.w900)),
+        if (!joker) Text(const ['♠', '♥', '♦', '♣'][s], style: TextStyle(color: col, fontSize: w * 0.42)),
+        if (joker) Text(code == 0 ? 'ROUGE' : 'NOIR', style: TextStyle(color: col, fontSize: w * 0.17, fontWeight: FontWeight.w900)),
+      ]),
+    );
+  }
+}
+
 class FapFapOnlineRoom extends StatefulWidget {
   const FapFapOnlineRoom({super.key, required this.gameId});
 
@@ -4601,7 +5404,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     _protect(true);
     _geoT = Timer.periodic(const Duration(seconds: 30), (_) => _geoRefresh());
     _fetch();
-    _pollT = Timer.periodic(const Duration(seconds: 2), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -4764,6 +5567,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
         batches: const [3, 2],
         grouped: true,
         deckSize: 31,
+        fast: true,
         labels: [tr('Première distribution · 3 cartes', 'First deal · 3 cards'), tr('Deuxième distribution · 2 cartes', 'Second deal · 2 cards')],
         sfx: _sfx,
         onDone: () {
