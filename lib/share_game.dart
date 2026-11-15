@@ -100,7 +100,7 @@ String shareJoinLink(String col, String id) => _link(col, id, 'join');
 
 /// Message à partager pour une salle de cartes (TIAH / BOUBAYAH, gérée par le serveur).
 String buildCardsShareMessage(String id, Map<String, dynamic> v) {
-  final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : (v['game'] == 'fapfap' ? 'FAP-FAP' : (v['game'] == 'anticote' ? 'ANTI-COTE' : 'TIAH'));
+  final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : (v['game'] == 'fapfap' ? 'FAP-FAP' : (v['game'] == 'anticote' ? 'ANTI-COTE' : (v['game'] == 'tchek' ? 'TCHEK GAMES' : 'TIAH')));
   final players = ((v['players'] as List?) ?? const []);
   final max = (v['maxPlayers'] as num?)?.toInt() ?? 6;
   final stake = (v['stake'] as num?)?.toInt() ?? 0;
@@ -394,7 +394,7 @@ class SharedLink {
       return;
     }
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
-    final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : (v['game'] == 'fapfap' ? 'FAP-FAP' : (v['game'] == 'anticote' ? 'ANTI-COTE' : 'TIAH'));
+    final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : (v['game'] == 'fapfap' ? 'FAP-FAP' : (v['game'] == 'anticote' ? 'ANTI-COTE' : (v['game'] == 'tchek' ? 'TCHEK GAMES' : 'TIAH')));
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
