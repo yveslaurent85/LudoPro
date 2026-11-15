@@ -28,17 +28,10 @@ String _gameName(String col) {
     case 'damier':
       return tr('Damier', 'Draughts');
     case 'cards':
-      return 'TIAH / BOUBAYAH / FAP-FAP';
+      return 'TIAH / BOUBAYAH';
     default:
       return 'Ludo';
   }
-}
-
-/// Nom d'un jeu de cartes à partir de son code serveur.
-String _cardsName(dynamic game) {
-  if (game == 'boubayah') return 'BOUBAYAH';
-  if (game == 'fapfap') return 'FAP-FAP';
-  return 'TIAH';
 }
 
 String _siteBase() {
@@ -105,12 +98,11 @@ String buildShareMessage(String col, String id, Map<String, dynamic> d) {
 /// Lien pour rejoindre la partie.
 String shareJoinLink(String col, String id) => _link(col, id, 'join');
 
-/// Message à partager pour une salle de cartes (TIAH / BOUBAYAH / FAP-FAP, gérée par le serveur).
+/// Message à partager pour une salle de cartes (TIAH / BOUBAYAH, gérée par le serveur).
 String buildCardsShareMessage(String id, Map<String, dynamic> v) {
-  final name = _cardsName(v['game']);
-  final fap = v['game'] == 'fapfap';
+  final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : (v['game'] == 'fapfap' ? 'FAP-FAP' : 'TIAH');
   final players = ((v['players'] as List?) ?? const []);
-  final max = (v['maxPlayers'] as num?)?.toInt() ?? (fap ? 4 : 6);
+  final max = (v['maxPlayers'] as num?)?.toInt() ?? 6;
   final stake = (v['stake'] as num?)?.toInt() ?? 0;
   final host = players.isNotEmpty ? '${(players.first as Map)['name']}' : '';
   return [
@@ -122,9 +114,6 @@ String buildCardsShareMessage(String id, Map<String, dynamic> v) {
       tr('💰 Mise/joueur : ${Wallet.format(stake)}', '💰 Stake/player: ${Wallet.format(stake)}')
     else
       tr('💰 Partie gratuite', '💰 Free game'),
-    if (fap && stake > 0)
-      tr('🔒 ${Wallet.format(stake * 2)} bloqués par joueur (2 × la mise)',
-          '🔒 ${Wallet.format(stake * 2)} locked per player (2 × stake)'),
     '',
     tr('🔗 Rejoindre : ${_link('cards', id, 'join')}', '🔗 Join: ${_link('cards', id, 'join')}'),
   ].join('\n');
@@ -375,11 +364,7 @@ class SharedLink {
     }
   }
 
-  /// Page de la salle de cartes selon le jeu (Fap-Fap a sa propre salle).
-  static Widget _cardsRoom(String id, dynamic game) =>
-      game == 'fapfap' ? FapFapOnlineRoom(gameId: id) : CardsOnlineRoom(gameId: id);
-
-  /// Lien vers une salle TIAH / BOUBAYAH / FAP-FAP : rejoindre via le serveur.
+  /// Lien vers une salle TIAH / BOUBAYAH : rejoindre via le serveur.
   static Future<void> _handleCards(BuildContext context, String id) async {
     void toast(String m) {
       if (context.mounted) {
@@ -398,11 +383,10 @@ class SharedLink {
     if (!context.mounted) return;
     final players = ((v['players'] as List?) ?? const []);
     final mine = players.any((p) => p is Map && p['uid'] == me?.uid);
-    final fap = v['game'] == 'fapfap';
-    final max = (v['maxPlayers'] as num?)?.toInt() ?? (fap ? 4 : 6);
+    final max = (v['maxPlayers'] as num?)?.toInt() ?? 6;
     final waiting = v['status'] == 'waiting';
     if (mine) {
-      _push(context, _cardsRoom(id, v['game']));
+      _push(context, CardsOnlineRoom(gameId: id));
       return;
     }
     if (!waiting || players.length >= max) {
@@ -410,16 +394,13 @@ class SharedLink {
       return;
     }
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
-    final name = _cardsName(v['game']);
+    final name = v['game'] == 'boubayah' ? 'BOUBAYAH' : (v['game'] == 'fapfap' ? 'FAP-FAP' : 'TIAH');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(tr('Rejoindre la partie ?', 'Join the game?')),
         content: Text(stake > 0
-            ? (fap
-                ? tr('$name · Mise : ${Wallet.format(stake)}\n${Wallet.format(stake * 2)} seront bloqués (2 × la mise).',
-                    '$name · Stake: ${Wallet.format(stake)}\n${Wallet.format(stake * 2)} will be locked (2 × stake).')
-                : tr('$name · Mise : ${Wallet.format(stake)}', '$name · Stake: ${Wallet.format(stake)}'))
+            ? tr('$name · Mise : ${Wallet.format(stake)}', '$name · Stake: ${Wallet.format(stake)}')
             : tr('$name · Partie gratuite', '$name · Free game')),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(tr('Non', 'No'))),
@@ -430,7 +411,7 @@ class SharedLink {
     if (ok != true || !context.mounted) return;
     try {
       await Wallet.cardsJoin(gameId: id);
-      if (context.mounted) _push(context, _cardsRoom(id, v['game']));
+      if (context.mounted) _push(context, CardsOnlineRoom(gameId: id));
     } catch (e) {
       toast(Wallet.errorText(e));
     }
