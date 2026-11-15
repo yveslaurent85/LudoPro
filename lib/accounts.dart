@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart' hide Text;
 import 'package:http/http.dart' as http;
 
+import 'geo_guard.dart';
 import 'lang.dart';
 
 /// Adresse de ton Worker Cloudflare (sans « / » à la fin).
@@ -119,6 +120,23 @@ class Wallet {
     }
     final d = j['data'];
     return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
+  }
+
+  /// Comme [_call], mais si le serveur exige la position du joueur (Fap-Fap :
+  /// 'GEO_REQUIRED'), on la lit puis on renvoie la demande avec.
+  static Future<Map<String, dynamic>> _callGeo(String name, Map<String, dynamic> body) async {
+    try {
+      return await _call(name, body);
+    } on WalletException catch (e) {
+      if (!e.message.contains('GEO_REQUIRED')) rethrow;
+      final Map<String, dynamic> loc;
+      try {
+        loc = await GeoGuard.position();
+      } on GeoException catch (g) {
+        throw WalletException(g.message);
+      }
+      return _call(name, <String, dynamic>{...body, 'loc': loc});
+    }
   }
 
   /// Message lisible à partir d'une erreur serveur.
@@ -241,8 +259,8 @@ class Wallet {
         'id': id,
         'winnerUids': winnerUids,
         'scores': scores,
-        if (fscores != null) 'fscores': fscores,
         if (corat) 'corat': true,
+        if (fscores != null) 'fscores': fscores,
       },
     );
   }
@@ -641,7 +659,7 @@ class Wallet {
     required int maxPlayers,
     required bool isPublic,
   }) =>
-      _call('cardsCreate', <String, dynamic>{
+      _callGeo('cardsCreate', <String, dynamic>{
         'game': game,
         'stake': stake,
         'maxPlayers': maxPlayers,
@@ -649,7 +667,7 @@ class Wallet {
       });
 
   static Future<Map<String, dynamic>> cardsJoin({String? gameId, String? code}) =>
-      _call('cardsJoin', <String, dynamic>{
+      _callGeo('cardsJoin', <String, dynamic>{
         if (gameId != null) 'gameId': gameId,
         if (code != null) 'code': code,
       });
@@ -660,11 +678,16 @@ class Wallet {
   static Future<Map<String, dynamic>> cardsStart(String gameId) =>
       _call('cardsStart', <String, dynamic>{'gameId': gameId});
 
-  static Future<Map<String, dynamic>> cardsOpen(String gameId) =>
-      _call('cardsOpen', <String, dynamic>{'gameId': gameId});
+  /// Fap-Fap : le joueur actualise sa position (salle d'attente et manche).
+  static Future<Map<String, dynamic>> cardsLoc(String gameId, Map<String, dynamic> loc) =>
+      _call('cardsLoc', <String, dynamic>{'gameId': gameId, 'loc': loc});
 
+  /// Fap-Fap : jouer une carte (0..43 : valeur * 4 + famille).
   static Future<Map<String, dynamic>> cardsPlay(String gameId, int card) =>
       _call('cardsPlay', <String, dynamic>{'gameId': gameId, 'card': card});
+
+  static Future<Map<String, dynamic>> cardsOpen(String gameId) =>
+      _call('cardsOpen', <String, dynamic>{'gameId': gameId});
 
   /// Paris aux cartes : 'duel' (TIAH, BOUBAYAH) ou 'fetiche' (BOUBAYAH, plus ou moins que 13).
   static Future<Map<String, dynamic>> cardsBetPropose({
@@ -692,7 +715,7 @@ class Wallet {
       _call('cardsLeave', <String, dynamic>{'gameId': gameId});
 
   static Future<Map<String, dynamic>> cardsRematch(String gameId) =>
-      _call('cardsRematch', <String, dynamic>{'gameId': gameId});
+      _callGeo('cardsRematch', <String, dynamic>{'gameId': gameId});
 
   /// Recharge / retrait manuels par code marchand Orange Money.
   /// Renvoie { code, ussd, depositMin, depositMax, withdrawMin, withdrawMax }.
