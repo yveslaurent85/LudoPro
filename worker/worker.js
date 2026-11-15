@@ -5354,13 +5354,51 @@ const cardsIsFomekou = (d, uid) => {
 // Corat = gain doublé (voir settleGameCore).
 // ----------------------------------------------------------------------
 const FAP_TURN_MS = 20000;
+// Anti-triche Fap-Fap : position obligatoire, 150 m minimum entre 2 joueurs d'une même table.
+const FAP_MIN_DIST_M = 150;
+const FAP_MAX_ACC_M = 100; // précision GPS exigée
+const FAP_LOC_FRESH_MS = 120000; // position à jour au lancement de la manche
+
+/** Position envoyée par l'appli : { lat, lng, acc }. Refuse l'absence de position. */
+function fapLoc(data) {
+  const l = data && data.loc;
+  const lat = Number(l && l.lat);
+  const lng = Number(l && l.lng);
+  const acc = Number(l && l.acc);
+  if (!l || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) {
+    throw new HttpError('failed-precondition', 'GEO_REQUIRED');
+  }
+  if (!Number.isFinite(acc) || acc > FAP_MAX_ACC_M) {
+    throw new HttpError('failed-precondition', `Position trop imprécise (${Math.round(acc) || '?'} m). Active le GPS (localisation précise), sors si tu es dans un bâtiment et réessaie.`);
+  }
+  return { lat, lng, acc: Math.round(acc), ms: Date.now() };
+}
+
+/** Distance en mètres entre deux points (haversine). */
+function geoDistM(a, b) {
+  const R = 6371000;
+  const rad = (x) => (x * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/** Vrai si `loc` est à moins de 150 m d'un AUTRE joueur de la salle. */
+function fapTooClose(locs, uid, loc) {
+  for (const [u, o] of Object.entries(locs || {})) {
+    if (u === uid || !o) continue;
+    if (geoDistM(loc, o) < FAP_MIN_DIST_M) return true;
+  }
+  return false;
+}
+const FAP_CLOSE_MSG = 'Tu es trop près d\'un autre joueur de cette table (minimum 150 m entre deux joueurs).';
 const cardsTurnMs = (d) => (d && d.game === 'fapfap' ? FAP_TURN_MS : CARDS_TURN_MS);
 const cardSuit = (c) => c % 4;
 
 /** Combinaison gagnante d'une main de 5 cartes (ou null).
- *  Corat : 4 sept, ou total 16 (4 trois + un 4). Normale : 4 cartes du même numéro
- *  (le plus petit numéro gagne), 3 sept, total <= 21.
- *  rank : plus petit = plus fort (4 identiques par numéro < 3 sept < total <= 21). */
+ *  Ordre de force : 4 sept (Corat) > total 16 (Corat) > 3 sept > 4 cartes du même
+ *  numéro (le plus petit numéro gagne) > total <= 21. rank : plus petit = plus fort. */
 function fapCombo(hand) {
   const vals = (hand || []).map(cardVal);
   if (vals.length !== 5) return null;
@@ -5368,23 +5406,23 @@ function fapCombo(hand) {
   const cnt = {};
   for (const v of vals) cnt[v] = (cnt[v] || 0) + 1;
   if ((cnt[7] || 0) >= 4) return { corat: true, rule: 'four7', rank: 0 };
-  if (total === 16 && cnt[3] === 4 && cnt[4] === 1) return { corat: true, rule: 'sum16', rank: 0 };
+  if (total === 16 && cnt[3] === 4 && cnt[4] === 1) return { corat: true, rule: 'sum16', rank: 1 };
   let four = 0;
   for (const k of Object.keys(cnt)) if (cnt[k] >= 4 && (!four || Number(k) < four)) four = Number(k);
-  if (four) return { corat: false, rule: 'four', rank: four, value: four };
-  if ((cnt[7] || 0) >= 3) return { corat: false, rule: 'three7', rank: 100 };
+  if ((cnt[7] || 0) >= 3) return { corat: false, rule: 'three7', rank: 2 };
+  if (four) return { corat: false, rule: 'four', rank: 10 + four, value: four };
   if (total <= 21) return { corat: false, rule: 'le21', rank: 200, total };
   return null;
 }
 
-/** Vainqueur par combinaison à la distribution : Corat d'abord, puis rang, puis
+/** Vainqueur par combinaison à la distribution : le meilleur rang, puis
  *  1er joueur après le distributeur (ordre de seq). */
 function fapDealWinner(hands, seq) {
   let best = null;
   seq.forEach((u, i) => {
     const c = fapCombo(hands[u]);
     if (!c) return;
-    const key = [c.corat ? 0 : 1, c.rank, i];
+    const key = [0, c.rank, i];
     if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && (key[1] < best.key[1] || (key[1] === best.key[1] && key[2] < best.key[2])))) {
       best = { uid: u, combo: c, key };
     }
@@ -5923,6 +5961,7 @@ async function cardsCreate({ uid, data, env }) {
     throw new HttpError('failed-precondition', `Tu as déjà ${CARDS_MAX_OPEN_PER_HOST} salles ouvertes.`);
   }
   const id = newId();
+  const fapLoc0 = game === 'fapfap' ? fapLoc(data) : null; // position obligatoire
   await runTx(env, async (tx) => {
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
@@ -5932,7 +5971,10 @@ async function cardsCreate({ uid, data, env }) {
     }
     tx.write(`cards/${id}`, {
       create: true,
-      set: cardsNewDoc({ game, stake, maxPlayers, isPublic: data.isPublic !== false, uid, name: tournName(me) }),
+      set: {
+        ...cardsNewDoc({ game, stake, maxPlayers, isPublic: data.isPublic !== false, uid, name: tournName(me) }),
+        ...(fapLoc0 ? { locs: { [uid]: fapLoc0 } } : {}),
+      },
       serverTime: ['createdAt'],
     });
   });
@@ -5955,6 +5997,8 @@ async function cardsJoin({ uid, data, env }) {
     const players = playersOf(g);
     if (players.some((p) => p.uid === uid)) return;
     if (players.length >= intOr(g.maxPlayers, 6)) throw new HttpError('failed-precondition', 'Salle complète.');
+    const jLoc = g.game === 'fapfap' ? fapLoc(data) : null; // position obligatoire
+    if (jLoc && fapTooClose(g.locs, uid, jLoc)) throw new HttpError('failed-precondition', FAP_CLOSE_MSG);
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     const stake = intOr(g.stake, 0);
@@ -5966,6 +6010,7 @@ async function cardsJoin({ uid, data, env }) {
     const np = [...players, { uid, name: tournName(me) }];
     tx.write(path, {
       set: {
+        ...(jLoc ? { locs: { ...(g.locs || {}), [uid]: jLoc } } : {}),
         players: np,
         uids: np.map((p) => p.uid),
         paid: stake > 0 ? [...(Array.isArray(g.paid) ? g.paid : []), uid] : [],
@@ -5992,8 +6037,10 @@ async function cardsLeave({ uid, data, env }) {
       tx.write(path, { set: { status: 'cancelled', over: true, settled: true, players: [], uids: [], paid: [], pot: 0 } });
       return;
     }
+    const keepLocs = g.locs ? Object.fromEntries(Object.entries(g.locs).filter(([u]) => u !== uid)) : null;
     tx.write(path, {
       set: {
+        ...(keepLocs ? { locs: keepLocs } : {}),
         players: np,
         uids: np.map((p) => p.uid),
         paid: stake > 0 ? (Array.isArray(g.paid) ? g.paid : []).filter((u) => u !== uid) : [],
@@ -6016,6 +6063,21 @@ async function cardsStart({ uid, data, env }) {
     let players = playersOf(g);
     if (!players.some((p) => p.uid === uid)) throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette salle.');
     if (players.length < 2) throw new HttpError('failed-precondition', 'Il faut au moins 2 joueurs.');
+    if (g.game === 'fapfap') {
+      // Chaque joueur doit avoir une position récente et personne ne doit être à moins de 150 m d'un autre.
+      const locs = g.locs || {};
+      for (const p of players) {
+        const o = locs[p.uid];
+        if (!o || Date.now() - intOr(o.ms, 0) > FAP_LOC_FRESH_MS) {
+          throw new HttpError('failed-precondition', `La position de ${p.name || 'un joueur'} n'est pas à jour. Chacun doit garder la localisation activée et l'appli ouverte.`);
+        }
+      }
+      for (const p of players) {
+        if (fapTooClose(locs, p.uid, locs[p.uid])) {
+          throw new HttpError('failed-precondition', 'Deux joueurs sont à moins de 150 m l\'un de l\'autre : la manche ne peut pas démarrer. Éloignez-vous ou quittez la table.');
+        }
+      }
+    }
     const dealerOk = uid === (g.dealerUid || g.hostUid);
     if (!dealerOk && Date.now() - intOr(g.createdAtMs, 0) <= CARDS_START_AFTER_MS) {
       throw new HttpError('permission-denied', 'Seul le distributeur peut lancer la manche.');
@@ -6119,6 +6181,28 @@ async function cardsAct(uid, data, env, act) {
 
 const cardsOpen = ({ uid, data, env }) => cardsAct(uid, data, env, 'open');
 
+/** Fap-Fap, salle d'attente : le joueur actualise sa position (toutes les 30 s). */
+async function cardsLoc({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  const loc = fapLoc(data);
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g || g.game !== 'fapfap' || g.over === true) return;
+    if (g.status !== 'waiting' && g.status !== 'playing') return;
+    if (!playersOf(g).some((p) => p.uid === uid)) return;
+    const set = { locs: { ...(g.locs || {}), [uid]: loc } };
+    // Pendant la manche : deux joueurs à moins de 150 m = partie signalée (à vérifier par l'admin).
+    if (g.status === 'playing' && fapTooClose(g.locs, uid, loc)) {
+      set.proxFlag = true;
+      set.proxAt = Date.now();
+    }
+    tx.write(path, { set });
+  });
+  return { ok: true };
+}
+
 /** Fap-Fap : jouer une carte (le serveur vérifie le tour, la main et la famille demandée). */
 async function cardsPlay({ uid, data, env }) {
   const gid = idStr(data.gameId);
@@ -6154,6 +6238,7 @@ async function cardsRematch({ uid, data, env }) {
     if (!g || g.over !== true) throw new HttpError('failed-precondition', "La manche n'est pas terminée.");
     if (!playersOf(g).some((p) => p.uid === uid)) throw new HttpError('permission-denied', 'Tu ne fais pas partie de cette partie.');
     if (g.nextId) return g.nextId;
+    const rLoc = g.game === 'fapfap' ? fapLoc(data) : null; // position obligatoire
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     const stake = intOr(g.stake, 0);
@@ -6175,6 +6260,7 @@ async function cardsRematch({ uid, data, env }) {
       order: Array.isArray(g.order) ? g.order : [],
       dealerUid: g.nextDealerUid || uid,
     });
+    if (rLoc) doc.locs = { [uid]: rLoc };
     tx.write(`cards/${id}`, { create: true, set: doc, serverTime: ['createdAt'] });
     tx.write(path, { set: { nextId: id } });
     return id;
@@ -7797,6 +7883,7 @@ const HANDLERS = {
   cardsStart,
   cardsOpen,
   cardsPlay,
+  cardsLoc,
   cardsBetPropose,
   cardsBetAccept,
   cardsBetCancel,
