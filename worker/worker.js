@@ -2178,6 +2178,60 @@ function adminRow(kind, mode, d) {
   };
 }
 
+/** Administrateur : retrouve une partie par son identifiant (début de l'id,
+ *  au moins 4 caractères) ou par le code de la salle de cartes. */
+async function adminFindGame({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const q = String(data.q || '').trim();
+  if (q.length < 4 || q.length > 40 || /[\/\s]/.test(q)) {
+    throw new HttpError('invalid-argument', 'Saisis au moins 4 caractères de l\'identifiant.');
+  }
+  await accessToken(env);
+  const cols = ['games', 'deuxdes', 'songo', 'damier', 'pileface', 'cards', 'localGames'];
+  const found = new Map();
+  const add = (col, d) => {
+    if (!d || !d.id || found.has(d.id)) return;
+    let kind = col === 'games' ? 'ludo' : col;
+    let mode = 'online';
+    if (col === 'cards') kind = ['boubayah', 'fapfap', 'anticote', 'tchek'].includes(d.game) ? d.game : 'tiah';
+    if (col === 'localGames') {
+      mode = 'local';
+      kind = ['deuxdes', 'ludo', 'songo', 'damier', 'pileface', 'tiah', 'boubayah'].includes(d.game) ? d.game : 'unknown';
+    }
+    found.set(d.id, adminRow(kind, mode, d));
+  };
+  await Promise.all(
+    cols.map(async (col) => {
+      try {
+        const lo = docName(env, `${col}/${q}`);
+        const hi = docName(env, `${col}/${q}\uf8ff`);
+        const res = await fsCall(env, 'runQuery', {
+          structuredQuery: {
+            from: [{ collectionId: col }],
+            where: {
+              compositeFilter: {
+                op: 'AND',
+                filters: [
+                  { fieldFilter: { field: { fieldPath: '__name__' }, op: 'GREATER_THAN_OR_EQUAL', value: { referenceValue: lo } } },
+                  { fieldFilter: { field: { fieldPath: '__name__' }, op: 'LESS_THAN_OR_EQUAL', value: { referenceValue: hi } } },
+                ],
+              },
+            },
+            limit: 5,
+          },
+        });
+        for (const r of Array.isArray(res) ? res : []) {
+          if (r.document) add(col, { id: r.document.name.split('/').pop(), ...fieldsToObj(r.document.fields || {}) });
+        }
+      } catch (_) {}
+    }),
+  );
+  try {
+    for (const d of await queryDocs(env, 'cards', eqFilter('code', q.toUpperCase()), 5)) add('cards', d);
+  } catch (_) {}
+  return { rows: [...found.values()].slice(0, 20) };
+}
+
 async function adminStats({ uid, data, env }) {
   if (!adminIds(env).includes(uid)) {
     throw new HttpError(
@@ -6428,6 +6482,8 @@ async function cardsFetch(env, gid, uid) {
         console.error('cards bets', e);
       }
     }
+  } else if (g && g.status === 'waiting' && g.over !== true) {
+    // Salle d'attente : rien à faire avancer, on évite 2 lectures (réponse plus rapide).
   } else {
     await cardsDrive(env, gid);
     try {
@@ -6518,14 +6574,14 @@ async function cardsJoin({ uid, data, env }) {
   if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
   await runTx(env, async (tx) => {
     const path = `cards/${gid}`;
-    const g = await tx.get(path);
+    const [g, meDoc] = await tx.getMany([path, `users/${uid}`]); // un seul aller-retour
     if (!g || g.status !== 'waiting') throw new HttpError('failed-precondition', "Cette salle n'est plus ouverte.");
     const players = playersOf(g);
     if (players.some((p) => p.uid === uid)) return;
     if (players.length >= intOr(g.maxPlayers, 6)) throw new HttpError('failed-precondition', 'Salle complète.');
     const jLoc = isFl(g.game) && intOr(g.maxPlayers, 4) >= 3 ? fapLoc(data) : null; // position obligatoire à 3-4 joueurs (pas à 2)
     if (jLoc && fapTooClose(g.locs, uid, jLoc)) throw new HttpError('failed-precondition', FAP_CLOSE_MSG);
-    const me = await tx.get(`users/${uid}`);
+    const me = meDoc;
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     const stake = intOr(g.stake, 0);
     const esc = stake * (isEsc2(g.game) ? 2 : 1);
@@ -8415,6 +8471,7 @@ const HANDLERS = {
   sideBetSync,
   localBetCreate,
   adminStats,
+  adminFindGame,
   adminHouseWithdraw,
   campayDeposit,
   campayDepositStatus,
