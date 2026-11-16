@@ -12,7 +12,7 @@ import 'geo_guard.dart';
 import 'lang.dart';
 import 'share_menu.dart';
 import 'lobby_widgets.dart';
-import 'main.dart' show firebaseReady, Sfx;
+import 'main.dart' show firebaseReady, Sfx, JoinBell;
 import 'online_screen.dart';
 import 'rules.dart';
 import 'stake_field.dart';
@@ -2996,7 +2996,10 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     if (status == 'cancelled') {
       return _shell(Center(child: Text(tr('Salle fermée', 'Room closed'), style: const TextStyle(color: Colors.white))));
     }
-    if (status == 'waiting') return _shell(_lobby(v));
+    if (status == 'waiting') {
+      final pl = (v['players'] as List?)?.length ?? 0;
+      return _shell(JoinBell(count: pl, isHost: v['hostUid'] == _me, child: _lobby(v)));
+    }
     final id = '${v['id']}';
     final needDeal = status == 'playing' && _dealtFor != id;
     Widget? overlay;
@@ -4044,7 +4047,10 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     if (status == 'cancelled') {
       return _shell(Center(child: Text(tr('Salle fermée', 'Room closed'), style: const TextStyle(color: Colors.white))));
     }
-    if (status == 'waiting') return _shell(_lobby(v));
+    if (status == 'waiting') {
+      final pl = (v['players'] as List?)?.length ?? 0;
+      return _shell(JoinBell(count: pl, isHost: v['hostUid'] == _me, child: _lobby(v)));
+    }
     final id = '${v['id']}';
     Widget? overlay;
     if (_dealtFor != id) {
@@ -4781,7 +4787,10 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     if (status == 'cancelled') {
       return _shell(Center(child: Text(tr('Salle fermée', 'Room closed'), style: const TextStyle(color: Colors.white))));
     }
-    if (status == 'waiting') return _shell(_lobby(v));
+    if (status == 'waiting') {
+      final pl = (v['players'] as List?)?.length ?? 0;
+      return _shell(JoinBell(count: pl, isHost: v['hostUid'] == _me, child: _lobby(v)));
+    }
     final id = '${v['id']}';
     Widget? overlay;
     if (_dealtFor != id) {
@@ -5591,7 +5600,10 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     if (status == 'cancelled') {
       return _shell(Center(child: Text(tr('Salle fermée', 'Room closed'), style: const TextStyle(color: Colors.white))));
     }
-    if (status == 'waiting') return _shell(_lobby(v));
+    if (status == 'waiting') {
+      final pl = (v['players'] as List?)?.length ?? 0;
+      return _shell(JoinBell(count: pl, isHost: v['hostUid'] == _me, child: _lobby(v)));
+    }
     final id = '${v['id']}';
     Widget? overlay;
     if (_dealtFor != id) {

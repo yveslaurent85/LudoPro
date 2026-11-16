@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide Text;
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:url_launcher/url_launcher.dart';
 import 'cashier_screen.dart';
 import 'tx_history_screen.dart';
@@ -134,8 +135,49 @@ class Sfx {
   void win() => _play('sfx_win.wav'); // victoire
   void roll() => _play('sfx_roll.wav'); // dé qui roule
   void six() => _play('sfx_six.wav'); // le dé tombe sur 6
+  void bell() {
+    _play('sfx_bell.wav'); // cloche : un joueur a rejoint
+    try {
+      HapticFeedback.heavyImpact();
+    } catch (_) {}
+  }
 
   void dispose() {}
+}
+
+/// Cloche pour le créateur : sonne dès que le nombre de joueurs augmente dans
+/// la salle d'attente. À poser autour de l'écran d'attente.
+class JoinBell extends StatefulWidget {
+  const JoinBell({super.key, required this.count, required this.isHost, required this.child});
+
+  final int count;
+  final bool isHost;
+  final Widget child;
+
+  @override
+  State<JoinBell> createState() => _JoinBellState();
+}
+
+class _JoinBellState extends State<JoinBell> {
+  final Sfx _sfx = Sfx();
+
+  @override
+  void didUpdateWidget(JoinBell old) {
+    super.didUpdateWidget(old);
+    if (widget.isHost && widget.count > old.count) {
+      _sfx.bell();
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+          duration: const Duration(seconds: 3),
+          content: Text(tr('🔔 Un joueur a rejoint ta partie : tu peux lancer !',
+              '🔔 A player joined your game: you can start!')),
+        ));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 // ----------------------------------------------------------------------
