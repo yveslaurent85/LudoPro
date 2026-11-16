@@ -203,7 +203,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  static const _cancelKinds = {'ludo', 'deuxdes', 'songo', 'damier', 'pileface', 'tiah', 'boubayah'};
+  static const _cancelKinds = {'ludo', 'deuxdes', 'songo', 'damier', 'pileface', 'tiah', 'boubayah', 'fapfap', 'anticote', 'tchek'};
 
   /// Partie en ligne ouverte ou en cours : l'administrateur peut l'annuler.
   bool _cancellable(Map<String, dynamic> r) =>
@@ -386,6 +386,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return 'TIAH';
       case 'boubayah':
         return 'BOUBAYAH';
+      case 'fapfap':
+        return 'FAP-FAP';
+      case 'anticote':
+        return 'ANTI-COTE';
+      case 'tchek':
+        return 'TCHEK GAMES';
       case 'sports':
         return 'Paris Sports';
       case 'courses':
@@ -887,7 +893,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       _snack("Cette partie n'a pas encore commencé.");
       return;
     }
-    if (const ['pileface', 'sports', 'courses'].contains(r['kind'])) {
+    if (const ['pileface', 'sports', 'courses', 'fapfap', 'anticote', 'tchek'].contains(r['kind'])) {
       _snack('Pas de revue pour ce jeu : consulte les mises et les commissions ici.');
       return;
     }
@@ -1179,6 +1185,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
             _chip('TIAH', kind == 'tiah', () => setState(() => kind = 'tiah')),
             _chip('BOUBAYAH', kind == 'boubayah',
                 () => setState(() => kind = 'boubayah')),
+            _chip('FAP-FAP', kind == 'fapfap',
+                () => setState(() => kind = 'fapfap')),
+            _chip('ANTI-COTE', kind == 'anticote',
+                () => setState(() => kind = 'anticote')),
+            _chip('TCHEK GAMES', kind == 'tchek',
+                () => setState(() => kind = 'tchek')),
             _chip('Paris Sports', kind == 'sports',
                 () => setState(() => kind = 'sports')),
             _chip('Paris Courses', kind == 'courses',
