@@ -643,47 +643,30 @@ async function payOut(
 // ne doit l'ouvrir aux joueurs).
 const HOUSE_PATH = 'house/ledger';
 
-// Partage des commissions : 50 % pour le 1er compte de ADMIN_UIDS, 50 % pour le
-// 2e (si la somme est impaire, le franc en trop va au 1er). Chacun retire sa
-// part vers son propre compte. Champs supplémentaires de house/ledger :
-//   bal0 / bal1             = part disponible du 1er / du 2e administrateur
-//   withdrawn0 / withdrawn1 = total déjà retiré par chacun
-//   balance                 = bal0 + bal1 (total disponible)
+// Caisse commune : toutes les commissions s'accumulent dans une seule caisse
+// (house/ledger.balance). N'importe quel compte de ADMIN_UIDS peut retirer
+// tout ce qui est disponible vers son propre compte. Les champs bal0/bal1 des
+// anciennes versions sont regroupés : balance = bal0 + bal1.
 
-/** Parts disponibles { b0, b1 }. Ancien format (sans bal0/bal1) : le solde
- *  actuel est partagé 50/50 la première fois. */
-function houseShares(h) {
+/** Solde disponible de la caisse (ancien format 50/50 inclus). */
+function houseTotal(h) {
   if (h && h.bal0 !== undefined && h.bal0 !== null && h.bal1 !== undefined && h.bal1 !== null) {
-    return { b0: Math.max(0, intOr(h.bal0, 0)), b1: Math.max(0, intOr(h.bal1, 0)) };
+    return Math.max(0, intOr(h.bal0, 0)) + Math.max(0, intOr(h.bal1, 0));
   }
-  const total = Math.max(0, intOr(h ? h.balance : 0, 0));
-  const b0 = Math.ceil(total / 2);
-  return { b0, b1: total - b0 };
+  return Math.max(0, intOr(h ? h.balance : 0, 0));
 }
 
-/** Ce que l'administrateur d'index `idx` peut retirer (`count` = nombre
- *  d'identifiants dans ADMIN_UIDS). Avec un seul administrateur, il garde tout. */
-function houseMyAmount(count, idx, b0, b1) {
-  if (idx === 0) return b0 + (count < 2 ? b1 : 0);
-  if (idx === 1) return b1;
-  return 0;
-}
-
-/** Ajoute `amount` aux commissions de Katika, réparties 50/50 entre les deux
- *  administrateurs (à appeler UNE fois par transaction). */
+/** Ajoute `amount` à la caisse commune (à appeler UNE fois par transaction). */
 async function houseAdd(tx, amount) {
   amount = Math.floor(amount);
   if (!(amount > 0)) return;
   const h = await tx.get(HOUSE_PATH);
-  const { b0, b1 } = houseShares(h);
-  const first = Math.ceil(amount / 2);
-  const n0 = b0 + first;
-  const n1 = b1 + (amount - first);
+  const total = houseTotal(h) + amount;
   tx.write(HOUSE_PATH, {
     set: {
-      bal0: n0,
-      bal1: n1,
-      balance: n0 + n1,
+      bal0: total,
+      bal1: 0,
+      balance: total,
       earned: Math.max(0, intOr(h ? h.earned : 0, 0)) + amount,
     },
   });
@@ -2243,8 +2226,7 @@ async function adminStats({ uid, data, env }) {
     if (f) pool = intOr(fieldsToObj(f.fields || {}).pool, 0);
   } catch (_) {}
 
-  // Commissions de Katika : MA moitié (disponible / retirée). Le 1er compte de
-  // ADMIN_UIDS touche 50 %, le 2e touche 50 %.
+  // Commissions de Katika : caisse commune, visible par tous les administrateurs.
   const adminList = adminIds(env);
   const myIdx = adminList.indexOf(uid);
   let house = { available: 0, earned: 0, withdrawn: 0, totalEarned: 0 };
@@ -2253,12 +2235,11 @@ async function adminStats({ uid, data, env }) {
     const hf = Array.isArray(hr) && hr[0] && hr[0].found;
     if (hf) {
       const h = fieldsToObj(hf.fields || {});
-      const { b0, b1 } = houseShares(h);
-      const mine = houseMyAmount(adminList.length, myIdx, b0, b1);
-      const wd = Math.max(0, intOr(myIdx === 1 ? h.withdrawn1 : myIdx === 0 ? h.withdrawn0 : 0, 0));
+      const avail = houseTotal(h);
+      const wd = Math.max(0, intOr(h.withdrawn, 0));
       house = {
-        available: mine,
-        earned: mine + wd,
+        available: avail,
+        earned: avail + wd,
         withdrawn: wd,
         totalEarned: Math.max(0, intOr(h.earned, 0)),
       };
@@ -2287,32 +2268,23 @@ async function adminStats({ uid, data, env }) {
     referralPercent: REFERRAL_PERCENT,
     house: {
       ...house,
-      sharePercent: adminList.length < 2 ? 100 : 50,
+      sharePercent: 100,
       min: HOUSE_WITHDRAW_MIN,
-      canWithdraw: myIdx >= 0 && myIdx <= 1 && house.available >= HOUSE_WITHDRAW_MIN,
+      canWithdraw: myIdx >= 0 && house.available >= HOUSE_WITHDRAW_MIN,
     },
   };
 }
 
-/** Administrateur : transfère SA part des commissions de Katika (50 %) vers son
- *  compte principal (jetons). Possible quand elle atteint HOUSE_WITHDRAW_MIN.
- *  Seuls les 2 premiers comptes de ADMIN_UIDS reçoivent des commissions. */
+/** Administrateur : transfère toute la caisse des commissions de Katika vers
+ *  son compte principal (jetons). Possible quand elle atteint HOUSE_WITHDRAW_MIN. */
 async function adminHouseWithdraw({ uid, env }) {
   const ids = adminIds(env);
   if (!ids.includes(uid)) {
     throw new HttpError('permission-denied', "Accès réservé à l'administrateur.");
   }
-  const idx = ids.indexOf(uid);
-  if (idx > 1) {
-    throw new HttpError(
-      'permission-denied',
-      'Les commissions sont partagées entre les 2 premiers comptes administrateurs.',
-    );
-  }
   return runTx(env, async (tx) => {
     const h = await tx.get(HOUSE_PATH);
-    const { b0, b1 } = houseShares(h);
-    const amount = houseMyAmount(ids.length, idx, b0, b1);
+    const amount = houseTotal(h);
     if (amount < HOUSE_WITHDRAW_MIN) {
       throw new HttpError(
         'failed-precondition',
@@ -2321,20 +2293,15 @@ async function adminHouseWithdraw({ uid, env }) {
     }
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
-    // Il ne reste que la part de l'autre administrateur (rien si un seul admin).
-    const takesAll = idx === 0 && ids.length < 2;
-    const n0 = idx === 0 ? 0 : b0;
-    const n1 = idx === 1 || takesAll ? 0 : b1;
     tx.write(`users/${uid}`, { incr: { balance: amount } });
     tx.write(HOUSE_PATH, {
       set: {
-        bal0: n0,
-        bal1: n1,
-        balance: n0 + n1,
+        bal0: 0,
+        bal1: 0,
+        balance: 0,
         withdrawn: Math.max(0, intOr(h.withdrawn, 0)) + amount,
-        ...(idx === 0
-          ? { withdrawn0: Math.max(0, intOr(h.withdrawn0, 0)) + amount }
-          : { withdrawn1: Math.max(0, intOr(h.withdrawn1, 0)) + amount }),
+        ['withdrawn' + (ids.indexOf(uid) === 1 ? '1' : '0')]:
+          Math.max(0, intOr(h['withdrawn' + (ids.indexOf(uid) === 1 ? '1' : '0')], 0)) + amount,
       },
     });
     return { amount, balance: balanceOf(me) + amount };
