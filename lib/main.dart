@@ -326,30 +326,34 @@ class HomeScreen extends StatelessWidget {
           _requireLogin(context, page);
         }
 
+        // Menu en 2 colonnes : chaque entrée est une tuile (icône au-dessus du texte).
+        final menuW = ((MediaQuery.of(sheetCtx).size.width.clamp(0.0, 560.0)) - 50) / 2;
+
         Widget item(IconData icon, String label, Color color, VoidCallback f) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
-                  alignment: Alignment.centerLeft,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+          return SizedBox(
+            width: menuW,
+            height: 86,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+              onPressed: f,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 28),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
                   ),
-                ),
-                onPressed: f,
-                icon: Icon(icon),
-                label: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+                ],
               ),
             ),
           );
@@ -477,6 +481,13 @@ class HomeScreen extends StatelessWidget {
                           ],
                         ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
                 item(Icons.sports_esports, tr('Jeux', 'Games'),
                     const Color(0xFFE5262B), () {
                   Navigator.of(sheetCtx).pop();
@@ -538,6 +549,9 @@ class HomeScreen extends StatelessWidget {
                       const SnackBar(content: Text('Tu es déconnecté.')),
                     );
                   }),
+                    ],
+                  ),
+                ),
               ],
             ),
            ),
@@ -1014,22 +1028,13 @@ class _GamesGrid extends StatelessWidget {
           onTap: () => requireLogin(context, (_) => const DeuxDesPage()),
         ),
         _GameTile(
-          color: const Color(0xFF8D5A2B),
-          icon: Icons.workspaces,
-          image: 'assets/game_songo.png',
-          title: 'Songô',
-          subtitle: tr('Jeu de graines', 'Seed game'),
-          onTap: () => requireLogin(context, (_) => const SongoPage()),
-        ),
-        _GameTile(
           color: const Color(0xFF37474F),
           icon: Icons.grid_on,
           image: 'assets/game_damier.png',
-          title: 'Damier',
-          subtitle: tr('Présentiel, en ligne, Deux buts sort, tournoi',
-              'Local, online, Two strikes, tournament'),
+          title: 'Damier & Songô',
+          subtitle: tr('Damier · Songô · tournoi', 'Draughts · Songo · tournament'),
           badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => requireLogin(context, (_) => const DamierPage()),
+          onTap: () => requireLogin(context, (_) => const _DamierSongoPage()),
         ),
         _GameTile(
           color: const Color(0xFFF9A825),
@@ -1048,7 +1053,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF0E7A4B),
           icon: Icons.style,
           title: tr('Cartes', 'Cards'),
-          subtitle: 'TIAH · BOUBAYAH · TCHEK GAMES',
+          subtitle: 'TIAH · BOUBAYAH · FAP-FAP · ANTI-COTE · TCHEK',
           badge: tr('NOUVEAU', 'NEW'),
           onTap: () => requireLogin(context, (_) => const CartesPage()),
         ),
@@ -1061,6 +1066,64 @@ class _GamesGrid extends StatelessWidget {
           onTap: () => requireLogin(context, (_) => const ParisParDerrierePage()),
         ),
       ],
+    );
+  }
+}
+
+/// Damier & Songô : choix du jeu de plateau.
+class _DamierSongoPage extends StatelessWidget {
+  const _DamierSongoPage();
+
+  @override
+  Widget build(BuildContext context) {
+    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: _appBackground,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                    const Text(
+                      'Damier & Songô',
+                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                _ModeCard(
+                  color: const Color(0xFF37474F),
+                  icon: Icons.grid_on,
+                  image: 'assets/game_damier.png',
+                  title: 'Damier',
+                  subtitle: tr('Présentiel, en ligne, Deux buts sort, tournoi',
+                      'Local, online, Two strikes, tournament'),
+                  onTap: () => open(const DamierPage()),
+                ),
+                const SizedBox(height: 14),
+                _ModeCard(
+                  color: const Color(0xFF8D5A2B),
+                  icon: Icons.workspaces,
+                  image: 'assets/game_songo.png',
+                  title: 'Songô',
+                  subtitle: tr('Jeu de graines', 'Seed game'),
+                  onTap: () => open(const SongoPage()),
+                ),
+                const Spacer(flex: 2),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2674,7 +2737,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   int _randomFace() {
     // Les captures sont un peu plus fréquentes : quand une face permet de
     // capturer, elle a 12 % de chances de plus de sortir (120 pour mille).
-    const captureBoost = 120;
+    const captureBoost = 90;
     final capFaces = <int>[
       for (int f = 1; f <= 6; f++)
         if (_faceCaptures(f)) f,
