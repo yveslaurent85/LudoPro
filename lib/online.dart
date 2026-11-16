@@ -1669,7 +1669,11 @@ class OnlineGameRoom extends StatelessWidget {
         }
 
         if (d['status'] == 'waiting') {
-          return _waiting(context, d, players, user.uid);
+          return JoinBell(
+            count: players.length,
+            isHost: d['hostUid'] == user.uid,
+            child: _waiting(context, d, players, user.uid),
+          );
         }
 
         return LudoGame(
