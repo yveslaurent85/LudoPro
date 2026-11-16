@@ -1682,6 +1682,7 @@ async function sideBetPropose({ uid, data, env }) {
   const amount = intOr(data.amount, -1);
   const targetUid = typeof data.targetUid === 'string' && data.targetUid ? data.targetUid : null;
   const side = data.side === 'under' ? 'under' : 'over';
+  let inviter = '';
 
   if (!roomId || (type !== 'duel' && type !== 'seven')) {
     throw new HttpError('invalid-argument', 'Pari invalide.');
@@ -1732,6 +1733,7 @@ async function sideBetPropose({ uid, data, env }) {
     if (balanceOf(me) < amount) {
       throw new HttpError('failed-precondition', 'Solde insuffisant.');
     }
+    inviter = playersOf(room)[seat].name || 'Un joueur';
 
     const id = newId();
     tx.write(`users/${uid}`, { incr: { balance: -amount } });
@@ -1757,6 +1759,10 @@ async function sideBetPropose({ uid, data, env }) {
       union: { ids: [id] },
     });
   });
+  // Invitation : le joueur défié reçoit une notification (il accepte ou refuse dans la partie).
+  if (type === 'duel' && targetUid) {
+    later(env, pushToUser(env, targetUid, '⚔️ Défi reçu', `${inviter} te défie de ${amount} FCFA au Deux dés. Ouvre la partie pour accepter ou refuser.`));
+  }
   return { ok: true };
 }
 
@@ -5311,7 +5317,7 @@ async function adminTournamentEntries({ uid, data, env }) {
 // ce qu'il a le droit de voir (cardsView). Un joueur inactif est joué automatiquement
 // après CARDS_TURN_MS (l'ouverture est la seule action possible).
 
-const CARDS_TURN_MS = 5000; // 5 s par joueur et par action, pour tous les jeux de cartes
+const CARDS_TURN_MS = 10000; // 10 s par joueur et par action, pour tous les jeux de cartes
 const CARDS_MAX_OPEN_PER_HOST = 3;
 const CARDS_START_AFTER_MS = 120000;
 
@@ -5369,7 +5375,7 @@ const cardsIsFomekou = (d, uid) => {
 // la famille demandée gagne le pli et entame le suivant. Mise bloquée 2 x M ;
 // Corat = gain doublé (voir settleGameCore).
 // ----------------------------------------------------------------------
-const FAP_TURN_MS = 5000; // 5 s par carte
+const FAP_TURN_MS = 10000; // 10 s par carte
 // Anti-triche Fap-Fap : position obligatoire, 150 m minimum entre 2 joueurs d'une même table.
 const FAP_MIN_DIST_M = 150;
 const FAP_MAX_ACC_M = 100; // précision GPS exigée
@@ -6177,6 +6183,22 @@ function cardsView(id, g, uid) {
 //  Égalité (ou 13 pile) : mises rendues.
 
 const FETICHE = 13;
+/** Défis entre joueurs avant le départ (Anti-Cote, Tchek) : jeux « rapides » avec défi à la création. */
+const cardsFlBets = (g) => g === 'anticote' || g === 'tchek';
+/** Vainqueur d'un défi : celui qui gagne la manche ; si un tiers gagne, Anti-Cote = meilleur total, Tchek = moins de cartes. */
+function flDuelWinner(room, a, b) {
+  const win = Array.isArray(room.winnerUids) ? room.winnerUids : [];
+  if (win.includes(a) !== win.includes(b)) return win.includes(a) ? a : b;
+  const sc = (u) => {
+    const h = room.hands && room.hands[u];
+    if (!Array.isArray(h)) return -1000;
+    if (room.game === 'tchek') return -h.length;
+    return cardsTotal(h) <= 21 ? cardsTotal(h) : -1;
+  };
+  const x = sc(a);
+  const y = sc(b);
+  return x === y ? null : x > y ? a : b;
+}
 const cardsBetPath = (rid, id) => `cards/${rid}/bets/${id}`;
 const cardsBetIndexPath = (rid) => `cards/${rid}/betMeta/index`;
 const cardsPlayed = (g, uid) => g.over === true || (Array.isArray(g.opened) && g.opened.includes(uid));
@@ -6209,27 +6231,33 @@ async function cardsBetPropose({ uid, data, env }) {
   const amount = intOr(data.amount, -1);
   const targetUid = typeof data.targetUid === 'string' && data.targetUid ? data.targetUid : null;
   const side = data.side === 'under' ? 'under' : 'over';
+  let inviter = '';
+  let gameName = '';
   if (!gid || (type !== 'duel' && type !== 'fetiche')) throw new HttpError('invalid-argument', 'Pari invalide.');
   if (amount < BET_MIN || amount > BET_MAX) throw new HttpError('invalid-argument', 'Mise invalide.');
   await runTx(env, async (tx) => {
     const path = `cards/${gid}`;
     const g = await tx.get(path);
     if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
-    if (isFl(g.game)) throw new HttpError('invalid-argument', 'Pas de paris à ce jeu.');
+    const flb = cardsFlBets(g.game);
+    if (isFl(g.game) && !flb) throw new HttpError('invalid-argument', 'Pas de paris à ce jeu.');
+    if (flb && type !== 'duel') throw new HttpError('invalid-argument', 'Seul le défi entre joueurs existe à ce jeu.');
     if (type === 'fetiche' && g.game !== 'boubayah') {
       throw new HttpError('invalid-argument', 'Le défi Fétiche existe seulement au BOUBAYAH.');
     }
-    if (intOr(g.stake, 0) <= 0) throw new HttpError('failed-precondition', 'Pas de pari dans une partie gratuite.');
-    if (g.status !== 'playing' || g.over === true) throw new HttpError('failed-precondition', "La manche n'est pas en cours.");
+    if (!flb && intOr(g.stake, 0) <= 0) throw new HttpError('failed-precondition', 'Pas de pari dans une partie gratuite.');
+    if (flb ? g.status !== 'waiting' : g.status !== 'playing' || g.over === true) {
+      throw new HttpError('failed-precondition', flb ? 'Les défis se font avant le début de la manche.' : "La manche n'est pas en cours.");
+    }
     const players = playersOf(g);
     const me = players.find((p) => p.uid === uid);
     if (!me) throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
-    if (cardsPlayed(g, uid)) throw new HttpError('failed-precondition', 'Tu as déjà ouvert tes cartes.');
+    if (!flb && cardsPlayed(g, uid)) throw new HttpError('failed-precondition', 'Tu as déjà ouvert tes cartes.');
     let target = null;
     if (targetUid) {
       target = players.find((p) => p.uid === targetUid);
       if (!target || targetUid === uid) throw new HttpError('invalid-argument', 'Adversaire invalide.');
-      if (cardsPlayed(g, targetUid)) throw new HttpError('failed-precondition', 'Ce joueur a déjà ouvert ses cartes.');
+      if (!flb && cardsPlayed(g, targetUid)) throw new HttpError('failed-precondition', 'Ce joueur a déjà ouvert ses cartes.');
     }
     const bets = await cardsLoadBets(tx, gid);
     if (bets.length >= BET_MAX_PER_ROOM) throw new HttpError('failed-precondition', 'Trop de paris dans cette partie.');
@@ -6238,6 +6266,8 @@ async function cardsBetPropose({ uid, data, env }) {
     }
     const u = await tx.get(`users/${uid}`);
     if (balanceOf(u) < amount) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    inviter = me.name || 'Un joueur';
+    gameName = g.game === 'anticote' ? 'ANTI-COTE' : g.game === 'tchek' ? 'TCHEK GAMES' : g.game === 'boubayah' ? 'BOUBAYAH' : 'TIAH';
     const id = newId();
     tx.write(`users/${uid}`, { incr: { balance: -amount } });
     tx.write(cardsBetPath(gid, id), {
@@ -6260,6 +6290,10 @@ async function cardsBetPropose({ uid, data, env }) {
     tx.write(cardsBetIndexPath(gid), { set: { n: bets.length + 1 }, union: { ids: [id] } });
     tx.write(path, { set: { betsN: bets.length + 1, betsDone: false } });
   });
+  // Invitation : le joueur défié reçoit une notification (il accepte ou refuse dans la table).
+  if (type === 'duel' && targetUid) {
+    later(env, pushToUser(env, targetUid, '⚔️ Défi reçu', `${inviter} te défie de ${amount} FCFA à ${gameName}. Ouvre la table pour accepter ou refuser.`));
+  }
   return cardsFetch(env, gid, uid);
 }
 
@@ -6274,11 +6308,14 @@ async function cardsBetAccept({ uid, data, env }) {
     if (bet.status !== 'open') throw new HttpError('failed-precondition', "Ce pari n'est plus disponible.");
     if (bet.proposerUid === uid) throw new HttpError('failed-precondition', 'Tu ne peux pas relever ton propre pari.');
     if (bet.targetUid && bet.targetUid !== uid) throw new HttpError('permission-denied', "Ce pari ne t'est pas destiné.");
-    if (g.over === true || g.status !== 'playing') throw new HttpError('failed-precondition', "La manche n'est pas en cours.");
+    const flb = cardsFlBets(g.game);
+    if (flb ? g.status !== 'waiting' : g.over === true || g.status !== 'playing') {
+      throw new HttpError('failed-precondition', flb ? 'Les défis se font avant le début de la manche.' : "La manche n'est pas en cours.");
+    }
     const me = playersOf(g).find((p) => p.uid === uid);
     if (!me) throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
-    if (cardsPlayed(g, uid)) throw new HttpError('failed-precondition', 'Tu as déjà ouvert tes cartes.');
-    if (cardsPlayed(g, bet.proposerUid)) throw new HttpError('failed-precondition', 'Le parieur a déjà ouvert ses cartes.');
+    if (!flb && cardsPlayed(g, uid)) throw new HttpError('failed-precondition', 'Tu as déjà ouvert tes cartes.');
+    if (!flb && cardsPlayed(g, bet.proposerUid)) throw new HttpError('failed-precondition', 'Le parieur a déjà ouvert ses cartes.');
     const u = await tx.get(`users/${uid}`);
     if (balanceOf(u) < bet.amount) throw new HttpError('failed-precondition', 'Solde insuffisant.');
     tx.write(`users/${uid}`, { incr: { balance: -bet.amount } });
@@ -6321,8 +6358,9 @@ async function cardsBetsSync(env, gid) {
     let pending = 0;
     for (const { path, b } of bets) {
       if (b.status === 'open') {
-        const expired =
-          room.over === true || cardsPlayed(room, b.proposerUid) || (b.targetUid && cardsPlayed(room, b.targetUid));
+        const expired = cardsFlBets(room.game)
+          ? room.status !== 'waiting' || room.over === true
+          : room.over === true || cardsPlayed(room, b.proposerUid) || (b.targetUid && cardsPlayed(room, b.targetUid));
         if (expired) {
           tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
           tx.write(path, { set: { status: 'expired' }, serverTime: ['closedAt'] });
@@ -6332,6 +6370,12 @@ async function cardsBetsSync(env, gid) {
         continue;
       }
       if (b.status !== 'accepted') continue;
+      if (cardsFlBets(room.game) && room.status === 'cancelled') {
+        tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
+        tx.write(`users/${b.opponentUid}`, { incr: { balance: b.amount } });
+        tx.write(path, { set: { status: 'cancelled' }, serverTime: ['closedAt'] });
+        continue;
+      }
       let winner;
       if (b.type === 'fetiche') {
         if (!cardsPlayed(room, b.proposerUid)) {
@@ -6340,6 +6384,12 @@ async function cardsBetsSync(env, gid) {
         }
         const v = cardsFeticheValue(room, b.proposerUid);
         winner = v === FETICHE ? null : v > FETICHE === (b.side !== 'under') ? b.proposerUid : b.opponentUid;
+      } else if (cardsFlBets(room.game)) {
+        if (room.over !== true) {
+          pending++;
+          continue;
+        }
+        winner = flDuelWinner(room, b.proposerUid, b.opponentUid);
       } else {
         if (!cardsPlayed(room, b.proposerUid) || !cardsPlayed(room, b.opponentUid)) {
           pending++;
@@ -6402,6 +6452,14 @@ async function cardsFetch(env, gid, uid) {
     if (g.status === 'playing' && g.over !== true && Date.now() - intOr(g.turnAt, 0) > cardsTurnMs(g)) {
       await cardsDrive(env, gid);
       g = (await readDoc(env, `cards/${gid}`)) || g;
+    }
+    if (cardsFlBets(g.game) && intOr(g.betsN, 0) > 0 && g.betsDone !== true && (g.status !== 'waiting' || g.over === true)) {
+      try {
+        await cardsBetsSync(env, gid);
+        g = (await readDoc(env, `cards/${gid}`)) || g;
+      } catch (e) {
+        console.error('cards bets', e);
+      }
     }
   } else {
     await cardsDrive(env, gid);
@@ -6533,6 +6591,19 @@ async function cardsLeave({ uid, data, env }) {
     if (!players.some((p) => p.uid === uid)) return;
     const stake = intOr(g.stake, 0);
     if (stake > 0) tx.write(`users/${uid}`, { incr: { balance: stake * (isEsc2(g.game) ? 2 : 1) } });
+    if (cardsFlBets(g.game) && intOr(g.betsN, 0) > 0) {
+      // Défis en attente ou acceptés qui concernent ce joueur : annulés, mises rendues.
+      for (const { path: bp, b } of await cardsLoadBets(tx, gid)) {
+        if (b.status === 'open' && (b.proposerUid === uid || b.targetUid === uid)) {
+          tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
+          tx.write(bp, { set: { status: b.proposerUid === uid ? 'cancelled' : 'declined' }, serverTime: ['closedAt'] });
+        } else if (b.status === 'accepted' && (b.proposerUid === uid || b.opponentUid === uid)) {
+          tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
+          tx.write(`users/${b.opponentUid}`, { incr: { balance: b.amount } });
+          tx.write(bp, { set: { status: 'cancelled' }, serverTime: ['closedAt'] });
+        }
+      }
+    }
     const np = players.filter((p) => p.uid !== uid);
     if (!np.length) {
       tx.write(path, { set: { status: 'cancelled', over: true, settled: true, players: [], uids: [], paid: [], pot: 0 } });
@@ -7868,7 +7939,7 @@ function ludoBalancedFace(d, c, rnd) {
 function ludoRandomFace(d, c, rnd) {
   const capFaces = [];
   for (let f = 1; f <= 6; f++) if (ludoFaceCaptures(d, c, f)) capFaces.push(f);
-  if (capFaces.length > 0 && Math.floor(rnd() * 1000) < 90) {
+  if (capFaces.length > 0 && Math.floor(rnd() * 1000) < 100) {
     return capFaces[Math.floor(rnd() * capFaces.length)];
   }
   return ludoBalancedFace(d, c, rnd);
