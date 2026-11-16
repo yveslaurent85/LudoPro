@@ -39,6 +39,12 @@ const List<Color> _seatColors = [
   Color(0xFFFFCC80),
 ];
 
+/// Identifiant court de la partie (les 6 premiers caractères) : à donner à l'admin.
+String _gid(Map<String, dynamic> v) {
+  final id = '${v['id']}';
+  return id.length > 6 ? id.substring(0, 6) : id;
+}
+
 String _fcfa(int n) {
   final s = n.toString();
   final b = StringBuffer();
@@ -115,12 +121,13 @@ class _CardView extends StatelessWidget {
     }
     final c = card!;
     final col = c.red ? const Color(0xFFD32F2F) : const Color(0xFF111111);
-    final showName = w >= 40;
+    final big = w >= 60;
+    final nameFs = (w * 0.17).clamp(9.5, 15.0).toDouble();
     Widget index() => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(c.label, style: TextStyle(color: col, fontWeight: FontWeight.w900, fontSize: w * 0.32, height: 1)),
-            Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.26, height: 1)),
+            Text(c.label, style: TextStyle(color: col, fontWeight: FontWeight.w900, fontSize: w * 0.34, height: 1)),
+            Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.27, height: 1.05)),
           ],
         );
     return Container(
@@ -128,25 +135,32 @@ class _CardView extends StatelessWidget {
       height: h,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(w * 0.14),
-        border: Border.all(color: const Color(0xFF9E9E9E), width: 1.2),
+        borderRadius: BorderRadius.circular(w * 0.12),
+        border: Border.all(color: const Color(0xFFB0B0B0), width: 1.2),
         boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 5, offset: Offset(0, 3))],
       ),
       child: Stack(
         children: [
-          Positioned(left: w * 0.08, top: w * 0.05, child: index()),
-          if (showName) Positioned(right: w * 0.08, bottom: w * 0.05, child: Transform.rotate(angle: pi, child: index())),
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(c.symbol, style: TextStyle(color: col, fontSize: w * (showName ? 0.46 : 0.6), height: 1)),
-                if (showName)
-                  Text(c.family,
-                      style: TextStyle(color: col, fontWeight: FontWeight.w900, fontSize: w * 0.16, height: 1.1)),
-              ],
+          Positioned(left: w * 0.07, top: w * 0.04, child: index()),
+          // Nom de la famille : bandeau de couleur, bien lisible (visible aussi dans l'éventail).
+          Positioned(
+            left: w * 0.05,
+            top: w * 0.04 + w * 0.64,
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: w * 0.05, vertical: 1),
+              decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(4)),
+              child: Text(c.family,
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: nameFs, height: 1.15)),
             ),
           ),
+          // Grand symbole, comme sur une vraie carte.
+          Positioned(
+            right: w * 0.07,
+            top: big ? h * 0.26 : h * 0.34,
+            child: Text(c.symbol, style: TextStyle(color: col, fontSize: w * (big ? 0.62 : 0.5), height: 1)),
+          ),
+          if (big)
+            Positioned(right: w * 0.07, bottom: w * 0.04, child: Transform.rotate(angle: pi, child: index())),
         ],
       ),
     );
@@ -331,8 +345,95 @@ class _ConfettiPainter extends CustomPainter {
 }
 
 /// Cartes du milieu, classées dans l'ordre : la 1re est celle du dessus.
+/// Main en éventail (comme une vraie main) : la carte choisie s'envole vers la table.
+class _FanHand extends StatelessWidget {
+  const _FanHand({
+    required this.cards,
+    required this.legal,
+    required this.canPlay,
+    required this.fly,
+    required this.hidden,
+    required this.onPlay,
+    this.w = 80,
+  });
+
+  final List<_Card> cards;
+  final Set<int> legal;
+  final bool canPlay; // c'est mon tour et je peux jouer
+  final int fly; // code de la carte en train de partir (-1 : aucune)
+  final bool hidden;
+  final void Function(_Card c) onPlay;
+  final double w;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, box) {
+      final n = cards.length;
+      if (n == 0) return const SizedBox(height: 10);
+      final avail = box.maxWidth.isFinite ? box.maxWidth : 320.0;
+      var step = w * 0.7;
+      if (n > 1 && w + (n - 1) * step > avail) step = (avail - w) / (n - 1);
+      final total = w + (n - 1) * step;
+      final h = w * 1.42;
+      final mid = (n - 1) / 2;
+      return SizedBox(
+        width: avail,
+        height: h + 34,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            for (var i = 0; i < n; i++)
+              Positioned(
+                left: (avail - total) / 2 + i * step,
+                top: 22 + (i - mid).abs() * (i - mid).abs() * 1.6,
+                child: _one(cards[i], (i - mid) * 0.075),
+              ),
+          ],
+        ),
+      );
+    });
+  }
+
+  Widget _one(_Card c, double angle) {
+    final ok = canPlay && legal.contains(c.code);
+    final flying = fly == c.code;
+    Widget card = _CardView(card: c, w: w, up: !hidden);
+    if (!canPlay || legal.contains(c.code)) {
+      // pleine opacité
+    } else {
+      card = Opacity(opacity: 0.4, child: card);
+    }
+    if (flying) {
+      card = TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeIn,
+        builder: (context, v, ch) => Opacity(
+          opacity: (1 - v).clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(0, -150 * v),
+            child: Transform.scale(scale: 1 + 0.25 * v, child: ch),
+          ),
+        ),
+        child: card,
+      );
+    } else if (ok) {
+      card = Transform.translate(offset: const Offset(0, -12), child: card);
+    }
+    return Transform.rotate(
+      angle: angle,
+      alignment: Alignment.bottomCenter,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: ok && !flying ? () => onPlay(c) : null,
+        child: card,
+      ),
+    );
+  }
+}
+
 class _MiddleStrip extends StatelessWidget {
-  const _MiddleStrip({required this.cards, this.w = 38});
+  const _MiddleStrip({required this.cards, this.w = 56});
 
   final List<_Card> cards; // la 1re = dessus du paquet
   final double w;
@@ -356,7 +457,7 @@ class _MiddleStrip extends StatelessWidget {
             // Les cartes s'ouvrent l'une après l'autre quand le milieu apparaît.
             child: _PopIn(
               key: ValueKey('mid-${cards[i].v}-${cards[i].suit}'),
-              delayMs: i * 170,
+              delayMs: i * 70,
               child: _CardView(card: cards[i], w: w),
             ),
           ),
@@ -3729,7 +3830,7 @@ List<_Card> _fapLegal(List<_Card> hand, List<_FapPlay> trick) {
   return same.isEmpty ? List<_Card>.of(hand) : same;
 }
 
-Widget _fapPlayed(List<_Card> cards, {double w = 34}) => Wrap(
+Widget _fapPlayed(List<_Card> cards, {double w = 50}) => Wrap(
       spacing: 4,
       runSpacing: 4,
       children: [for (final c in cards) _CardView(card: c, w: w)],
@@ -3947,6 +4048,17 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     }
   }
 
+  int _flyCode = -1; // carte en train de partir vers la table (réponse instantanée)
+
+  void _playCard(_Card c) {
+    if (_busy) return;
+    _sfx.land();
+    setState(() => _flyCode = c.code);
+    _do(() => Wallet.cardsPlay(widget.gameId, c.code)).whenComplete(() {
+      if (mounted) setState(() => _flyCode = -1);
+    });
+  }
+
   Future<void> _do(Future<Map<String, dynamic>> Function() f) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -4014,7 +4126,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
       const GameInfoButton(gameKey: 'anticote'),
       Expanded(
         child: Text(
-          'ANTI-COTE · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+          'ANTI-COTE · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''} · ID ${_gid(v)}',
           style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
         ),
       ),
@@ -4381,7 +4493,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
                 child: Wrap(spacing: 10, runSpacing: 6, children: [
                   for (final t in trick)
                     Column(mainAxisSize: MainAxisSize.min, children: [
-                      _CardView(card: _decode((t['card'] as num).toInt()), w: 44),
+                      _PopIn(key: ValueKey('tr-${t['card']}'), child: _CardView(card: _decode((t['card'] as num).toInt()), w: 60)),
                       Text(nameOf('${t['uid']}'), style: const TextStyle(color: Colors.white70, fontSize: 11)),
                     ]),
                 ]),
@@ -4434,21 +4546,14 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
                   style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
-                Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
-                  for (final c in myHand)
-                    GestureDetector(
-                      onTap: phase == 'play' && myTurn && !_busy && legal.contains(c.code)
-                          ? () => _do(() => Wallet.cardsPlay(widget.gameId, c.code))
-                          : null,
-                      child: Opacity(
-                        opacity: phase != 'play' || !myTurn || legal.contains(c.code) ? 1 : 0.35,
-                        child: Transform.translate(
-                          offset: Offset(0, phase == 'play' && myTurn && legal.contains(c.code) ? -6 : 0),
-                          child: _CardView(card: c, w: 56, up: !_hidden),
-                        ),
-                      ),
-                    ),
-                ]),
+                _FanHand(
+                  cards: myHand,
+                  legal: legal,
+                  canPlay: phase == 'play' && myTurn && !_busy,
+                  fly: _flyCode,
+                  hidden: _hidden,
+                  onPlay: _playCard,
+                ),
                 if (phase == 'open' && myTurn)
                   Padding(
                     padding: const EdgeInsets.only(top: 10),
@@ -4754,7 +4859,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
       const GameInfoButton(gameKey: 'tchek'),
       Expanded(
         child: Text(
-          'TCHEK GAMES · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+          'TCHEK GAMES · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''} · ID ${_gid(v)}',
           style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
         ),
       ),
@@ -5500,6 +5605,17 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     }
   }
 
+  int _flyCode = -1; // carte en train de partir vers la table (réponse instantanée)
+
+  void _playCard(_Card c) {
+    if (_busy) return;
+    _sfx.land();
+    setState(() => _flyCode = c.code);
+    _do(() => Wallet.cardsPlay(widget.gameId, c.code)).whenComplete(() {
+      if (mounted) setState(() => _flyCode = -1);
+    });
+  }
+
   Future<void> _do(Future<Map<String, dynamic>> Function() f) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -5567,7 +5683,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
       const GameInfoButton(gameKey: 'fapfap'),
       Expanded(
         child: Text(
-          'FAP-FAP · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
+          'FAP-FAP · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''} · ID ${_gid(v)}',
           style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900),
         ),
       ),
@@ -5886,7 +6002,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                     Wrap(spacing: 10, runSpacing: 6, children: [
                       for (final t in trick)
                         Column(mainAxisSize: MainAxisSize.min, children: [
-                          _CardView(card: _decode((t['card'] as num).toInt()), w: 44),
+                          _PopIn(key: ValueKey('tr-${t['card']}'), child: _CardView(card: _decode((t['card'] as num).toInt()), w: 60)),
                           Text(nameOf('${t['uid']}'), style: const TextStyle(color: Colors.white70, fontSize: 11)),
                         ]),
                     ]),
@@ -5940,21 +6056,14 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                   style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
-                Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
-                  for (final c in myHand)
-                    GestureDetector(
-                      onTap: myTurn && !_busy && legal.contains(c.code)
-                          ? () => _do(() => Wallet.cardsPlay(widget.gameId, c.code))
-                          : null,
-                      child: Opacity(
-                        opacity: !myTurn || legal.contains(c.code) ? 1 : 0.35,
-                        child: Transform.translate(
-                          offset: Offset(0, myTurn && legal.contains(c.code) ? -6 : 0),
-                          child: _CardView(card: c, w: 56, up: !_hidden),
-                        ),
-                      ),
-                    ),
-                ]),
+                _FanHand(
+                  cards: myHand,
+                  legal: legal,
+                  canPlay: myTurn && !_busy,
+                  fly: _flyCode,
+                  hidden: _hidden,
+                  onPlay: _playCard,
+                ),
               ]),
       ),
     ]);
