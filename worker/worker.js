@@ -2217,7 +2217,7 @@ async function adminStats({ uid, data, env }) {
     ...songo.map((d) => adminRow('songo', 'online', d)),
     ...damier.map((d) => adminRow('damier', 'online', d)),
     ...pile.map((d) => adminRow('pileface', 'online', d)),
-    ...cartes.map((d) => adminRow(d.game === 'boubayah' ? 'boubayah' : 'tiah', 'online', d)),
+    ...cartes.map((d) => adminRow(d.game === 'boubayah' || d.game === 'fapfap' || d.game === 'anticote' || d.game === 'tchek' ? d.game : 'tiah', 'online', d)),
     ...sportB.map((d) => adminSportRow(d)),
     ...raceS.map((d) => adminRaceRow(d)),
     ...local.map((d) =>
@@ -5311,7 +5311,7 @@ async function adminTournamentEntries({ uid, data, env }) {
 // ce qu'il a le droit de voir (cardsView). Un joueur inactif est joué automatiquement
 // après CARDS_TURN_MS (l'ouverture est la seule action possible).
 
-const CARDS_TURN_MS = 30000; // 30 s pour ouvrir ses cartes
+const CARDS_TURN_MS = 5000; // 5 s par joueur et par action, pour tous les jeux de cartes
 const CARDS_MAX_OPEN_PER_HOST = 3;
 const CARDS_START_AFTER_MS = 120000;
 
@@ -5369,7 +5369,7 @@ const cardsIsFomekou = (d, uid) => {
 // la famille demandée gagne le pli et entame le suivant. Mise bloquée 2 x M ;
 // Corat = gain doublé (voir settleGameCore).
 // ----------------------------------------------------------------------
-const FAP_TURN_MS = 7000; // 7 s par carte (Fap-Fap et Anti-Cote)
+const FAP_TURN_MS = 5000; // 5 s par carte
 // Anti-triche Fap-Fap : position obligatoire, 150 m minimum entre 2 joueurs d'une même table.
 const FAP_MIN_DIST_M = 150;
 const FAP_MAX_ACC_M = 100; // précision GPS exigée
@@ -5806,6 +5806,7 @@ function tcDealFields(from, deck) {
 function tcCanPlay(d, c) {
   const pen = intOr(d.pen, 0);
   if (pen > 0) return tcIsJoker(c) || tcRank(c) === 7;
+  if (!tcIsJoker(c) && tcRank(c) === 11) return true; // le J passe sur toutes les familles
   if (tcIsJoker(c)) return (c === 0 ? 'r' : 'b') === d.curColor;
   const s = tcSuit(c);
   if (intOr(d.curSuit, -1) >= 0) return s === d.curSuit || tcRank(c) === intOr(d.curRank, 0);
@@ -6674,7 +6675,7 @@ async function cardsStart({ uid, data, env }) {
       set.deck = [];
       set.seq = from;
     }
-    if (g.game === 'fapfap' || g.game === 'anticote') set.turnAt = Date.now() + 3000; // + 3 s : le temps de voir la distribution
+    set.turnAt = Date.now() + 3000; // + 3 s pour le 1er joueur : le temps de voir la distribution
     tx.write(path, { set, serverTime: ['startedAt'] });
   });
   return cardsFetch(env, gid, uid);
@@ -7867,7 +7868,7 @@ function ludoBalancedFace(d, c, rnd) {
 function ludoRandomFace(d, c, rnd) {
   const capFaces = [];
   for (let f = 1; f <= 6; f++) if (ludoFaceCaptures(d, c, f)) capFaces.push(f);
-  if (capFaces.length > 0 && Math.floor(rnd() * 1000) < 120) {
+  if (capFaces.length > 0 && Math.floor(rnd() * 1000) < 90) {
     return capFaces[Math.floor(rnd() * capFaces.length)];
   }
   return ludoBalancedFace(d, c, rnd);
