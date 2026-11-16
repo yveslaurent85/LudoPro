@@ -271,6 +271,10 @@ class Wallet {
     return _call('adminStats', <String, dynamic>{'limit': limit});
   }
 
+  /// Administrateur : retrouve une partie par son identifiant (début de l'id).
+  static Future<Map<String, dynamic>> adminFindGame(String q) =>
+      _call('adminFindGame', <String, dynamic>{'q': q});
+
   /// Administrateur : transfère les commissions de Katika vers son solde
   /// principal (possible à partir de 2500 FCFA). Renvoie { amount, balance }.
   static Future<Map<String, dynamic>> adminHouseWithdraw() {
