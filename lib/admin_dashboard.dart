@@ -539,9 +539,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 6),
           const Text(
             'Part nette de Katika (commission moins la part des parrains et '
-            'des partenaires), partagée entre les deux administrateurs : '
-            "50 % chacun, sur les parties terminées depuis l'activation de "
-            'ce compte.',
+            'des partenaires), versée dans une caisse commune à tous les '
+            'administrateurs. Le retrait vide toute la caisse.',
             style: TextStyle(color: Colors.white54, fontSize: 11),
           ),
         ],
