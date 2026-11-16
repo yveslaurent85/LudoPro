@@ -877,6 +877,99 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // Sections repliables : on touche le titre pour ouvrir la liste.
+  final Set<String> folds = <String>{};
+  String? catSel;
+
+  Widget _foldHead(String id, String title, {String? hint}) {
+    final open = folds.contains(id);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() {
+        if (!folds.remove(id)) folds.add(id);
+      }),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 18, bottom: 8),
+        child: Row(children: [
+          Expanded(
+            child: Text(title,
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+          ),
+          if (hint != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text(hint, style: const TextStyle(color: _gold, fontWeight: FontWeight.w800, fontSize: 13)),
+            ),
+          Icon(open ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
+        ]),
+      ),
+    );
+  }
+
+  static const List<List<String>> _gameChoices = [
+    ['all', 'Tous les jeux'],
+    ['ludo', 'Ludo'],
+    ['deuxdes', 'Deux dés'],
+    ['songo', 'Songô'],
+    ['damier', 'Damier'],
+    ['pileface', 'Pile ou Face'],
+    ['tiah', 'TIAH'],
+    ['boubayah', 'BOUBAYAH'],
+    ['fapfap', 'FAP-FAP'],
+    ['anticote', 'ANTI-COTE'],
+    ['tchek', 'TCHEK GAMES'],
+    ['sports', 'Paris Sports'],
+    ['courses', 'Paris Courses'],
+  ];
+
+  Widget _gamePicker() {
+    final label = _gameChoices.firstWhere((g) => g[0] == kind, orElse: () => _gameChoices.first)[1];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: GestureDetector(
+        onTap: () async {
+          final pick = await showModalBottomSheet<String>(
+            context: context,
+            backgroundColor: const Color(0xFF14202B),
+            isScrollControlled: true,
+            builder: (ctx) => SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(18, 16, 18, 6),
+                    child: Text('Choisir un jeu',
+                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                  ),
+                  for (final g in _gameChoices)
+                    ListTile(
+                      title: Text(g[1], style: const TextStyle(color: Colors.white)),
+                      trailing: kind == g[0] ? const Icon(Icons.check, color: _gold) : null,
+                      onTap: () => Navigator.of(ctx).pop(g[0]),
+                    ),
+                ],
+              ),
+            ),
+          );
+          if (pick != null && mounted) setState(() => kind = pick);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(children: [
+            const Text('Jeu : ', style: TextStyle(color: Colors.white70)),
+            Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
+            const Icon(Icons.arrow_drop_down, color: Colors.white70),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _title(String t) => Padding(
         padding: const EdgeInsets.only(top: 18, bottom: 8),
         child: Text(
@@ -1251,31 +1344,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               for (final r in idFound) _gameTile(r),
           ],
           _title('Filtres'),
-          _filterRow('Jeu', [
-            _chip('Tous', kind == 'all', () => setState(() => kind = 'all')),
-            _chip('Ludo', kind == 'ludo', () => setState(() => kind = 'ludo')),
-            _chip('Deux dés', kind == 'deuxdes',
-                () => setState(() => kind = 'deuxdes')),
-            _chip('Songô', kind == 'songo',
-                () => setState(() => kind = 'songo')),
-            _chip('Damier', kind == 'damier',
-                () => setState(() => kind = 'damier')),
-            _chip('Pile ou Face', kind == 'pileface',
-                () => setState(() => kind = 'pileface')),
-            _chip('TIAH', kind == 'tiah', () => setState(() => kind = 'tiah')),
-            _chip('BOUBAYAH', kind == 'boubayah',
-                () => setState(() => kind = 'boubayah')),
-            _chip('FAP-FAP', kind == 'fapfap',
-                () => setState(() => kind = 'fapfap')),
-            _chip('ANTI-COTE', kind == 'anticote',
-                () => setState(() => kind = 'anticote')),
-            _chip('TCHEK GAMES', kind == 'tchek',
-                () => setState(() => kind = 'tchek')),
-            _chip('Paris Sports', kind == 'sports',
-                () => setState(() => kind = 'sports')),
-            _chip('Paris Courses', kind == 'courses',
-                () => setState(() => kind = 'courses')),
-          ]),
+          _gamePicker(),
           _filterRow('Mode', [
             _chip('Tous', mode == 'all', () => setState(() => mode = 'all')),
             _chip('En ligne', mode == 'online',
@@ -1289,8 +1358,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             _chip('7 jours', days == 7, () => setState(() => days = 7)),
             _chip('30 jours', days == 30, () => setState(() => days = 30)),
           ]),
-          _title('Résumé'),
-          GridView.count(
+          _foldHead('resume', 'Résumé', hint: _money(total)),
+          if (folds.contains('resume')) GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -1330,44 +1399,52 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
+          if (folds.contains('resume')) const SizedBox(height: 8),
+          if (folds.contains('resume')) Text(
             'Terminées : $done · En cours : $playing · En attente : $waiting · '
             'Remboursées : $refunds',
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
-          _title('Commissions par catégorie'),
-          if (groups.isEmpty)
-            const Text(
-              'Aucune partie pour ces filtres.',
-              style: TextStyle(color: Colors.white70),
-            ),
-          for (final e in groups.entries)
-            Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: Colors.white.withOpacity(0.1),
+          _foldHead('cat', 'Commissions par catégorie', hint: _money(total)),
+          if (folds.contains('cat')) ...[
+            if (groups.isEmpty)
+              const Text(
+                'Aucune partie pour ces filtres.',
+                style: TextStyle(color: Colors.white70),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${e.key} (${e.value[0]} parties)',
-                      style: const TextStyle(color: Colors.white),
-                    ),
+            for (final e in groups.entries) ...[
+              GestureDetector(
+                onTap: () => setState(() => catSel = catSel == e.key ? null : e.key),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.white.withOpacity(catSel == e.key ? 0.2 : 0.1),
+                    border: catSel == e.key ? Border.all(color: _gold) : null,
                   ),
-                  Text(
-                    _money(e.value[1]),
-                    style: const TextStyle(
-                      color: _gold,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${e.key} (${e.value[0]} parties)',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      Text(
+                        _money(e.value[1]),
+                        style: const TextStyle(color: _gold, fontWeight: FontWeight.w900),
+                      ),
+                      Icon(catSel == e.key ? Icons.expand_less : Icons.expand_more, color: Colors.white54),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              if (catSel == e.key)
+                for (final r in shown.where((r) => '${_kindLabel('${r['kind']}')} · ${_modeLabel('${r['mode']}')}' == e.key))
+                  _gameTile(r),
+            ],
+          ],
           if (rows.any((r) => '${r['state']}' == 'review')) ...[
             _title('⚠️ Parties à vérifier'),
             for (final r in rows.where((r) => '${r['state']}' == 'review')) _gameTile(r),
