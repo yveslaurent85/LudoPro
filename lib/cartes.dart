@@ -3907,14 +3907,25 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     return n;
   }
 
+  String _holdId = '';
+  DateTime _holdUntil = DateTime(2000);
+
   void _set(Map<String, dynamic> v) {
     if (!mounted) return;
     final cnt = _tableCount(v);
     final id = '${v['id']}';
     if (_v == null && v['status'] != 'waiting' && (cnt > 0 || v['over'] == true)) _dealtFor = id;
     if (_v != null && cnt > _lastCount) _sfx.land();
-    if (v['over'] == true && _sounded.add(id) && _v != null) {
-      if (((v['winnerUids'] as List?) ?? const []).contains(_me)) _sfx.win();
+    final firstOver = v['over'] == true && _sounded.add(id) && _v != null;
+    if (firstOver) {
+      // Le dernier total reste affiché 2 s avant le résultat final.
+      _holdId = id;
+      _holdUntil = DateTime.now().add(const Duration(seconds: 2));
+      Timer(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        setState(() {});
+        if (((v['winnerUids'] as List?) ?? const []).contains(_me)) _sfx.win();
+      });
     }
     _lastCount = cnt;
     setState(() {
@@ -4055,7 +4066,9 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
         },
       );
     }
-    return _shell(_tableWithBurst(v), overlay: overlay);
+    final holding = v['over'] == true && _holdId == id && DateTime.now().isBefore(_holdUntil);
+    final shown = holding ? <String, dynamic>{...v, 'over': false, 'winnerUids': <dynamic>[]} : v;
+    return _shell(_tableWithBurst(shown), overlay: overlay);
   }
 
   // ------------------------------------------------------------ salle d'attente
