@@ -14,6 +14,7 @@ import 'share_menu.dart';
 import 'lobby_widgets.dart';
 import 'main.dart' show firebaseReady, Sfx;
 import 'online_screen.dart';
+import 'rules.dart';
 import 'stake_field.dart';
 
 // ======================================================================
@@ -65,6 +66,9 @@ class _Card {
   int get code => v * 4 + suit; // même codage que le serveur
   String get symbol => const ['♠', '♥', '♦', '♣'][suit];
   bool get red => suit == 1 || suit == 2;
+
+  /// Nom de la famille : Pique = Black, Cœur = Koubi, Carreau = Zing, Trèfle = Tchaka.
+  String get family => const ['Black', 'Koubi', 'Zing', 'Tchaka'][suit];
 }
 
 List<_Card> _newDeck({required bool withAce}) {
@@ -110,29 +114,39 @@ class _CardView extends StatelessWidget {
       );
     }
     final c = card!;
-    final col = c.red ? const Color(0xFFD32F2F) : const Color(0xFF212121);
+    final col = c.red ? const Color(0xFFD32F2F) : const Color(0xFF111111);
+    final showName = w >= 40;
+    Widget index() => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(c.label, style: TextStyle(color: col, fontWeight: FontWeight.w900, fontSize: w * 0.32, height: 1)),
+            Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.26, height: 1)),
+          ],
+        );
     return Container(
       width: w,
       height: h,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(w * 0.14),
-        border: Border.all(color: Colors.black26),
-        boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 5, offset: Offset(0, 3))],
+        border: Border.all(color: const Color(0xFF9E9E9E), width: 1.2),
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 5, offset: Offset(0, 3))],
       ),
       child: Stack(
         children: [
-          Positioned(
-            left: w * 0.1,
-            top: w * 0.05,
+          Positioned(left: w * 0.08, top: w * 0.05, child: index()),
+          if (showName) Positioned(right: w * 0.08, bottom: w * 0.05, child: Transform.rotate(angle: pi, child: index())),
+          Center(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(c.label, style: TextStyle(color: col, fontWeight: FontWeight.w900, fontSize: w * 0.34, height: 1)),
-                Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.28, height: 1)),
+                Text(c.symbol, style: TextStyle(color: col, fontSize: w * (showName ? 0.46 : 0.6), height: 1)),
+                if (showName)
+                  Text(c.family,
+                      style: TextStyle(color: col, fontWeight: FontWeight.w900, fontSize: w * 0.16, height: 1.1)),
               ],
             ),
           ),
-          Center(child: Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.62))),
         ],
       ),
     );
@@ -627,7 +641,7 @@ class CartesPage extends StatelessWidget {
   void _go(BuildContext c, Widget p) =>
       Navigator.of(c).push(MaterialPageRoute<void>(builder: (_) => p));
 
-  Widget _card(String title, String sub, IconData icon, Color color, VoidCallback? onTap, {String? badge}) {
+  Widget _card(String title, String sub, IconData icon, Color color, VoidCallback? onTap, {String? badge, String? info}) {
     final off = onTap == null;
     return GestureDetector(
       onTap: onTap,
@@ -678,6 +692,7 @@ class CartesPage extends StatelessWidget {
                 ],
               ),
             ),
+            if (info != null) GameInfoButton(gameKey: info),
             if (!off) const Icon(Icons.chevron_right, color: Colors.white),
           ],
         ),
@@ -719,23 +734,23 @@ class CartesPage extends StatelessWidget {
                     const SizedBox(height: 14),
                     _card('TIAH', tr('Atteins 21 sans dépasser · 2 à 6 joueurs', 'Reach 21 without going over · 2-6 players'),
                         Icons.style, const Color(0xFFE5262B),
-                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'tiah')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'tiah')), badge: tr('NOUVEAU', 'NEW'), info: 'tiah'),
                     const SizedBox(height: 14),
                     _card('BOUBAYAH', tr('Le plus gros total gagne · 2 à 6 joueurs', 'Highest total wins · 2-6 players'),
                         Icons.filter_5, const Color(0xFF7B1FA2),
-                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'boubayah')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'boubayah')), badge: tr('NOUVEAU', 'NEW'), info: 'boubayah'),
                     const SizedBox(height: 14),
                     _card('FAP-FAP', tr('En ligne uniquement · plis et Corat · 2 à 4 joueurs', 'Online only · tricks and Corat · 2-4 players'),
                         Icons.style, const Color(0xFFEF6C00),
-                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'fapfap')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'fapfap')), badge: tr('NOUVEAU', 'NEW'), info: 'fapfap'),
                     const SizedBox(height: 14),
                     _card('ANTI-COTE', tr('En ligne uniquement · cagnotte et Corat · 2 à 5 joueurs', 'Online only · jackpot and Corat · 2-5 players'),
                         Icons.casino, const Color(0xFF00897B),
-                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'anticote')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'anticote')), badge: tr('NOUVEAU', 'NEW'), info: 'anticote'),
                     const SizedBox(height: 14),
                     _card('TCHEK GAMES', tr('En ligne uniquement · défausse-toi de tes cartes · 2 à 4 joueurs', 'Online only · shed all your cards · 2-4 players'),
                         Icons.location_on, const Color(0xFF0277BD),
-                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'tchek')), badge: tr('NOUVEAU', 'NEW')),
+                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'tchek')), badge: tr('NOUVEAU', 'NEW'), info: 'tchek'),
                   ],
                 ),
               ),
@@ -3982,6 +3997,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
         },
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
+      const GameInfoButton(gameKey: 'anticote'),
       Expanded(
         child: Text(
           'ANTI-COTE · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
@@ -4058,6 +4074,8 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           children: [
+            _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: false, onChanged: _fetch),
+            const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
@@ -4714,6 +4732,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
         },
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
+      const GameInfoButton(gameKey: 'tchek'),
       Expanded(
         child: Text(
           'TCHEK GAMES · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
@@ -4790,6 +4809,8 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           children: [
+            _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: true, onChanged: _fetch),
+            const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
@@ -5276,11 +5297,14 @@ class _TcCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(w * 0.14),
-        border: Border.all(color: Colors.black26),
+        border: Border.all(color: const Color(0xFF9E9E9E), width: 1.2),
       ),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Text(label, style: TextStyle(color: col, fontSize: w * (joker ? 0.5 : 0.42), fontWeight: FontWeight.w900)),
-        if (!joker) Text(const ['♠', '♥', '♦', '♣'][s], style: TextStyle(color: col, fontSize: w * 0.42)),
+        Text(label, style: TextStyle(color: col, fontSize: w * (joker ? 0.5 : 0.4), fontWeight: FontWeight.w900, height: 1)),
+        if (!joker) Text(const ['♠', '♥', '♦', '♣'][s], style: TextStyle(color: col, fontSize: w * 0.4, height: 1.1)),
+        if (!joker && w >= 40)
+          Text(const ['Black', 'Koubi', 'Zing', 'Tchaka'][s],
+              style: TextStyle(color: col, fontSize: w * 0.15, fontWeight: FontWeight.w900, height: 1.1)),
         if (joker) Text(code == 0 ? 'ROUGE' : 'NOIR', style: TextStyle(color: col, fontSize: w * 0.17, fontWeight: FontWeight.w900)),
       ]),
     );
@@ -5518,6 +5542,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
         },
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
+      const GameInfoButton(gameKey: 'fapfap'),
       Expanded(
         child: Text(
           'FAP-FAP · ${tr('manche', 'round')} ${v['round']}${stake > 0 ? ' · ${_fcfa(stake)}' : ''}',
@@ -5947,6 +5972,211 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
           Text(tr('Main', 'Hand'), style: const TextStyle(color: Colors.white54, fontSize: 11)),
           _fapPlayed(revealed),
         ],
+      ]),
+    );
+  }
+}
+
+
+/// Défis entre joueurs pendant la création de la table (Anti-Cote / Tchek).
+/// Le défi est envoyé au joueur ciblé comme une invitation : il accepte ou refuse.
+class _DuelPanel extends StatefulWidget {
+  const _DuelPanel({
+    required this.gameId,
+    required this.view,
+    required this.me,
+    required this.tchek,
+    required this.onChanged,
+  });
+
+  final String gameId;
+  final Map<String, dynamic> view;
+  final String me;
+  final bool tchek;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_DuelPanel> createState() => _DuelPanelState();
+}
+
+class _DuelPanelState extends State<_DuelPanel> {
+  bool _busy = false;
+
+  Future<void> _run(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await f();
+      await widget.onChanged();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _newDuel(List<Map<String, dynamic>> rivals) async {
+    final amountCtrl = TextEditingController(text: '${Wallet.minStake}');
+    var target = '';
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF14202B),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: EdgeInsets.fromLTRB(18, 18, 18, 18 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('Défier un joueur', 'Challenge a player'),
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            Text(
+              widget.tchek
+                  ? tr('Si un autre joueur gagne la manche, celui qui a le moins de cartes à la fin gagne le défi.',
+                      'If a third player wins the round, whoever has the fewest cards left wins the challenge.')
+                  : tr('Le meilleur total de la manche gagne le défi. Égalité : remboursé.',
+                      'The best total of the round wins the challenge. Tie: refunded.'),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: target,
+              dropdownColor: const Color(0xFF14202B),
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(labelText: tr('Adversaire', 'Rival')),
+              items: [
+                DropdownMenuItem(value: '', child: Text(tr('Tous les adversaires', 'All rivals'))),
+                for (final p in rivals) DropdownMenuItem(value: '${p['uid']}', child: Text('${p['name']}')),
+              ],
+              onChanged: (x) => setS(() => target = x ?? ''),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amountCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(labelText: tr('Mise du défi (FCFA)', 'Challenge stake (FCFA)')),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: FilledButton(
+                onPressed: () {
+                  final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
+                  if (amount < Wallet.minStake) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                        content: Text(tr('Mise minimum : ${_fcfa(Wallet.minStake)}', 'Minimum: ${_fcfa(Wallet.minStake)}'))));
+                    return;
+                  }
+                  Navigator.of(ctx).pop();
+                  _run(() => Wallet.cardsBetPropose(
+                        gameId: widget.gameId,
+                        type: 'duel',
+                        amount: amount,
+                        targetUid: target.isEmpty ? null : target,
+                      ));
+                },
+                child: Text(tr('Envoyer le défi', 'Send the challenge'), style: const TextStyle(fontWeight: FontWeight.w900)),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+    amountCtrl.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = widget.view;
+    final waiting = v['status'] == 'waiting';
+    final bets = [for (final b in (v['bets'] as List? ?? [])) Map<String, dynamic>.from(b as Map)];
+    final players = [for (final p in (v['players'] as List? ?? [])) Map<String, dynamic>.from(p as Map)];
+    final rivals = players.where((p) => p['uid'] != widget.me).toList();
+    final iAmIn = players.any((p) => p['uid'] == widget.me);
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    if (stake <= 0 && bets.isEmpty) return const SizedBox.shrink();
+    String nameOf(String u) => _firstOf(players.where((p) => p['uid'] == u).map((p) => '${p['name']}')) ?? '?';
+    String status(Map<String, dynamic> b) {
+      switch ('${b['status']}') {
+        case 'open':
+          return tr('en attente de réponse', 'waiting for an answer');
+        case 'accepted':
+          return '${tr('accepté par', 'accepted by')} ${b['opponentName']}';
+        case 'cancelled':
+          return tr('annulé · remboursé', 'cancelled · refunded');
+        case 'declined':
+          return tr('refusé', 'declined');
+        case 'expired':
+          return tr('expiré · remboursé', 'expired · refunded');
+        case 'settled':
+          final w = '${b['winnerUid']}';
+          if (b['result'] == 'refund' || w.isEmpty) return tr('égalité · remboursé', 'tie · refunded');
+          return '${tr('gagné par', 'won by')} ${nameOf(w)}';
+        default:
+          return '${b['status']}';
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.sports_mma, color: Color(0xFFFFD54F), size: 18),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(tr('Défis entre joueurs', 'Player challenges'),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+          ),
+          if (waiting && iAmIn && rivals.isNotEmpty && stake > 0)
+            TextButton(
+              onPressed: _busy ? null : () => _newDuel(rivals),
+              child: Text(tr('+ Défier', '+ Challenge'), style: const TextStyle(fontWeight: FontWeight.w900)),
+            ),
+        ]),
+        if (bets.isEmpty)
+          Text(
+            tr('Défie un joueur : il reçoit une invitation et accepte ou refuse.',
+                'Challenge a player: he gets an invitation and accepts or declines.'),
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        for (final b in bets)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    '${b['proposerName']} ⚔ ${'${b['targetName']}'.isEmpty ? tr('tous ses adversaires', 'all rivals') : b['targetName']} · ${_fcfa((b['amount'] as num).toInt())}',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  Text(status(b), style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                ]),
+              ),
+              if ('${b['status']}' == 'open' && waiting) ...[
+                if (b['proposerUid'] == widget.me)
+                  TextButton(
+                    onPressed: _busy ? null : () => _run(() => Wallet.cardsBetCancel(widget.gameId, '${b['id']}')),
+                    child: Text(tr('Annuler', 'Cancel')),
+                  )
+                else if (iAmIn && ('${b['targetUid']}'.isEmpty || b['targetUid'] == widget.me)) ...[
+                  TextButton(
+                    onPressed: _busy ? null : () => _run(() => Wallet.cardsBetAccept(widget.gameId, '${b['id']}')),
+                    child: Text(tr('Accepter', 'Accept'),
+                        style: const TextStyle(color: Color(0xFF7CFFB0), fontWeight: FontWeight.w900)),
+                  ),
+                  if ('${b['targetUid']}' == widget.me)
+                    TextButton(
+                      onPressed: _busy ? null : () => _run(() => Wallet.cardsBetCancel(widget.gameId, '${b['id']}')),
+                      child: Text(tr('Refuser', 'Decline')),
+                    ),
+                ],
+              ],
+            ]),
+          ),
       ]),
     );
   }
