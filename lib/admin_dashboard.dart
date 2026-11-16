@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter/material.dart';
 
 import 'replay.dart';
@@ -55,6 +57,42 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Map<String, dynamic> pStats = {};
   bool pBusy = false;
 
+  // Recherche par identifiant de partie
+  final TextEditingController idCtrl = TextEditingController();
+  Timer? _idTimer;
+  List<Map<String, dynamic>> idFound = [];
+  bool idBusy = false;
+  String idDone = '';
+
+  void _onIdChanged(String v) {
+    _idTimer?.cancel();
+    final q = v.trim();
+    if (q.length < 4) {
+      setState(() {
+        idFound = [];
+        idDone = '';
+      });
+      return;
+    }
+    setState(() {});
+    _idTimer = Timer(const Duration(milliseconds: 450), () => _findById(q));
+  }
+
+  Future<void> _findById(String q) async {
+    setState(() => idBusy = true);
+    try {
+      final res = await Wallet.adminFindGame(q);
+      if (!mounted || idCtrl.text.trim() != q) return;
+      setState(() {
+        idFound = [for (final r in (res['rows'] as List? ?? const [])) Map<String, dynamic>.from(r as Map)];
+        idDone = q;
+      });
+    } catch (e) {
+      if (mounted) _snack(Wallet.errorText(e));
+    }
+    if (mounted) setState(() => idBusy = false);
+  }
+
   // Filtres
   String kind = 'all'; // all | ludo | deuxdes | songo | damier
   String mode = 'all'; // all | online | local
@@ -69,6 +107,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   void dispose() {
     partnerCtrl.dispose();
+    idCtrl.dispose();
+    _idTimer?.cancel();
     super.dispose();
   }
 
@@ -914,8 +954,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final isSongo = r['kind'] == 'songo';
     final isDamier = r['kind'] == 'damier';
 
+    final gid = '${r['id']}';
     return GestureDetector(
       onTap: () => _review(r),
+      onLongPress: () {
+        Clipboard.setData(ClipboardData(text: gid));
+        _snack('ID copié : $gid');
+      },
       child: Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -971,6 +1016,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Text(
             _dateText(r),
             style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          Text(
+            'ID : $gid',
+            style: const TextStyle(color: Color(0xFFFFE082), fontSize: 11, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
           Row(
@@ -1169,6 +1218,38 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ),
           ),
+          _title('Rechercher une partie par son ID'),
+          TextField(
+            controller: idCtrl,
+            onChanged: _onIdChanged,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Colle ou saisis l\'ID (4 caractères minimum)',
+              hintStyle: const TextStyle(color: Colors.white54),
+              prefixIcon: const Icon(Icons.search, color: Colors.white70),
+              suffixIcon: idCtrl.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70),
+                      onPressed: () {
+                        idCtrl.clear();
+                        _onIdChanged('');
+                      },
+                    ),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.12),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            ),
+          ),
+          if (idBusy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+          if (idCtrl.text.trim().length >= 4 && !idBusy && idDone == idCtrl.text.trim()) ...[
+            const SizedBox(height: 8),
+            if (idFound.isEmpty)
+              const Text('Aucune partie avec cet ID.', style: TextStyle(color: Colors.white70))
+            else
+              for (final r in idFound) _gameTile(r),
+          ],
           _title('Filtres'),
           _filterRow('Jeu', [
             _chip('Tous', kind == 'all', () => setState(() => kind = 'all')),
