@@ -2634,9 +2634,9 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
   void _snack(Object e) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
 
-  Future<void> _enter(String id) async {
+  Future<void> _enter(String id, {Map<String, dynamic>? initial}) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id) : widget.game == 'anticote' ? AntiCoteOnlineRoom(gameId: id) : widget.game == 'tchek' ? TchekOnlineRoom(gameId: id) : CardsOnlineRoom(gameId: id)));
+        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id, initial: initial) : widget.game == 'anticote' ? AntiCoteOnlineRoom(gameId: id, initial: initial) : widget.game == 'tchek' ? TchekOnlineRoom(gameId: id, initial: initial) : CardsOnlineRoom(gameId: id)));
     if (mounted) _load();
   }
 
@@ -2652,7 +2652,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
       );
       if (!mounted) return;
       setState(() => _busy = false);
-      await _enter(v['id'] as String);
+      await _enter(v['id'] as String, initial: v);
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
@@ -2668,7 +2668,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
       final v = await Wallet.cardsJoin(gameId: id, code: code);
       if (!mounted) return;
       setState(() => _busy = false);
-      await _enter(v['id'] as String);
+      await _enter(v['id'] as String, initial: v);
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
@@ -3871,9 +3871,12 @@ String _acRuleText(String r) {
 // ----------------------------------------------------------------------
 
 class AntiCoteOnlineRoom extends StatefulWidget {
-  const AntiCoteOnlineRoom({super.key, required this.gameId});
+  const AntiCoteOnlineRoom({super.key, required this.gameId, this.initial});
 
   final String gameId;
+
+  /// Vue déjà reçue à la création / à l'entrée : la salle s'affiche tout de suite.
+  final Map<String, dynamic>? initial;
 
   @override
   State<AntiCoteOnlineRoom> createState() => _AntiCoteOnlineRoomState();
@@ -3986,6 +3989,10 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     WidgetsBinding.instance.addObserver(this);
     _protect(true);
     _geoT = Timer.periodic(const Duration(seconds: 30), (_) => _geoRefresh());
+    if (widget.initial != null) {
+      _v = widget.initial;
+      _rx = DateTime.now();
+    }
     _fetch();
     _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -4632,9 +4639,12 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
 }
 
 class TchekOnlineRoom extends StatefulWidget {
-  const TchekOnlineRoom({super.key, required this.gameId});
+  const TchekOnlineRoom({super.key, required this.gameId, this.initial});
 
   final String gameId;
+
+  /// Vue déjà reçue à la création / à l'entrée : la salle s'affiche tout de suite.
+  final Map<String, dynamic>? initial;
 
   @override
   State<TchekOnlineRoom> createState() => _TchekOnlineRoomState();
@@ -4747,6 +4757,10 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     WidgetsBinding.instance.addObserver(this);
     _protect(true);
     _geoT = Timer.periodic(const Duration(seconds: 30), (_) => _geoRefresh());
+    if (widget.initial != null) {
+      _v = widget.initial;
+      _rx = DateTime.now();
+    }
     _fetch();
     _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -5439,9 +5453,12 @@ class _TcCard extends StatelessWidget {
 }
 
 class FapFapOnlineRoom extends StatefulWidget {
-  const FapFapOnlineRoom({super.key, required this.gameId});
+  const FapFapOnlineRoom({super.key, required this.gameId, this.initial});
 
   final String gameId;
+
+  /// Vue déjà reçue à la création / à l'entrée : la salle s'affiche tout de suite.
+  final Map<String, dynamic>? initial;
 
   @override
   State<FapFapOnlineRoom> createState() => _FapFapOnlineRoomState();
@@ -5554,6 +5571,10 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     WidgetsBinding.instance.addObserver(this);
     _protect(true);
     _geoT = Timer.periodic(const Duration(seconds: 30), (_) => _geoRefresh());
+    if (widget.initial != null) {
+      _v = widget.initial;
+      _rx = DateTime.now();
+    }
     _fetch();
     _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
