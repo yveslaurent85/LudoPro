@@ -200,8 +200,10 @@ class _ModeCard extends StatelessWidget {
   final String subtitle;
   final Color color;
   final VoidCallback onTap;
+  final String? infoKey;
 
   const _ModeCard({
+    this.infoKey,
     required this.icon,
     this.image,
     required this.title,
@@ -274,6 +276,7 @@ class _ModeCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (infoKey != null) GameInfoButton(gameKey: infoKey!),
             const Icon(Icons.chevron_right, color: Colors.white),
           ],
         ),
@@ -874,8 +877,10 @@ class _GameTile extends StatelessWidget {
     required this.onTap,
     this.image,
     this.badge,
+    this.infoKey,
   });
 
+  final String? infoKey;
   final String title;
   final String subtitle;
   final Color color;
@@ -916,6 +921,7 @@ class _GameTile extends StatelessWidget {
         ),
         child: Stack(
           children: [
+            if (infoKey != null) Positioned(top: 0, left: 0, child: GameInfoButton(gameKey: infoKey!, size: 26)),
             if (badge != null)
               Positioned(
                 top: 0,
@@ -1015,6 +1021,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF22B14C),
           icon: Icons.grid_view_rounded,
           image: 'assets/game_ludo.png',
+          infoKey: 'ludo',
           title: 'Ludo',
           subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
           onTap: () => requireLogin(context, (_) => _LudoModePage(onLocal: onLocal)),
@@ -1023,6 +1030,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFFFFA000),
           icon: Icons.casino,
           image: 'assets/game_deuxdes.png',
+          infoKey: 'deuxdes',
           title: tr('Deux dés', 'Two dice'),
           subtitle: tr('Lance deux dés, défie les autres', 'Roll two dice, challenge others'),
           onTap: () => requireLogin(context, (_) => const DeuxDesPage()),
@@ -1031,6 +1039,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF37474F),
           icon: Icons.grid_on,
           image: 'assets/game_damier.png',
+          infoKey: 'damiersongo',
           title: 'Damier & Songô',
           subtitle: tr('Damier · Songô · tournoi', 'Draughts · Songo · tournament'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1039,6 +1048,7 @@ class _GamesGrid extends StatelessWidget {
         _GameTile(
           color: const Color(0xFFF9A825),
           icon: Icons.monetization_on,
+          infoKey: 'pileface',
           title: tr('Pile ou Face', 'Heads or Tails'),
           subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1052,6 +1062,7 @@ class _GamesGrid extends StatelessWidget {
         _GameTile(
           color: const Color(0xFF0E7A4B),
           icon: Icons.style,
+          infoKey: 'cartes',
           title: tr('Cartes', 'Cards'),
           subtitle: 'TIAH · BOUBAYAH · FAP-FAP · ANTI-COTE · TCHEK',
           badge: tr('NOUVEAU', 'NEW'),
@@ -1104,6 +1115,7 @@ class _DamierSongoPage extends StatelessWidget {
                   color: const Color(0xFF37474F),
                   icon: Icons.grid_on,
                   image: 'assets/game_damier.png',
+                  infoKey: 'damier',
                   title: 'Damier',
                   subtitle: tr('Présentiel, en ligne, Deux buts sort, tournoi',
                       'Local, online, Two strikes, tournament'),
@@ -1114,6 +1126,7 @@ class _DamierSongoPage extends StatelessWidget {
                   color: const Color(0xFF8D5A2B),
                   icon: Icons.workspaces,
                   image: 'assets/game_songo.png',
+                  infoKey: 'songo',
                   title: 'Songô',
                   subtitle: tr('Jeu de graines', 'Seed game'),
                   onTap: () => open(const SongoPage()),
@@ -2737,7 +2750,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   int _randomFace() {
     // Les captures sont un peu plus fréquentes : quand une face permet de
     // capturer, elle a 12 % de chances de plus de sortir (120 pour mille).
-    const captureBoost = 90;
+    const captureBoost = 100;
     final capFaces = <int>[
       for (int f = 1; f <= 6; f++)
         if (_faceCaptures(f)) f,
