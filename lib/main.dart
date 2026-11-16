@@ -1104,6 +1104,7 @@ class _GamesGrid extends StatelessWidget {
         _GameTile(
           color: const Color(0xFF0E7A4B),
           icon: Icons.style,
+          image: 'assets/game_cartes.png',
           infoKey: 'cartes',
           title: tr('Cartes', 'Cards'),
           subtitle: 'TIAH · BOUBAYAH · FAP-FAP · ANTI-COTE · TCHEK',
@@ -1113,6 +1114,7 @@ class _GamesGrid extends StatelessWidget {
         _GameTile(
           color: const Color(0xFF14295C),
           icon: Icons.sports_soccer,
+          image: 'assets/game_pariderriere.png',
           title: tr('Paris par derrière', 'Side bets'),
           subtitle: tr('Sports · Courses', 'Sports · Races'),
           badge: tr('NOUVEAU', 'NEW'),
