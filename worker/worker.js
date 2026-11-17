@@ -4752,11 +4752,9 @@ async function dbCreate({ uid, data, env }) {
 async function dbJoin({ uid, data, env }) {
   const rid = dbRid(data);
   const res = await runTx(env, async (tx) => {
-    const r = await tx.get(`dbRooms/${rid}`);
+    const [r, me, old] = await tx.getMany([`dbRooms/${rid}`, `users/${uid}`, `dbPlayers/${rid}_${uid}`]); // un seul aller-retour
     if (!r || r.status !== 'open') throw new HttpError('failed-precondition', 'Cette salle est fermée.');
-    const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
-    const old = await tx.get(`dbPlayers/${rid}_${uid}`);
     if (old && (old.state === 'waiting' || old.state === 'table' || old.state === 'playing')) {
       throw new HttpError('failed-precondition', 'Tu es déjà dans la salle.');
     }
@@ -5143,12 +5141,11 @@ async function pfJoin({ uid, data, env }) {
   if (!gid) throw new HttpError('invalid-argument', 'Défi inconnu.');
   const roll = crypto.getRandomValues(new Uint8Array(1))[0] % 2 === 0 ? 'pile' : 'face';
   const out = await runTx(env, async (tx) => {
-    const g = await tx.get(`pileface/${gid}`);
+    const [g, me] = await tx.getMany([`pileface/${gid}`, `users/${uid}`]); // un seul aller-retour
     if (!g || g.status !== 'waiting') {
       throw new HttpError('failed-precondition', "Ce défi n'est plus disponible.");
     }
     if (g.hostUid === uid) throw new HttpError('invalid-argument', 'Tu ne peux pas relever ton propre défi.');
-    const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     const stake = intOr(g.stake, 0);
     if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
