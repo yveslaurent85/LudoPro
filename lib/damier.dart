@@ -9,6 +9,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'balance_dialog.dart';
 import 'deux_buts_screen.dart';
 import 'tournaments_screen.dart';
 import 'game_chat.dart';
@@ -2502,9 +2503,7 @@ class _DamierHubState extends State<_DamierHub> {
       }
       if (pre.exists && need > 0 && await balanceF < need) {
         if (mounted) {
-          setState(() => error = tr(
-              'Solde insuffisant : mise de ${Wallet.format(need)}.',
-              'Insufficient balance: stake of ${Wallet.format(need)}.'));
+          await showInsufficientBalance(context, balance: await balanceF, stake: need, game: 'Damier');
         }
         return;
       }

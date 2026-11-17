@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:screen_protector/screen_protector.dart';
 
 import 'accounts.dart';
+import 'balance_dialog.dart';
 import 'geo_guard.dart';
 import 'lang.dart';
 import 'share_menu.dart';
@@ -2661,7 +2662,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
     }
   }
 
-  Future<void> _join({String? id, String? code}) async {
+  Future<void> _join({String? id, String? code, int stake = 0}) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
@@ -2672,6 +2673,35 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
+        if (Wallet.errorText(e).contains('Solde insuffisant')) {
+          final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          int bal = 0;
+          try {
+            bal = await Wallet.watch(uid).first;
+          } catch (_) {}
+          final need = stake * ((widget.game == 'fapfap' || widget.game == 'anticote') ? 2 : 1);
+          if (mounted && need > 0) {
+            await showInsufficientBalance(
+              context,
+              balance: bal,
+              stake: need,
+              game: widget.game == 'fapfap'
+                  ? 'FAP-FAP'
+                  : widget.game == 'anticote'
+                      ? 'ANTI-COTE'
+                      : widget.game == 'tchek'
+                          ? 'TCHEK GAMES'
+                          : widget.game == 'boubayah'
+                              ? 'BOUBAYAH'
+                              : 'TIAH',
+              lines: [
+                if (widget.game == 'fapfap' || widget.game == 'anticote')
+                  tr('Ce jeu bloque 2 mises (rejouées en cas d\'égalité).', 'This game locks 2 stakes (replayed on a tie).'),
+              ],
+            );
+            return;
+          }
+        }
         _snack(e);
       }
     }
@@ -2750,7 +2780,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
               if (_open.isEmpty)
                 Text(tr('Aucune salle pour le moment : crée la tienne !', 'No room yet: create yours!'),
                     style: const TextStyle(color: Colors.white60)),
-              for (final r in _open) _roomTile(r, tr('Rejoindre', 'Join'), () => _join(id: r['id'] as String)),
+              for (final r in _open) _roomTile(r, tr('Rejoindre', 'Join'), () => _join(id: r['id'] as String, stake: (r['stake'] as num?)?.toInt() ?? 0)),
               if (_mine.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(tr('Parties en cours', 'Games in progress'),

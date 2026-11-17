@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'balance_dialog.dart';
 import 'replay_core.dart';
 import 'game_chat.dart';
 import 'lang.dart';
@@ -2122,9 +2123,7 @@ class _SongoHubState extends State<_SongoHub> {
       final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
       if (pre.exists && need > 0 && await balanceF < need) {
         if (mounted) {
-          setState(() => error = tr(
-              'Solde insuffisant : mise de ${Wallet.format(need)}.',
-              'Insufficient balance: stake of ${Wallet.format(need)}.'));
+          await showInsufficientBalance(context, balance: await balanceF, stake: need, game: 'Songô');
         }
         return;
       }

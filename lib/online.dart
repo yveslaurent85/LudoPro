@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import 'accounts.dart';
+import 'balance_dialog.dart';
 import 'replay_core.dart';
 import 'game_chat.dart';
 import 'lang.dart';
@@ -517,14 +518,19 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       final need = stakeNeed + captNeed;
       if (pre.exists && need > 0 && await balanceF < need) {
         if (mounted) {
-          setState(() => error = captNeed > 0
-              ? tr('Solde insuffisant : il te faut au moins '
-                  '${Wallet.format(need)} (mise + une capture de '
-                  '${Wallet.format(captNeed)}).',
-                  'Insufficient balance: you need at least '
-                  '${Wallet.format(need)} (stake + one ${Wallet.format(captNeed)} capture).')
-              : tr('Solde insuffisant : mise de ${Wallet.format(need)}.',
-                  'Insufficient balance: stake of ${Wallet.format(need)}.'));
+          await showInsufficientBalance(
+            context,
+            balance: await balanceF,
+            stake: stakeNeed,
+            fee: captNeed,
+            feeLabel: tr('Prix d\'une capture :', 'One capture:'),
+            game: 'Ludo',
+            lines: [
+              if (captNeed > 0)
+                tr('💰 Prix par capture — ${Wallet.format(captNeed)} par capture',
+                    '💰 Price per capture — ${Wallet.format(captNeed)} per capture'),
+            ],
+          );
         }
         return;
       }
