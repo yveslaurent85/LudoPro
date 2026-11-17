@@ -271,6 +271,10 @@ class Wallet {
     return _call('adminStats', <String, dynamic>{'limit': limit});
   }
 
+  /// Administrateur : dernières recharges (pour la cloche).
+  static Future<Map<String, dynamic>> adminRechargeFeed() =>
+      _call('adminRechargeFeed', <String, dynamic>{});
+
   /// Administrateur : retrouve une partie par son identifiant (début de l'id).
   static Future<Map<String, dynamic>> adminFindGame(String q) =>
       _call('adminFindGame', <String, dynamic>{'q': q});

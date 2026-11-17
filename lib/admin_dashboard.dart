@@ -12,6 +12,7 @@ import 'online.dart';
 import 'player_stats.dart';
 import 'damier.dart';
 import 'songo.dart';
+import 'main.dart' show Sfx;
 
 /// Tableau de bord administrateur : toutes les parties (Ludo, Deux dés et Songô,
 /// en ligne et en présentiel), les commissions, les jackpots.
@@ -102,10 +103,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void initState() {
     super.initState();
     _load();
+    _feedT = Timer.periodic(const Duration(seconds: 12), (_) => _checkRecharges());
+    _checkRecharges();
+  }
+
+  // Cloche : sonne quand une nouvelle recharge arrive (appli ouverte sur l'admin).
+  Timer? _feedT;
+  final Sfx _bellSfx = Sfx();
+  final Set<String> _feedSeen = <String>{};
+  bool _feedPrimed = false;
+  bool _feedOff = false;
+  bool bellOn = true;
+
+  Future<void> _checkRecharges() async {
+    if (_feedOff) return;
+    try {
+      final res = await Wallet.adminRechargeFeed();
+      final list = [for (final r in (res['rows'] as List? ?? const [])) Map<String, dynamic>.from(r as Map)];
+      final fresh = <Map<String, dynamic>>[];
+      for (final r in list) {
+        final key = '${r['id']}:${r['status']}';
+        final st = '${r['status']}';
+        if (_feedSeen.add(key) && _feedPrimed && (st == 'pending' || st == 'credited')) fresh.add(r);
+      }
+      _feedPrimed = true;
+      if (fresh.isNotEmpty && bellOn && mounted) {
+        _bellSfx.bell();
+        final r = fresh.first;
+        final who = '${r['name']}'.isEmpty ? '' : ' · ${r['name']}';
+        _snack('🔔 Recharge ${r['src']} : +${_money(_i(r['amount']))}$who'
+            '${fresh.length > 1 ? ' (+${fresh.length - 1} autre${fresh.length > 2 ? 's' : ''})' : ''}');
+      }
+    } catch (e) {
+      // Compte non administrateur (vue partenaire) : on arrête.
+      if ('$e'.contains('Accès réservé') || '$e'.contains('permission')) _feedOff = true;
+    }
   }
 
   @override
   void dispose() {
+    _feedT?.cancel();
     partnerCtrl.dispose();
     idCtrl.dispose();
     _idTimer?.cancel();
@@ -1550,6 +1587,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         ),
                       ),
                     ),
+                    if (!partnerView)
+                      IconButton(
+                        tooltip: bellOn ? 'Cloche des recharges : activée' : 'Cloche des recharges : coupée',
+                        onPressed: () {
+                          setState(() => bellOn = !bellOn);
+                          if (bellOn) _bellSfx.bell();
+                        },
+                        icon: Icon(bellOn ? Icons.notifications_active : Icons.notifications_off,
+                            color: bellOn ? const Color(0xFFFFC21A) : Colors.white54),
+                      ),
                     IconButton(
                       onPressed: loading ? null : _load,
                       icon: const Icon(Icons.refresh, color: Colors.white),
