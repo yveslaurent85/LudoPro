@@ -2232,6 +2232,34 @@ async function adminFindGame({ uid, data, env }) {
   return { rows: [...found.values()].slice(0, 20) };
 }
 
+/** Administrateur : dernières recharges (Campay, manuelles, International) pour la cloche de l'appli. */
+async function adminRechargeFeed({ uid, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const extra = ['uid', 'name', 'amount', 'operator'];
+  const [camp, man, seb] = await Promise.all([
+    recentDocs(env, 'deposits', 15, extra).catch(() => []),
+    recentDocs(env, 'manualDeposits', 15, extra).catch(() => []),
+    recentDocs(env, 'sebpayDeposits', 15, extra).catch(() => []),
+  ]);
+  const row = (src, d) => ({
+    id: d.id,
+    src,
+    amount: Math.max(0, intOr(d.amount, 0)),
+    name: String(d.name || ''),
+    status: String(d.status || ''),
+    createdAt: typeof d.createdAt === 'string' ? d.createdAt : '',
+  });
+  const rows = [
+    ...camp.map((d) => row('campay', d)),
+    ...man.map((d) => row('manuel', d)),
+    ...seb.map((d) => row('international', d)),
+  ]
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, 25);
+  return { rows };
+}
+
 async function adminStats({ uid, data, env }) {
   if (!adminIds(env).includes(uid)) {
     throw new HttpError(
@@ -8469,6 +8497,7 @@ const HANDLERS = {
   localBetCreate,
   adminStats,
   adminFindGame,
+  adminRechargeFeed,
   adminHouseWithdraw,
   campayDeposit,
   campayDepositStatus,
