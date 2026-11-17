@@ -1646,9 +1646,10 @@ class _OnlineHubState extends State<_OnlineHub> {
     });
     try {
       final ref = _rooms.doc(id);
+      final balanceF = _myBalance();
       final pre = await ref.get();
       final need = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
-      if (pre.exists && need > 0 && await _myBalance() < need) {
+      if (pre.exists && need > 0 && await balanceF < need) {
         if (mounted) {
           setState(() => error = tr(
               'Solde insuffisant : mise de ${Wallet.format(need)}.',
@@ -1681,15 +1682,17 @@ class _OnlineHubState extends State<_OnlineHub> {
         setState(() => error = result);
         return;
       }
-      try {
-        await Wallet.payStake(id);
-        if (mounted) _open(id);
-      } catch (e) {
+      // La salle s'ouvre tout de suite ; la mise est prélevée en parallèle.
+      final nav = Navigator.of(context);
+      final payF = Wallet.payStake(id);
+      _open(id);
+      payF.then<void>((_) {}, onError: (Object e) async {
         try {
           await Wallet.leaveGame(id);
         } catch (_) {}
+        nav.maybePop();
         if (mounted) setState(() => error = Wallet.errorText(e));
-      }
+      });
     } catch (_) {
       if (mounted) setState(() => error = 'Impossible de rejoindre la partie.');
     } finally {
@@ -2361,7 +2364,11 @@ class _OnlineRoomState extends State<_OnlineRoom> {
           return _info("Cette partie n'a pas encore commencé.");
         }
         if (d['status'] == 'waiting') {
-          return _waiting(d, players, user.uid);
+          return JoinBell(
+            count: players.length,
+            isHost: d['hostUid'] == user.uid,
+            child: _waiting(d, players, user.uid),
+          );
         }
 
         if (seat >= 0 && _reactions == null) {

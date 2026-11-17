@@ -555,15 +555,17 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       if (result != null) {
         setState(() => error = result);
       } else {
-        try {
-          await Wallet.payStake(id);
-          if (mounted) _openRoom(id);
-        } catch (e) {
+        // La salle s'ouvre tout de suite ; la mise est prélevée en parallèle.
+        final nav = Navigator.of(context);
+        final payF = Wallet.payStake(id);
+        _openRoom(id);
+        payF.then<void>((_) {}, onError: (Object e) async {
           try {
             await Wallet.leaveGame(id);
           } catch (_) {}
+          nav.maybePop();
           if (mounted) setState(() => error = Wallet.errorText(e));
-        }
+        });
       }
     } catch (_) {
       if (mounted) {

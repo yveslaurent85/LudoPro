@@ -2636,7 +2636,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
 
   Future<void> _enter(String id, {Map<String, dynamic>? initial}) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id, initial: initial) : widget.game == 'anticote' ? AntiCoteOnlineRoom(gameId: id, initial: initial) : widget.game == 'tchek' ? TchekOnlineRoom(gameId: id, initial: initial) : CardsOnlineRoom(gameId: id)));
+        builder: (_) => widget.game == 'fapfap' ? FapFapOnlineRoom(gameId: id, initial: initial) : widget.game == 'anticote' ? AntiCoteOnlineRoom(gameId: id, initial: initial) : widget.game == 'tchek' ? TchekOnlineRoom(gameId: id, initial: initial) : CardsOnlineRoom(gameId: id, initial: initial)));
     if (mounted) _load();
   }
 
@@ -2870,9 +2870,12 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
 
 /// Salle de jeu en ligne (TIAH ou BOUBAYAH) : le serveur est l'arbitre.
 class CardsOnlineRoom extends StatefulWidget {
-  const CardsOnlineRoom({super.key, required this.gameId});
+  const CardsOnlineRoom({super.key, required this.gameId, this.initial});
 
   final String gameId;
+
+  /// Vue déjà reçue à la création / à l'entrée : la salle s'affiche tout de suite.
+  final Map<String, dynamic>? initial;
 
   @override
   State<CardsOnlineRoom> createState() => _CardsOnlineRoomState();
@@ -2892,8 +2895,12 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
   @override
   void initState() {
     super.initState();
+    if (widget.initial != null) {
+      _v = widget.initial;
+      _rx = DateTime.now();
+    }
     _poll();
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+    _timer = Timer.periodic(const Duration(milliseconds: 1200), (_) => _poll());
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
