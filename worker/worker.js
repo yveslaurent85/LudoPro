@@ -2724,9 +2724,9 @@ async function adminRechargeFeed({ uid, env }) {
   await accessToken(env);
   const extra = ['uid', 'name', 'amount', 'operator'];
   const [camp, man, seb] = await Promise.all([
-    recentDocs(env, 'deposits', 15, extra).catch(() => []),
-    recentDocs(env, 'manualDeposits', 15, extra).catch(() => []),
-    recentDocs(env, 'sebpayDeposits', 15, extra).catch(() => []),
+    recentDocs(env, 'deposits', 6, extra).catch(() => []),
+    recentDocs(env, 'manualDeposits', 6, extra).catch(() => []),
+    recentDocs(env, 'sebpayDeposits', 6, extra).catch(() => []),
   ]);
   const row = (src, d) => ({
     id: d.id,
@@ -3220,14 +3220,14 @@ async function adminRiskClear({ uid, data, env }) {
 async function riskScan(env) {
   try {
     const st = await readDoc(env, 'app/riskScan');
-    if (st && Date.now() - intOr(st.lastMs, 0) < 3600000) return;
+    if (st && Date.now() - intOr(st.lastMs, 0) < 6 * 3600000) return; // toutes les 6 h (économie de lectures)
     await runTx(env, async (tx) => {
       tx.write('app/riskScan', { set: { lastMs: Date.now() } });
     });
     const gte = (field, v) => ({ fieldFilter: { field: { fieldPath: field }, op: 'GREATER_THAN_OR_EQUAL', value: toFs(v) } });
     const [a, b] = await Promise.all([
-      queryDocs(env, 'users', gte('statPlayed', 30), 500).catch(() => []),
-      queryDocs(env, 'users', gte('tmGames', 8), 500).catch(() => []),
+      queryDocs(env, 'users', gte('statPlayed', 30), 200).catch(() => []),
+      queryDocs(env, 'users', gte('tmGames', 8), 200).catch(() => []),
     ]);
     const seen = new Set();
     for (const u of [...a, ...b]) {
@@ -7423,8 +7423,10 @@ async function cardsList({ uid, data, env }) {
   await accessToken(env);
   later(env, maybeSweep(env));
   const game = data && (data.game === 'tiah' || data.game === 'boubayah' || data.game === 'fapfap' || data.game === 'anticote' || data.game === 'tchek') ? data.game : '';
-  const waiting = await queryDocs(env, 'cards', eqFilter('status', 'waiting'), 80);
-  const mine = await queryDocs(env, 'cards', arrayContainsFilter('uids', uid), 60);
+  const waiting = await queryDocs(env, 'cards', eqFilter('status', 'waiting'), 30);
+  // Actualisation légère (toutes les ~10 s) : on ne relit pas « mes parties » (économie de lectures).
+  const light = !!(data && data.light === true);
+  const mine = light ? [] : await queryDocs(env, 'cards', arrayContainsFilter('uids', uid), 60);
   const row = (g) => ({
     id: g.id,
     game: g.game,
@@ -7441,9 +7443,11 @@ async function cardsList({ uid, data, env }) {
       .filter((g) => g.isPublic === true && (!game || g.game === game) && intOr(g.createdAtMs, 0) > fresh)
       .filter((g) => !playersOf(g).some((p) => p.uid === uid))
       .map(row),
-    mine: mine
-      .filter((g) => (g.status === 'waiting' || g.status === 'playing') && g.over !== true && (!game || g.game === game))
-      .map(row),
+    mine: light
+      ? null
+      : mine
+          .filter((g) => (g.status === 'waiting' || g.status === 'playing') && g.over !== true && (!game || g.game === game))
+          .map(row),
   };
 }
 
@@ -8058,7 +8062,6 @@ async function maybeSweep(env, force = false) {
       tx.write('app/sweep', { set: { lastMs: now } });
     });
     const n = await sweepWaitingGames(env);
-    await riskScan(env);
     return n;
   } catch (e) {
     console.error('maybeSweep', e);
