@@ -2602,6 +2602,9 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
   bool _public = true;
   bool _busy = false;
   bool _creating = false; // vrai : options de création affichées
+  final _betCtrl = TextEditingController(); // défi lancé dès la création (facultatif)
+  String _betType = 'duel';
+  bool _betOver = true;
   final _code = TextEditingController();
 
   @override
@@ -2615,6 +2618,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
   void dispose() {
     _timer?.cancel();
     _code.dispose();
+    _betCtrl.dispose();
     super.dispose();
   }
 
@@ -2651,9 +2655,20 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
         maxPlayers: _max,
         isPublic: _public,
       );
+      var shown = v;
+      final betAmt = int.tryParse(_betCtrl.text.trim()) ?? 0;
+      if (betAmt > 0 && _stake > 0) {
+        // Défi / pari placé dès la création de la partie.
+        try {
+          shown = await Wallet.cardsBetPropose(
+              gameId: v['id'] as String, type: _betType, amount: betAmt, over: _betOver);
+        } catch (e) {
+          if (mounted) _snack(e);
+        }
+      }
       if (!mounted) return;
       setState(() => _busy = false);
-      await _enter(v['id'] as String, initial: v);
+      await _enter(v['id'] as String, initial: shown);
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
@@ -2873,6 +2888,50 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
                 value: _public,
                 onChanged: (v) => setState(() => _public = v),
               ),
+              if (_stake > 0 && widget.game != 'fapfap') ...[
+                Text(tr('Défi à la création (facultatif)', 'Challenge on creation (optional)'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+                if (widget.game == 'boubayah')
+                  Wrap(spacing: 8, children: [
+                    ChoiceChip(
+                      label: Text(tr('Défier les adversaires', 'Challenge rivals')),
+                      selected: _betType == 'duel',
+                      selectedColor: _gold,
+                      onSelected: (_) => setState(() => _betType = 'duel'),
+                    ),
+                    ChoiceChip(
+                      label: Text(tr('Défi Fétiche (13)', 'Fetish challenge (13)')),
+                      selected: _betType == 'fetiche',
+                      selectedColor: _gold,
+                      onSelected: (_) => setState(() => _betType = 'fetiche'),
+                    ),
+                  ]),
+                if (widget.game == 'boubayah' && _betType == 'fetiche')
+                  Wrap(spacing: 8, children: [
+                    ChoiceChip(
+                      label: Text(tr('Plus de 13', 'Over 13')),
+                      selected: _betOver,
+                      selectedColor: _gold,
+                      onSelected: (_) => setState(() => _betOver = true),
+                    ),
+                    ChoiceChip(
+                      label: Text(tr('Moins de 13', 'Under 13')),
+                      selected: !_betOver,
+                      selectedColor: _gold,
+                      onSelected: (_) => setState(() => _betOver = false),
+                    ),
+                  ]),
+                TextField(
+                  controller: _betCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: tr('Mise du défi en FCFA (vide = aucun)', 'Challenge stake in FCFA (empty = none)'),
+                    hintStyle: const TextStyle(color: Colors.white38),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               SizedBox(
                 height: 50,
                 child: FilledButton(
@@ -3180,6 +3239,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           children: [
+            _betsPanel(v, [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)], v['game'] == 'tiah'),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
@@ -4442,6 +4502,10 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
                   Text('⏱ $_secLeft s', style: const TextStyle(color: Colors.white70)),
                 ]),
               ),
+            if (!over) ...[
+              _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: false, onChanged: _fetch),
+              const SizedBox(height: 8),
+            ],
             if (stake > 0)
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -5187,6 +5251,10 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
                   Text('⏱ $_secLeft s', style: const TextStyle(color: Colors.white70)),
                 ]),
               ),
+            if (!over) ...[
+              _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: true, onChanged: _fetch),
+              const SizedBox(height: 8),
+            ],
             if (over)
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -6283,7 +6351,8 @@ class _DuelPanelState extends State<_DuelPanel> {
   @override
   Widget build(BuildContext context) {
     final v = widget.view;
-    final waiting = v['status'] == 'waiting';
+    // Défis possibles à la création (salle d'attente) ET pendant la manche.
+    final waiting = (v['status'] == 'waiting' || v['status'] == 'playing') && v['over'] != true;
     final bets = [for (final b in (v['bets'] as List? ?? [])) Map<String, dynamic>.from(b as Map)];
     final players = [for (final p in (v['players'] as List? ?? [])) Map<String, dynamic>.from(p as Map)];
     final rivals = players.where((p) => p['uid'] != widget.me).toList();

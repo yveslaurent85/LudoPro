@@ -279,6 +279,32 @@ class Wallet {
   static Future<Map<String, dynamic>> adminFindGame(String q) =>
       _call('adminFindGame', <String, dynamic>{'q': q});
 
+  // ---- Zoning (villes, partenaires exclusifs de zone) ----
+  static Future<Map<String, dynamic>> zoneMe() => _call('zoneMe', <String, dynamic>{});
+  static Future<Map<String, dynamic>> playerSetCity({required String region, required String city, String quarter = ''}) =>
+      _call('playerSetCity', <String, dynamic>{'region': region, 'city': city, 'quarter': quarter});
+  static Future<Map<String, dynamic>> cityChangeRequest({required String region, required String city, String reason = ''}) =>
+      _call('cityChangeRequest', <String, dynamic>{'region': region, 'city': city, 'reason': reason});
+  static Future<Map<String, dynamic>> zoneMy() => _call('zoneMy', <String, dynamic>{});
+  static Future<Map<String, dynamic>> zonePayoutRequest() => _call('zonePayoutRequest', <String, dynamic>{});
+  static Future<Map<String, dynamic>> adminZones() => _call('adminZones', <String, dynamic>{});
+  static Future<Map<String, dynamic>> adminZoneSave({required String name, required String region}) =>
+      _call('adminZoneSave', <String, dynamic>{'name': name, 'region': region});
+  static Future<Map<String, dynamic>> adminZoneAssign({required String zoneId, required String code, required int rate}) =>
+      _call('adminZoneAssign', <String, dynamic>{'zoneId': zoneId, 'code': code, 'rate': rate});
+  static Future<Map<String, dynamic>> adminZoneRelease(String zoneId) =>
+      _call('adminZoneRelease', <String, dynamic>{'zoneId': zoneId});
+  static Future<Map<String, dynamic>> adminZoneStatus(String zoneId, String status) =>
+      _call('adminZoneStatus', <String, dynamic>{'zoneId': zoneId, 'status': status});
+  static Future<Map<String, dynamic>> adminZoneAttach(String zoneId) =>
+      _call('adminZoneAttach', <String, dynamic>{'zoneId': zoneId});
+  static Future<Map<String, dynamic>> adminZonePlayers(String zoneId) =>
+      _call('adminZonePlayers', <String, dynamic>{'zoneId': zoneId});
+  static Future<Map<String, dynamic>> adminCityChangeDecide(String id, bool accept) =>
+      _call('adminCityChangeDecide', <String, dynamic>{'id': id, 'accept': accept});
+  static Future<Map<String, dynamic>> adminZonePayoutDecide(String id, bool accept) =>
+      _call('adminZonePayoutDecide', <String, dynamic>{'id': id, 'accept': accept});
+
   /// Administrateur : transfère les commissions de Katika vers son solde
   /// principal (possible à partir de 2500 FCFA). Renvoie { amount, balance }.
   static Future<Map<String, dynamic>> adminHouseWithdraw() {

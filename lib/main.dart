@@ -38,6 +38,7 @@ import 'share_game.dart';
 import 'password_screen.dart';
 import 'player_stats.dart';
 import 'update_check.dart';
+import 'zone_screens.dart';
 import 'stake_field.dart';
 import 'firebase_web.dart';
 import 'damier.dart';
@@ -87,7 +88,7 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
-      home: const SharedLinkGate(child: CashierGate(child: HomeScreen())),
+      home: const SharedLinkGate(child: CashierGate(child: CityGate(child: HomeScreen()))),
     );
   }
 }
@@ -574,6 +575,12 @@ class HomeScreen extends StatelessWidget {
                 item(Icons.emoji_events, tr('Tournois', 'Tournaments'),
                     const Color(0xFFF57C00),
                     () => go((_) => const TournamentsScreen())),
+                if (user != null)
+                  item(Icons.location_city, tr('Ma ville', 'My city'), const Color(0xFF00897B),
+                      () => go((_) => const MyCityScreen())),
+                if (user != null && kZonePartner.value)
+                  item(Icons.handshake, 'Mon espace partenaire', const Color(0xFFB8860B),
+                      () => go((_) => const PartnerZoneScreen())),
                 item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
                   Navigator.of(sheetCtx).pop();
                   openWhatsAppGroup(context);
