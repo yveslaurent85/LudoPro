@@ -165,14 +165,21 @@ class _JoinBellState extends State<JoinBell> {
   void didUpdateWidget(JoinBell old) {
     super.didUpdateWidget(old);
     if (widget.isHost && widget.count > old.count) {
-      _sfx.bell();
-      if (mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-          duration: const Duration(seconds: 3),
-          content: Text(tr('🔔 Un joueur a rejoint ta partie : tu peux lancer !',
-              '🔔 A player joined your game: you can start!')),
-        ));
-      }
+      // Jamais d'affichage pendant la construction de l'écran (sinon plantage) :
+      // on attend la fin de l'image en cours.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        try {
+          _sfx.bell();
+        } catch (_) {}
+        try {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+            duration: const Duration(seconds: 3),
+            content: Text(tr('🔔 Un joueur a rejoint ta partie : tu peux lancer !',
+                '🔔 A player joined your game: you can start!')),
+          ));
+        } catch (_) {}
+      });
     }
   }
 
