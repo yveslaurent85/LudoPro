@@ -548,6 +548,7 @@ async function referralPayout(tx, participants, commission, info = {}) {
     tx.write(`users/${r}`, { incr: { referralBalance: g, referralEarned: g } });
     referral += g;
   }
+  const zone = await zonePayout(tx, list, share, info);
   let partner = 0;
   for (const [p, g] of pGains) {
     tx.write(`users/${p}`, { incr: { partnerBalance: g, partnerEarned: g } });
@@ -563,7 +564,8 @@ async function referralPayout(tx, participants, commission, info = {}) {
     });
     partner += g;
   }
-  return { referral, partner };
+  // Commission des partenaires exclusifs de zone : comptée avec les partenaires pour la part de Katika.
+  return { referral, partner: partner + zone, zone };
 }
 
 // --- Jackpot ----------------------------------------------------------
@@ -2176,6 +2178,485 @@ function adminRow(kind, mode, d) {
     partnerPaid: Math.max(0, intOr(d.partnerPaid, 0)),
     jackpot: Math.max(0, intOr(d.jackpot, 0)),
   };
+}
+
+// ======================================================================
+// ZONING : partenaires exclusifs par ville
+// ======================================================================
+// zones/{zoneId}              : { name, region, country, status: active|suspended, partnerUid, partnerName, rate, partnerSince }
+// users/{uid}                 : country, region, city, quarter, zoneId, zoneAttached (rattaché à un partenaire),
+//                               zoneBalance / zoneEarned / zonePaid / zoneHeld (partenaire), zonePartner
+// player_attributions/{id}    : historique des rattachements
+// partner_assignments/{id}    : historique des affectations ville <-> partenaire
+// partner_commissions/{id}    : une commission par joueur et par opération (id déterministe = idempotence)
+// partner_payouts/{id}        : demandes de paiement des partenaires
+// city_change_requests/{id}   : demandes de changement de ville
+// partner_audit_logs/{id}     : actions sensibles
+// Règle : un joueur est rattaché seulement s'il s'inscrit dans une ville qui a déjà un partenaire actif,
+// ou si l'administration le décide explicitement (aucune commission rétroactive).
+// La commission du partenaire = ZONE rate % (15 % max) de la part de commission de chaque joueur.
+
+const ZONE_MAX_RATE = 15;
+const ZONE_PAYOUT_MIN = 1000;
+const CM_REGIONS = ['Adamaoua', 'Centre', 'Est', 'Extrême-Nord', 'Littoral', 'Nord', 'Nord-Ouest', 'Ouest', 'Sud', 'Sud-Ouest'];
+
+function zoneClean(v, max = 40) {
+  return String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, max);
+}
+
+function zoneKey(city) {
+  return promoKey(city);
+}
+
+function zoneAudit(tx, uid, action, info = {}) {
+  tx.write(`partner_audit_logs/${newId()}`, {
+    create: true,
+    set: { by: uid, action, ...info },
+    serverTime: ['createdAt'],
+  });
+}
+
+async function zoneCount(env, zid, attachedOnly = false) {
+  try {
+    const filters = [{ fieldFilter: { field: { fieldPath: 'zoneId' }, op: 'EQUAL', value: { stringValue: zid } } }];
+    if (attachedOnly) filters.push({ fieldFilter: { field: { fieldPath: 'zoneAttached' }, op: 'EQUAL', value: { booleanValue: true } } });
+    const r = await fsCall(env, 'runAggregationQuery', {
+      structuredAggregationQuery: {
+        structuredQuery: {
+          from: [{ collectionId: 'users' }],
+          where: filters.length === 1 ? filters[0] : { compositeFilter: { op: 'AND', filters } },
+        },
+        aggregations: [{ alias: 'n', count: {} }],
+      },
+    });
+    return Number(r[0].result.aggregateFields.n.integerValue) || 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+/** Commission des partenaires exclusifs : ZONE rate % (15 % max) de la part de commission de chaque
+ *  joueur rattaché à une zone active. Idempotent (un document par joueur et par opération).
+ *  Renvoie le total versé aux partenaires. */
+async function zonePayout(tx, list, share, info = {}) {
+  if (!(share > 0) || list.length === 0) return 0;
+  const users = await tx.getMany(list.map((u) => `users/${u}`));
+  const zids = [...new Set(users.filter((d) => d && d.zoneAttached === true && d.zoneId).map((d) => d.zoneId))];
+  if (zids.length === 0) return 0;
+  const zdocs = await tx.getMany(zids.map((z) => `zones/${z}`));
+  const zones = new Map(zids.map((z, i) => [z, zdocs[i]]));
+  const cands = [];
+  list.forEach((u, i) => {
+    const d = users[i];
+    if (!d || d.zoneAttached !== true || !d.zoneId) return;
+    const z = zones.get(d.zoneId);
+    if (!z || z.status !== 'active' || !z.partnerUid || z.partnerUid === u) return;
+    const rate = Math.min(ZONE_MAX_RATE, Math.max(0, intOr(z.rate, ZONE_MAX_RATE)));
+    const amount = Math.floor((share * rate) / 100);
+    if (!(amount > 0)) return;
+    const cid = `${String(info.mode || 'g')}_${String(info.gameId || 'x')}_${String(info.ref || '0')}_${u}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 140);
+    cands.push({ u, d, z, rate, amount, cid, zid: d.zoneId });
+  });
+  if (cands.length === 0) return 0;
+  const seen = await tx.getMany(cands.map((c) => `partner_commissions/${c.cid}`));
+  const gains = new Map();
+  let total = 0;
+  cands.forEach((c, i) => {
+    if (seen[i]) return; // déjà comptabilisée : jamais de doublon
+    tx.write(`partner_commissions/${c.cid}`, {
+      create: true,
+      set: {
+        partnerUid: c.z.partnerUid,
+        playerUid: c.u,
+        playerName: tournName(c.d),
+        zoneId: c.zid,
+        city: String(c.z.name || ''),
+        game: String(info.mode || ''),
+        gameId: String(info.gameId || ''),
+        base: Math.floor(share),
+        rate: c.rate,
+        amount: c.amount,
+        status: 'validated',
+      },
+      serverTime: ['createdAt'],
+    });
+    gains.set(c.z.partnerUid, (gains.get(c.z.partnerUid) || 0) + c.amount);
+    total += c.amount;
+  });
+  for (const [p, g] of gains) tx.write(`users/${p}`, { incr: { zoneBalance: g, zoneEarned: g } });
+  return total;
+}
+
+// --- Joueur ------------------------------------------------------------
+
+/** Profil territorial du joueur connecté + indicateur « compte partenaire ». */
+async function zoneMe({ uid, env }) {
+  const u = (await readDoc(env, `users/${uid}`)) || {};
+  const mine = await queryDocs(env, 'zones', eqFilter('partnerUid', uid), 30);
+  const reqs = await queryDocs(env, 'city_change_requests', eqFilter('uid', uid), 10);
+  const pending = reqs.find((r) => r.status === 'pending');
+  return {
+    hasCity: !!u.city,
+    city: String(u.city || ''),
+    region: String(u.region || ''),
+    quarter: String(u.quarter || ''),
+    attached: u.zoneAttached === true,
+    isPartner: mine.length > 0 || u.zonePartner === true,
+    pendingChange: pending ? { city: pending.toCity, region: pending.toRegion } : null,
+    regions: CM_REGIONS,
+  };
+}
+
+/** Première déclaration de ville (obligatoire). La ville ne peut plus être changée librement. */
+async function playerSetCity({ uid, data, env }) {
+  const region = zoneClean(data.region);
+  const city = zoneClean(data.city);
+  const quarter = zoneClean(data.quarter);
+  if (!CM_REGIONS.includes(region)) throw new HttpError('invalid-argument', 'Choisis ta région.');
+  const zid = zoneKey(city);
+  if (!zid) throw new HttpError('invalid-argument', 'Indique ta ville.');
+  return runTx(env, async (tx) => {
+    const [me, z] = await tx.getMany([`users/${uid}`, `zones/${zid}`]);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (me.city) {
+      throw new HttpError('failed-precondition', 'Ta ville est déjà enregistrée. Fais une demande de changement de ville.');
+    }
+    const attached = !!(z && z.status === 'active' && z.partnerUid && z.partnerUid !== uid);
+    tx.write(`users/${uid}`, {
+      set: { country: 'Cameroun', region, city, quarter, zoneId: zid, zoneAttached: attached },
+      serverTime: ['citySetAt'],
+    });
+    tx.write(`player_attributions/${newId()}`, {
+      create: true,
+      set: { uid, zoneId: zid, city, region, partnerUid: attached ? z.partnerUid : '', reason: 'inscription', managed: attached ? 'partenaire' : 'centrale' },
+      serverTime: ['createdAt'],
+    });
+    return { ok: true, city, region, attached };
+  });
+}
+
+/** Demande de changement de ville (examinée par l'administration). */
+async function cityChangeRequest({ uid, data, env }) {
+  const region = zoneClean(data.region);
+  const city = zoneClean(data.city);
+  const reason = zoneClean(data.reason, 200);
+  if (!CM_REGIONS.includes(region)) throw new HttpError('invalid-argument', 'Choisis la région.');
+  if (!zoneKey(city)) throw new HttpError('invalid-argument', 'Indique la nouvelle ville.');
+  const me = await readDoc(env, `users/${uid}`);
+  if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+  if (!me.city) throw new HttpError('failed-precondition', 'Enregistre d\'abord ta ville.');
+  if (zoneKey(me.city) === zoneKey(city)) throw new HttpError('invalid-argument', 'C\'est déjà ta ville.');
+  const old = await queryDocs(env, 'city_change_requests', eqFilter('uid', uid), 20);
+  if (old.some((r) => r.status === 'pending')) throw new HttpError('failed-precondition', 'Une demande est déjà en cours.');
+  const id = newId();
+  await runTx(env, async (tx) => {
+    tx.write(`city_change_requests/${id}`, {
+      create: true,
+      set: { uid, name: tournName(me), fromCity: String(me.city), fromRegion: String(me.region || ''), toCity: city, toRegion: region, reason, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+  });
+  return { ok: true, id };
+}
+
+// --- Partenaire ---------------------------------------------------------
+
+/** MON ESPACE PARTENAIRE : uniquement les zones dont l'appelant est le partenaire. */
+async function zoneMy({ uid, env }) {
+  const zones = await queryDocs(env, 'zones', eqFilter('partnerUid', uid), 30);
+  const me = (await readDoc(env, `users/${uid}`)) || {};
+  const players = [];
+  for (const z of zones) {
+    const list = await queryDocs(env, 'users', eqFilter('zoneId', z.id), 300);
+    for (const p of list) {
+      if (p.zoneAttached !== true || p.id === uid) continue;
+      players.push({
+        id: p.id,
+        name: tournName(p),
+        city: String(z.name || p.city || ''),
+        quarter: String(p.quarter || ''),
+        createdAt: typeof p.createdAt === 'string' ? p.createdAt : '',
+        wagered: Math.max(0, intOr(p.wagered, 0)),
+      });
+    }
+  }
+  const comm = await queryDocs(env, 'partner_commissions', eqFilter('partnerUid', uid), 500);
+  const rows = comm
+    .map((c) => ({
+      id: c.id,
+      playerUid: String(c.playerUid || ''),
+      playerName: String(c.playerName || ''),
+      city: String(c.city || ''),
+      game: String(c.game || ''),
+      base: intOr(c.base, 0),
+      rate: intOr(c.rate, 0),
+      amount: intOr(c.amount, 0),
+      status: String(c.status || ''),
+      createdAt: typeof c.createdAt === 'string' ? c.createdAt : '',
+    }))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const payouts = await queryDocs(env, 'partner_payouts', eqFilter('partnerUid', uid), 30);
+  return {
+    zones: zones.map((z) => ({ id: z.id, name: String(z.name || ''), region: String(z.region || ''), status: String(z.status || ''), rate: intOr(z.rate, ZONE_MAX_RATE) })),
+    players,
+    commissions: rows,
+    available: Math.max(0, intOr(me.zoneBalance, 0)),
+    held: Math.max(0, intOr(me.zoneHeld, 0)),
+    paid: Math.max(0, intOr(me.zonePaid, 0)),
+    earned: Math.max(0, intOr(me.zoneEarned, 0)),
+    min: ZONE_PAYOUT_MIN,
+    payouts: payouts
+      .map((p) => ({ id: p.id, amount: intOr(p.amount, 0), status: String(p.status || ''), createdAt: typeof p.createdAt === 'string' ? p.createdAt : '' }))
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
+  };
+}
+
+/** Le partenaire demande le paiement de sa commission disponible (validé ensuite par l'administration). */
+async function zonePayoutRequest({ uid, env }) {
+  const zones = await queryDocs(env, 'zones', eqFilter('partnerUid', uid), 5);
+  return runTx(env, async (tx) => {
+    const me = await tx.get(`users/${uid}`);
+    if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (zones.length === 0 && me.zonePartner !== true) throw new HttpError('permission-denied', 'Réservé aux partenaires.');
+    const amount = Math.max(0, intOr(me.zoneBalance, 0));
+    if (amount < ZONE_PAYOUT_MIN) {
+      throw new HttpError('failed-precondition', `Demande possible à partir de ${ZONE_PAYOUT_MIN} FCFA de commission.`);
+    }
+    const id = newId();
+    tx.write(`users/${uid}`, { incr: { zoneBalance: -amount, zoneHeld: amount } });
+    tx.write(`partner_payouts/${id}`, {
+      create: true,
+      set: { partnerUid: uid, name: tournName(me), amount, status: 'pending' },
+      serverTime: ['createdAt'],
+    });
+    return { ok: true, id, amount };
+  });
+}
+
+// --- Administration -------------------------------------------------------
+
+async function adminZones({ uid, env }) {
+  requireAdmin(uid, env);
+  const zones = await queryDocs(env, 'zones', undefined, 300);
+  const slice = zones.slice(0, 80);
+  const counts = await Promise.all(slice.map((z) => zoneCount(env, z.id)));
+  const att = await Promise.all(slice.map((z) => zoneCount(env, z.id, true)));
+  const reqs = await queryDocs(env, 'city_change_requests', eqFilter('status', 'pending'), 100);
+  const pays = await queryDocs(env, 'partner_payouts', eqFilter('status', 'pending'), 100);
+  return {
+    regions: CM_REGIONS,
+    maxRate: ZONE_MAX_RATE,
+    zones: slice
+      .map((z, i) => ({
+        id: z.id,
+        name: String(z.name || ''),
+        region: String(z.region || ''),
+        status: String(z.status || 'active'),
+        partnerUid: String(z.partnerUid || ''),
+        partnerName: String(z.partnerName || ''),
+        rate: intOr(z.rate, ZONE_MAX_RATE),
+        players: counts[i],
+        attached: att[i],
+      }))
+      .sort((a, b) => a.region.localeCompare(b.region) || a.name.localeCompare(b.name)),
+    cityRequests: reqs.map((r) => ({
+      id: r.id,
+      name: String(r.name || ''),
+      from: String(r.fromCity || ''),
+      to: String(r.toCity || ''),
+      toRegion: String(r.toRegion || ''),
+      reason: String(r.reason || ''),
+      createdAt: typeof r.createdAt === 'string' ? r.createdAt : '',
+    })),
+    payouts: pays.map((p) => ({
+      id: p.id,
+      name: String(p.name || ''),
+      amount: intOr(p.amount, 0),
+      createdAt: typeof p.createdAt === 'string' ? p.createdAt : '',
+    })),
+  };
+}
+
+/** Ajoute (ou renomme) une ville. */
+async function adminZoneSave({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const name = zoneClean(data.name);
+  const region = zoneClean(data.region);
+  if (!CM_REGIONS.includes(region)) throw new HttpError('invalid-argument', 'Région invalide.');
+  const zid = zoneKey(name);
+  if (!zid) throw new HttpError('invalid-argument', 'Nom de ville invalide.');
+  return runTx(env, async (tx) => {
+    const z = await tx.get(`zones/${zid}`);
+    if (z) {
+      tx.write(`zones/${zid}`, { set: { name, region } });
+    } else {
+      tx.write(`zones/${zid}`, {
+        create: true,
+        set: { name, region, country: 'Cameroun', status: 'active', partnerUid: '', partnerName: '', rate: ZONE_MAX_RATE },
+        serverTime: ['createdAt'],
+      });
+    }
+    zoneAudit(tx, uid, z ? 'zone_update' : 'zone_create', { zoneId: zid });
+    return { ok: true, id: zid };
+  });
+}
+
+/** Affecte (ou remplace) le partenaire exclusif d'une ville. Une ville = un seul partenaire actif. */
+async function adminZoneAssign({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const zid = zoneKey(zoneClean(data.zoneId));
+  const code = promoKey(data.code);
+  if (!zid || !code) throw new HttpError('invalid-argument', 'Ville ou code promo invalide.');
+  const rate = Math.min(ZONE_MAX_RATE, Math.max(1, intOr(data.rate, ZONE_MAX_RATE)));
+  return runTx(env, async (tx) => {
+    const [z, owner] = await tx.getMany([`zones/${zid}`, `promoCodes/${code}`]);
+    if (!z) throw new HttpError('not-found', 'Ville inconnue.');
+    if (z.status !== 'active') throw new HttpError('failed-precondition', 'Cette zone est suspendue.');
+    if (!owner || typeof owner.uid !== 'string') throw new HttpError('not-found', 'Aucun joueur avec ce code promo.');
+    const p = await tx.get(`users/${owner.uid}`);
+    if (!p) throw new HttpError('not-found', 'Compte partenaire introuvable.');
+    const prev = String(z.partnerUid || '');
+    tx.write(`zones/${zid}`, {
+      set: { partnerUid: owner.uid, partnerName: tournName(p), rate },
+      ...(prev !== owner.uid ? { serverTime: ['partnerSince'] } : {}),
+    });
+    tx.write(`users/${owner.uid}`, { set: { zonePartner: true } });
+    tx.write(`partner_assignments/${newId()}`, {
+      create: true,
+      set: { zoneId: zid, partnerUid: owner.uid, previousPartnerUid: prev, rate, by: uid },
+      serverTime: ['createdAt'],
+    });
+    zoneAudit(tx, uid, prev && prev !== owner.uid ? 'partner_replaced' : 'partner_assigned', { zoneId: zid, partnerUid: owner.uid, rate });
+    return { ok: true, partnerUid: owner.uid, partnerName: tournName(p), rate };
+  });
+}
+
+/** Retire le partenaire d'une ville (partenaire suspendu ou résilié) : l'historique est conservé. */
+async function adminZoneRelease({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const zid = zoneKey(zoneClean(data.zoneId));
+  return runTx(env, async (tx) => {
+    const z = await tx.get(`zones/${zid}`);
+    if (!z) throw new HttpError('not-found', 'Ville inconnue.');
+    const prev = String(z.partnerUid || '');
+    tx.write(`zones/${zid}`, { set: { partnerUid: '', partnerName: '' } });
+    tx.write(`partner_assignments/${newId()}`, {
+      create: true,
+      set: { zoneId: zid, partnerUid: '', previousPartnerUid: prev, rate: 0, by: uid },
+      serverTime: ['createdAt'],
+    });
+    zoneAudit(tx, uid, 'partner_released', { zoneId: zid, partnerUid: prev });
+    return { ok: true };
+  });
+}
+
+/** Suspend ou réactive une zone (aucune commission pendant la suspension). */
+async function adminZoneStatus({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const zid = zoneKey(zoneClean(data.zoneId));
+  const status = data.status === 'suspended' ? 'suspended' : 'active';
+  return runTx(env, async (tx) => {
+    const z = await tx.get(`zones/${zid}`);
+    if (!z) throw new HttpError('not-found', 'Ville inconnue.');
+    tx.write(`zones/${zid}`, { set: { status } });
+    zoneAudit(tx, uid, status === 'suspended' ? 'zone_suspended' : 'zone_reactivated', { zoneId: zid });
+    return { ok: true, status };
+  });
+}
+
+/** Décision explicite : rattache au partenaire actuel les joueurs déjà inscrits dans la ville
+ *  (par lots de 100). Aucune commission rétroactive n'est créée. */
+async function adminZoneAttach({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const zid = zoneKey(zoneClean(data.zoneId));
+  const z = await readDoc(env, `zones/${zid}`);
+  if (!z || !z.partnerUid || z.status !== 'active') throw new HttpError('failed-precondition', 'La ville doit avoir un partenaire actif.');
+  const list = (await queryDocs(env, 'users', eqFilter('zoneId', zid), 400)).filter((p) => p.zoneAttached !== true && p.id !== z.partnerUid);
+  const batch = list.slice(0, 100);
+  if (batch.length) {
+    await runTx(env, async (tx) => {
+      for (const p of batch) {
+        tx.write(`users/${p.id}`, { set: { zoneAttached: true } });
+        tx.write(`player_attributions/${newId()}`, {
+          create: true,
+          set: { uid: p.id, zoneId: zid, city: String(z.name || ''), region: String(z.region || ''), partnerUid: z.partnerUid, reason: 'decision_admin', managed: 'partenaire' },
+          serverTime: ['createdAt'],
+        });
+      }
+      zoneAudit(tx, uid, 'players_attached', { zoneId: zid, count: batch.length });
+    });
+  }
+  return { ok: true, attached: batch.length, remaining: Math.max(0, list.length - batch.length) };
+}
+
+async function adminZonePlayers({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const zid = zoneKey(zoneClean(data.zoneId));
+  const list = await queryDocs(env, 'users', eqFilter('zoneId', zid), 300);
+  return {
+    players: list.map((p) => ({
+      id: p.id,
+      name: tournName(p),
+      quarter: String(p.quarter || ''),
+      attached: p.zoneAttached === true,
+      wagered: Math.max(0, intOr(p.wagered, 0)),
+    })),
+  };
+}
+
+/** Accepte ou refuse un changement de ville. Acceptation : nouveau rattachement dès maintenant,
+ *  les commissions passées restent à l'ancien partenaire. */
+async function adminCityChangeDecide({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Demande inconnue.');
+  const accept = data.accept === true;
+  return runTx(env, async (tx) => {
+    const r = await tx.get(`city_change_requests/${id}`);
+    if (!r || r.status !== 'pending') throw new HttpError('failed-precondition', 'Demande déjà traitée.');
+    if (!accept) {
+      tx.write(`city_change_requests/${id}`, { set: { status: 'refused', by: uid }, serverTime: ['closedAt'] });
+      zoneAudit(tx, uid, 'city_change_refused', { requestId: id, playerUid: r.uid });
+      return { ok: true, status: 'refused' };
+    }
+    const zid = zoneKey(r.toCity);
+    const z = await tx.get(`zones/${zid}`);
+    const attached = !!(z && z.status === 'active' && z.partnerUid && z.partnerUid !== r.uid);
+    tx.write(`users/${r.uid}`, {
+      set: { city: String(r.toCity), region: String(r.toRegion), zoneId: zid, zoneAttached: attached },
+      serverTime: ['citySetAt'],
+    });
+    tx.write(`player_attributions/${newId()}`, {
+      create: true,
+      set: { uid: r.uid, zoneId: zid, city: String(r.toCity), region: String(r.toRegion), partnerUid: attached ? z.partnerUid : '', reason: 'changement_ville', managed: attached ? 'partenaire' : 'centrale', fromCity: String(r.fromCity || '') },
+      serverTime: ['createdAt'],
+    });
+    tx.write(`city_change_requests/${id}`, { set: { status: 'accepted', by: uid }, serverTime: ['closedAt'] });
+    zoneAudit(tx, uid, 'city_change_accepted', { requestId: id, playerUid: r.uid, zoneId: zid });
+    return { ok: true, status: 'accepted' };
+  });
+}
+
+/** Valide ou refuse une demande de paiement de commission d'un partenaire. */
+async function adminZonePayoutDecide({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Demande inconnue.');
+  const accept = data.accept === true;
+  return runTx(env, async (tx) => {
+    const p = await tx.get(`partner_payouts/${id}`);
+    if (!p || p.status !== 'pending') throw new HttpError('failed-precondition', 'Demande déjà traitée.');
+    const amount = Math.max(0, intOr(p.amount, 0));
+    if (accept) {
+      tx.write(`users/${p.partnerUid}`, { incr: { balance: amount, zoneHeld: -amount, zonePaid: amount } });
+      tx.write(`partner_payouts/${id}`, { set: { status: 'paid', by: uid }, serverTime: ['closedAt'] });
+    } else {
+      tx.write(`users/${p.partnerUid}`, { incr: { zoneBalance: amount, zoneHeld: -amount } });
+      tx.write(`partner_payouts/${id}`, { set: { status: 'refused', by: uid }, serverTime: ['closedAt'] });
+    }
+    zoneAudit(tx, uid, accept ? 'payout_paid' : 'payout_refused', { payoutId: id, partnerUid: p.partnerUid, amount });
+    return { ok: true, status: accept ? 'paid' : 'refused' };
+  });
 }
 
 /** Administrateur : retrouve une partie par son identifiant (début de l'id,
@@ -6292,8 +6773,9 @@ async function cardsBetPropose({ uid, data, env }) {
       throw new HttpError('invalid-argument', 'Le défi Fétiche existe seulement au BOUBAYAH.');
     }
     if (!flb && intOr(g.stake, 0) <= 0) throw new HttpError('failed-precondition', 'Pas de pari dans une partie gratuite.');
-    if (flb ? g.status !== 'waiting' : g.status !== 'playing' || g.over === true) {
-      throw new HttpError('failed-precondition', flb ? 'Les défis se font avant le début de la manche.' : "La manche n'est pas en cours.");
+    // Paris et défis : à la création (salle d'attente) ET pendant la manche.
+    if ((g.status !== 'waiting' && g.status !== 'playing') || g.over === true) {
+      throw new HttpError('failed-precondition', "La manche est terminée : plus de pari.");
     }
     const players = playersOf(g);
     const me = players.find((p) => p.uid === uid);
@@ -6355,8 +6837,8 @@ async function cardsBetAccept({ uid, data, env }) {
     if (bet.proposerUid === uid) throw new HttpError('failed-precondition', 'Tu ne peux pas relever ton propre pari.');
     if (bet.targetUid && bet.targetUid !== uid) throw new HttpError('permission-denied', "Ce pari ne t'est pas destiné.");
     const flb = cardsFlBets(g.game);
-    if (flb ? g.status !== 'waiting' : g.over === true || g.status !== 'playing') {
-      throw new HttpError('failed-precondition', flb ? 'Les défis se font avant le début de la manche.' : "La manche n'est pas en cours.");
+    if ((g.status !== 'waiting' && g.status !== 'playing') || g.over === true) {
+      throw new HttpError('failed-precondition', "La manche est terminée : plus de pari.");
     }
     const me = playersOf(g).find((p) => p.uid === uid);
     if (!me) throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
@@ -6405,7 +6887,7 @@ async function cardsBetsSync(env, gid) {
     for (const { path, b } of bets) {
       if (b.status === 'open') {
         const expired = cardsFlBets(room.game)
-          ? room.status !== 'waiting' || room.over === true
+          ? room.status === 'cancelled' || room.over === true
           : room.over === true || cardsPlayed(room, b.proposerUid) || (b.targetUid && cardsPlayed(room, b.targetUid));
         if (expired) {
           tx.write(`users/${b.proposerUid}`, { incr: { balance: b.amount } });
@@ -6639,7 +7121,7 @@ async function cardsLeave({ uid, data, env }) {
     if (!players.some((p) => p.uid === uid)) return;
     const stake = intOr(g.stake, 0);
     if (stake > 0) tx.write(`users/${uid}`, { incr: { balance: stake * (isEsc2(g.game) ? 2 : 1) } });
-    if (cardsFlBets(g.game) && intOr(g.betsN, 0) > 0) {
+    if (intOr(g.betsN, 0) > 0) {
       // Défis en attente ou acceptés qui concernent ce joueur : annulés, mises rendues.
       for (const { path: bp, b } of await cardsLoadBets(tx, gid)) {
         if (b.status === 'open' && (b.proposerUid === uid || b.targetUid === uid)) {
@@ -7212,7 +7694,7 @@ async function adminSportEventResult({ uid, data, env }) {
       });
       // Les parrains et partenaires touchent leur part de la commission, le reste revient à Katika.
       const commission = pool - prize;
-      const ref = await referralPayout(tx, [cur.proposerUid, cur.opponentUid], commission, { gameId: id, mode: 'sport' });
+      const ref = await referralPayout(tx, [cur.proposerUid, cur.opponentUid], commission, { gameId: id, mode: 'sport', ref: b.id });
       tx.write(`users/${cur.proposerUid}`, { incr: { wagered: amount } });
       tx.write(`users/${cur.opponentUid}`, { incr: { wagered: amount } });
       await houseAdd(tx, commission - ref.referral - ref.partner);
@@ -7468,7 +7950,7 @@ async function raceSettleFormula(env, race, formula, arrival) {
       if (!cur || cur.status !== 'active') return;
       const stake = intOr(cur.stake, 0);
       const share = gross > 0 ? Math.floor((commission * stake) / gross) : 0;
-      const ref = await referralPayout(tx, [cur.uid], share, { gameId: race.id, mode: 'course' });
+      const ref = await referralPayout(tx, [cur.uid], share, { gameId: race.id, mode: 'course', ref: b.id });
       tx.write(`users/${cur.uid}`, { incr: { wagered: stake } });
       await houseAdd(tx, share - ref.referral - ref.partner);
       if (win) {
@@ -8497,6 +8979,20 @@ const HANDLERS = {
   localBetCreate,
   adminStats,
   adminFindGame,
+  zoneMe,
+  playerSetCity,
+  cityChangeRequest,
+  zoneMy,
+  zonePayoutRequest,
+  adminZones,
+  adminZoneSave,
+  adminZoneAssign,
+  adminZoneRelease,
+  adminZoneStatus,
+  adminZoneAttach,
+  adminZonePlayers,
+  adminCityChangeDecide,
+  adminZonePayoutDecide,
   adminRechargeFeed,
   adminHouseWithdraw,
   campayDeposit,
