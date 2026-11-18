@@ -9130,10 +9130,12 @@ export default {
       return json({ error: 'Fonction inconnue.' }, 404);
     }
 
+    let whoAdmin = false;
     try {
       const m = (request.headers.get('authorization') || '').match(/^Bearer (.+)$/i);
       if (!m) throw new HttpError('unauthenticated', 'Connexion requise.');
       const uid = await verifyIdToken(m[1], env);
+      try { whoAdmin = adminIds(env).includes(uid); } catch (_) {}
 
       let data = {};
       try {
@@ -9164,7 +9166,9 @@ export default {
         return json({ error: e.message }, STATUS[e.code] || 400);
       }
       console.error(e);
-      return json({ error: 'Erreur serveur.' }, 500);
+      // Pour l'administrateur seulement : on montre la cause pour pouvoir corriger vite.
+      const detail = whoAdmin ? ` [${name} : ${String((e && e.message) || e).slice(0, 160)}]` : '';
+      return json({ error: 'Erreur serveur.' + detail }, 500);
     }
   },
 };
