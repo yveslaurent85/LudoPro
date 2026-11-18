@@ -252,10 +252,15 @@ async function fsCall(env, method, body) {
       body: JSON.stringify(body),
     },
   );
-  const j = await res.json().catch(() => ({}));
+  const txt = await res.text().catch(() => '');
+  let j = {};
+  try {
+    j = JSON.parse(txt);
+  } catch (_) {}
   if (!res.ok) {
-    const err = new Error((j.error && j.error.message) || 'Firestore');
-    err.fsStatus = j.error && j.error.status;
+    const je = Array.isArray(j) ? (j[0] && j[0].error) || {} : j.error || {};
+    const err = new Error(je.message || `Firestore HTTP ${res.status} ${String(txt).slice(0, 120)}`);
+    err.fsStatus = je.status;
     throw err;
   }
   return j;
