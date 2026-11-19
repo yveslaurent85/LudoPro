@@ -1134,8 +1134,16 @@ async function captureFee({ uid, data, env }) {
     if (amount > 0) {
       tx.write(`users/${victim}`, { incr: { balance: -amount } });
       tx.write(`users/${capturer}`, { incr: { balance: amount } });
+      // Avis affiché à l'écran des deux joueurs : gain / perte + nouveau solde (aucun frais sur les captures).
+      const at = Date.now();
+      tx.write(`users/${capturer}`, {
+        set: { capNotice: { id: eventId, kind: 'gain', amount, fee: 0, balance: balanceOf(c) + amount, other: tournName(v), at } },
+      });
+      tx.write(`users/${victim}`, {
+        set: { capNotice: { id: eventId, kind: 'loss', amount, fee: 0, balance: balanceOf(v) - amount, other: tournName(c), at } },
+      });
     }
-    return { amount, eliminated };
+    return { amount, eliminated, balance: balanceOf(c) + amount };
   });
 }
 
@@ -7551,7 +7559,6 @@ async function cardsAct(uid, data, env, act) {
   if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
   if (act !== 'open') throw new HttpError('invalid-argument', 'Action inconnue.');
   await accessToken(env);
-  await cardsDrive(env, gid);
   await runTx(env, async (tx) => {
     const path = `cards/${gid}`;
     const d = await tx.get(path);
@@ -7618,7 +7625,6 @@ async function cardsDraw({ uid, data, env }) {
   const gid = idStr(data.gameId);
   if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
   await accessToken(env);
-  await cardsDrive(env, gid);
   await runTx(env, async (tx) => {
     const path = `cards/${gid}`;
     const d = await tx.get(path);
