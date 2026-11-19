@@ -39,6 +39,7 @@ import 'password_screen.dart';
 import 'player_stats.dart';
 import 'update_check.dart';
 import 'zone_screens.dart';
+import 'pes_screens.dart';
 import 'stake_field.dart';
 import 'firebase_web.dart';
 import 'damier.dart';
@@ -1133,6 +1134,14 @@ class _GamesGrid extends StatelessWidget {
           subtitle: tr('Sports · Courses', 'Sports · Races'),
           badge: tr('NOUVEAU', 'NEW'),
           onTap: () => requireLogin(context, (_) => const ParisParDerrierePage()),
+        ),
+        _GameTile(
+          color: const Color(0xFF0B6E3A),
+          icon: Icons.sports_soccer,
+          title: 'KATIKA PES',
+          subtitle: tr('PES 2016 · 1 contre 1 en ligne', 'PES 2016 · 1v1 online'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const PesHomeScreen()),
         ),
       ],
     );

@@ -13,6 +13,7 @@ import 'player_stats.dart';
 import 'damier.dart';
 import 'songo.dart';
 import 'zone_screens.dart' show AdminZonesScreen;
+import 'pes_screens.dart' show PesAdminScreen;
 
 /// Tableau de bord administrateur : toutes les parties (Ludo, Deux dés et Songô,
 /// en ligne et en présentiel), les commissions, les jackpots.
@@ -1267,6 +1268,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 icon: const Text('💁', style: TextStyle(fontSize: 18)),
                 label: const Text(
                   'Hôtesses (inscriptions)',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.16),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const PesAdminScreen()),
+                ),
+                icon: const Text('⚽', style: TextStyle(fontSize: 18)),
+                label: const Text(
+                  'PES : arbitrage des matchs',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),

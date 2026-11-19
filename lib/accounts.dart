@@ -279,6 +279,40 @@ class Wallet {
   static Future<Map<String, dynamic>> adminFindGame(String q) =>
       _call('adminFindGame', <String, dynamic>{'q': q});
 
+  // ---- KATIKA PES (PES 2016) ----
+  static Future<Map<String, dynamic>> pesList() => _call('pesList', <String, dynamic>{});
+  static Future<Map<String, dynamic>> pesGet(String id) => _call('pesGet', <String, dynamic>{'id': id});
+  static Future<Map<String, dynamic>> pesCreate({required int stake, required String efId, required String rules, required String platform}) =>
+      _call('pesCreate', <String, dynamic>{'stake': stake, 'efId': efId, 'rules': rules, 'platform': platform});
+  static Future<Map<String, dynamic>> pesCancel(String id) => _call('pesCancel', <String, dynamic>{'id': id});
+  static Future<Map<String, dynamic>> pesAccept(String id, String efId) => _call('pesAccept', <String, dynamic>{'id': id, 'efId': efId});
+  static Future<Map<String, dynamic>> pesSetRoom(String id, String room) => _call('pesSetRoom', <String, dynamic>{'id': id, 'room': room});
+  static Future<Map<String, dynamic>> pesReport({
+    required String id,
+    required int scoreMe,
+    required int scoreOpp,
+    required String extra,
+    required int pkMe,
+    required int pkOpp,
+    required String team,
+    String? proof,
+  }) =>
+      _call('pesReport', <String, dynamic>{
+        'id': id,
+        'scoreMe': scoreMe,
+        'scoreOpp': scoreOpp,
+        'extra': extra,
+        'pkMe': pkMe,
+        'pkOpp': pkOpp,
+        'team': team,
+        if (proof != null) 'proof': proof,
+      });
+  static Future<Map<String, dynamic>> pesDispute(String id, String reason) => _call('pesDispute', <String, dynamic>{'id': id, 'reason': reason});
+  static Future<Map<String, dynamic>> pesAdminList() => _call('pesAdminList', <String, dynamic>{});
+  static Future<Map<String, dynamic>> pesAdminProofs(String id) => _call('pesAdminProofs', <String, dynamic>{'id': id});
+  static Future<Map<String, dynamic>> pesAdminResolve(String id, String decision, String note) =>
+      _call('pesAdminResolve', <String, dynamic>{'id': id, 'decision': decision, 'note': note});
+
   // ---- Zoning (villes, partenaires exclusifs de zone) ----
   static Future<Map<String, dynamic>> zoneMe() => _call('zoneMe', <String, dynamic>{});
   static Future<Map<String, dynamic>> playerSetCity({required String region, required String city, String quarter = ''}) =>
@@ -684,8 +718,8 @@ class Wallet {
       _call('pfCancel', <String, dynamic>{'gameId': gameId});
 
   // ------------------------------------------------------------ Cartes en ligne
-  static Future<Map<String, dynamic>> cardsList(String game) =>
-      _call('cardsList', <String, dynamic>{'game': game});
+  static Future<Map<String, dynamic>> cardsList(String game, {bool light = false}) =>
+      _call('cardsList', <String, dynamic>{'game': game, if (light) 'light': true});
 
   static Future<Map<String, dynamic>> cardsCreate({
     required String game,
