@@ -6631,6 +6631,7 @@ function cardsView(id, g, uid) {
     players: out,
     pile: Array.isArray(g.deck) ? g.deck.length : 0,
     pileCards: (g.game === 'tiah' || g.game === 'anticote') && Array.isArray(g.deck) ? [...g.deck].reverse() : [], // la 1re est celle du dessus
+    chat: cardsChatView(g),
     curOpen: g.curOpen === true,
     seq: Array.isArray(g.seq) ? g.seq : [],
     turnUid,
@@ -6755,6 +6756,143 @@ async function cardsLoadBets(tx, rid) {
     if (b) out.push({ id, path: cardsBetPath(rid, id), b });
   }
   return out;
+}
+
+// ----------------------------------------------------------------------
+// Pari « CHAT » (TIAH et ANTI-COTE) : on parie sur le rang d'une carte du milieu.
+// 1er CHAT = la 1re carte du milieu (celle du dessus), 2ÈME CHAT = la suivante, etc.
+// Chaque joueur de la salle choisit un CHAT (même mise pour tous, fixée par le 1er parieur)
+// AVANT le début de la manche, quand les cartes ne sont pas encore connues. Au départ, la carte
+// de plus grande valeur gagne la cagnotte (5 % de commission) ; égalité : la cagnotte est partagée.
+// Un CHAT qui n'existe pas (ANTI-COTE : joueurs + 1 cartes) est remboursé.
+// Données : cards/{id}.chatBet = { amount, status: none|open|settled|void|cancelled, entries: [{uid,name,n,value?}], ... }
+// ----------------------------------------------------------------------
+const CHAT_COMMISSION_PERCENT = 5;
+const cardsChatMax = (g) => (g.game === 'tiah' ? 10 : intOr(g.maxPlayers, 4) + 1);
+const cardsChatOf = (g) =>
+  g && g.chatBet && Array.isArray(g.chatBet.entries) ? g.chatBet : { amount: 0, entries: [], status: 'none' };
+
+async function cardsChatJoin({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  const n = intOr(data.n, 0);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    if (g.game !== 'tiah' && g.game !== 'anticote') {
+      throw new HttpError('invalid-argument', 'Le pari CHAT existe seulement au TIAH et à ANTI-COTE.');
+    }
+    if (g.status !== 'waiting') {
+      throw new HttpError('failed-precondition', 'Le pari CHAT se place avant le début de la manche (les cartes du milieu ne sont pas encore connues).');
+    }
+    if (intOr(g.stake, 0) <= 0) throw new HttpError('failed-precondition', 'Pas de pari dans une partie gratuite.');
+    const me = playersOf(g).find((p) => p.uid === uid);
+    if (!me) throw new HttpError('permission-denied', 'Tu ne joues pas dans cette partie.');
+    const cb = cardsChatOf(g);
+    if (cb.entries.some((e) => e.uid === uid)) {
+      throw new HttpError('failed-precondition', 'Tu as déjà choisi ton CHAT : retire-le d\'abord pour en changer.');
+    }
+    const max = cardsChatMax(g);
+    if (n < 1 || n > max) throw new HttpError('invalid-argument', `CHAT invalide : choisis de 1 à ${max}.`);
+    const amount = cb.entries.length ? intOr(cb.amount, 0) : intOr(data.amount, -1);
+    if (amount < BET_MIN || amount > BET_MAX) throw new HttpError('invalid-argument', 'Mise invalide.');
+    const u = await tx.get(`users/${uid}`);
+    if (balanceOf(u) < amount) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    tx.write(`users/${uid}`, { incr: { balance: -amount } });
+    tx.write(path, {
+      set: { chatBet: { amount, status: 'open', entries: [...cb.entries, { uid, name: me.name || 'Joueur', n }] } },
+    });
+  });
+  return cardsFetch(env, gid, uid);
+}
+
+async function cardsChatLeave({ uid, data, env }) {
+  const gid = idStr(data.gameId);
+  if (!gid) throw new HttpError('invalid-argument', 'Salle inconnue.');
+  await runTx(env, async (tx) => {
+    const path = `cards/${gid}`;
+    const g = await tx.get(path);
+    if (!g) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    if (g.status !== 'waiting') throw new HttpError('failed-precondition', 'Le pari CHAT ne peut plus être retiré.');
+    const patch = cardsChatDrop(tx, g, uid);
+    if (!patch.chatBet) throw new HttpError('failed-precondition', "Tu n'as pas de pari CHAT.");
+    tx.write(path, { set: patch });
+  });
+  return cardsFetch(env, gid, uid);
+}
+
+/** Rembourse l'entrée CHAT d'un joueur (salle d'attente) et renvoie le champ à mettre à jour. */
+function cardsChatDrop(tx, g, uid) {
+  const cb = cardsChatOf(g);
+  if (!cb.entries.some((e) => e.uid === uid)) return {};
+  tx.write(`users/${uid}`, { incr: { balance: intOr(cb.amount, 0) } });
+  const entries = cb.entries.filter((e) => e.uid !== uid);
+  return { chatBet: { amount: entries.length ? intOr(cb.amount, 0) : 0, status: entries.length ? 'open' : 'none', entries } };
+}
+
+/** Salle annulée : toutes les mises CHAT sont rendues. */
+function cardsChatRefundAll(tx, g) {
+  const cb = cardsChatOf(g);
+  for (const e of cb.entries) tx.write(`users/${e.uid}`, { incr: { balance: intOr(cb.amount, 0) } });
+  return { chatBet: { amount: 0, status: 'cancelled', entries: [] } };
+}
+
+/** Au départ de la manche : les cartes du milieu sont connues, le pari CHAT est réglé tout de suite. */
+async function cardsChatSettle(tx, gid, g, set) {
+  const cb = cardsChatOf(g);
+  const amount = intOr(cb.amount, 0);
+  const cards = [...(Array.isArray(set.deck) ? set.deck : [])].reverse(); // 1er CHAT = carte du dessus
+  const vals = cards.map(cardVal);
+  const valid = cb.entries.filter((e) => e.n >= 1 && e.n <= cards.length);
+  const voided = cb.entries.filter((e) => !(e.n >= 1 && e.n <= cards.length));
+  for (const e of voided) tx.write(`users/${e.uid}`, { incr: { balance: amount } });
+  if (valid.length < 2) {
+    for (const e of valid) tx.write(`users/${e.uid}`, { incr: { balance: amount } });
+    set.chatBet = {
+      amount, status: 'void', cards, entries: cb.entries.map((e) => ({ ...e, value: vals[e.n - 1] === undefined ? null : vals[e.n - 1] })),
+      voidUids: cb.entries.map((e) => e.uid), winners: [], prize: 0, each: 0, commission: 0,
+      note: 'Pas assez de CHAT valides : mises rendues.',
+    };
+    return;
+  }
+  const best = Math.max(...valid.map((e) => vals[e.n - 1]));
+  const winners = valid.filter((e) => vals[e.n - 1] === best);
+  const pool = amount * valid.length;
+  const prize = prizeOf(pool, CHAT_COMMISSION_PERCENT);
+  const each = Math.floor(prize / winners.length);
+  const commission = pool - each * winners.length; // commission 5 % + arrondi du partage
+  for (const w of winners) tx.write(`users/${w.uid}`, { incr: { balance: each } });
+  for (const e of valid) tx.write(`users/${e.uid}`, { incr: { wagered: amount } });
+  const ref = await referralPayout(tx, valid.map((e) => e.uid), commission, { gameId: gid, mode: 'chat', ref: gid });
+  await houseAdd(tx, commission - ref.referral - ref.partner);
+  set.betCommission = Math.max(0, intOr(g.betCommission, 0)) + commission;
+  set.chatBet = {
+    amount, status: 'settled', cards,
+    entries: cb.entries.map((e) => ({ ...e, value: vals[e.n - 1] === undefined ? null : vals[e.n - 1] })),
+    voidUids: voided.map((e) => e.uid), winners: winners.map((e) => e.uid), best, prize, each, commission,
+    note: voided.length ? 'Un CHAT inexistant a été remboursé.' : '',
+  };
+}
+
+function cardsChatView(g) {
+  if (g.game !== 'tiah' && g.game !== 'anticote') return null;
+  const cb = cardsChatOf(g);
+  if (!cb.entries.length && cb.status !== 'settled' && cb.status !== 'void') return null;
+  return {
+    amount: intOr(cb.amount, 0),
+    status: String(cb.status || 'open'),
+    max: cardsChatMax(g),
+    percent: CHAT_COMMISSION_PERCENT,
+    entries: cb.entries.map((e) => ({ uid: e.uid, name: String(e.name || ''), n: intOr(e.n, 0), value: e.value === undefined || e.value === null ? null : intOr(e.value, 0) })),
+    cards: Array.isArray(cb.cards) ? cb.cards.map((c) => intOr(c, 0)) : [],
+    voidUids: Array.isArray(cb.voidUids) ? cb.voidUids : [],
+    winners: Array.isArray(cb.winners) ? cb.winners : [],
+    prize: intOr(cb.prize, 0),
+    each: intOr(cb.each, 0),
+    commission: intOr(cb.commission, 0),
+    note: String(cb.note || ''),
+  };
 }
 
 async function cardsBetPropose({ uid, data, env }) {
@@ -7126,6 +7264,7 @@ async function cardsLeave({ uid, data, env }) {
     if (!players.some((p) => p.uid === uid)) return;
     const stake = intOr(g.stake, 0);
     if (stake > 0) tx.write(`users/${uid}`, { incr: { balance: stake * (isEsc2(g.game) ? 2 : 1) } });
+    const chatPatch = cardsChatDrop(tx, g, uid);
     if (intOr(g.betsN, 0) > 0) {
       // Défis en attente ou acceptés qui concernent ce joueur : annulés, mises rendues.
       for (const { path: bp, b } of await cardsLoadBets(tx, gid)) {
@@ -7141,12 +7280,13 @@ async function cardsLeave({ uid, data, env }) {
     }
     const np = players.filter((p) => p.uid !== uid);
     if (!np.length) {
-      tx.write(path, { set: { status: 'cancelled', over: true, settled: true, players: [], uids: [], paid: [], pot: 0 } });
+      tx.write(path, { set: { status: 'cancelled', over: true, settled: true, players: [], uids: [], paid: [], pot: 0, ...chatPatch } });
       return;
     }
     const keepLocs = g.locs ? Object.fromEntries(Object.entries(g.locs).filter(([u]) => u !== uid)) : null;
     tx.write(path, {
       set: {
+        ...chatPatch,
         ...(keepLocs ? { locs: keepLocs } : {}),
         players: np,
         uids: np.map((p) => p.uid),
@@ -7281,6 +7421,7 @@ async function cardsStart({ uid, data, env }) {
       set.deck = [];
       set.seq = from;
     }
+    if ((g.game === 'tiah' || g.game === 'anticote') && cardsChatOf(g).entries.length) await cardsChatSettle(tx, gid, g, set); // pari CHAT
     set.turnAt = Date.now() + 3000; // + 3 s pour le 1er joueur : le temps de voir la distribution
     tx.write(path, { set, serverTime: ['startedAt'] });
   });
@@ -8445,6 +8586,7 @@ async function sweepWaitingGames(env) {
           refund(tx, Array.isArray(g.paid) ? g.paid : [], stake, g);
           tx.write(path, {
             set: {
+              ...(col === 'cards' && cardsChatOf(g).entries.length ? cardsChatRefundAll(tx, g) : {}),
               settled: true,
               refunded: true,
               status: col === 'cards' || col === 'pileface' ? 'cancelled' : 'finished',
@@ -9400,6 +9542,8 @@ const HANDLERS = {
   localBetCreate,
   adminStats,
   adminFindGame,
+  cardsChatJoin,
+  cardsChatLeave,
   pesList,
   pesGet,
   pesCreate,
