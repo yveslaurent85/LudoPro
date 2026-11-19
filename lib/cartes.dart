@@ -2603,6 +2603,8 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
   bool _busy = false;
   bool _creating = false; // vrai : options de création affichées
   final _betCtrl = TextEditingController(); // défi lancé dès la création (facultatif)
+  final _chatCtrl = TextEditingController(); // pari CHAT placé dès la création (TIAH, ANTI-COTE)
+  int _chatN = 0;
   String _betType = 'duel';
   bool _betOver = true;
   final _code = TextEditingController();
@@ -2611,7 +2613,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
   void initState() {
     super.initState();
     _load();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _load());
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load(light: true));
   }
 
   @override
@@ -2619,19 +2621,20 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
     _timer?.cancel();
     _code.dispose();
     _betCtrl.dispose();
+    _chatCtrl.dispose();
     super.dispose();
   }
 
   List<Map<String, dynamic>> _list(dynamic l) =>
       l is List ? [for (final x in l) Map<String, dynamic>.from(x as Map)] : [];
 
-  Future<void> _load() async {
+  Future<void> _load({bool light = false}) async {
     try {
-      final r = await Wallet.cardsList(widget.game);
+      final r = await Wallet.cardsList(widget.game, light: light);
       if (!mounted) return;
       setState(() {
         _open = _list(r['open']);
-        _mine = _list(r['mine']);
+        if (r['mine'] != null) _mine = _list(r['mine']);
       });
     } catch (_) {}
   }
@@ -2662,6 +2665,15 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
         try {
           shown = await Wallet.cardsBetPropose(
               gameId: v['id'] as String, type: _betType, amount: betAmt, over: _betOver);
+        } catch (e) {
+          if (mounted) _snack(e);
+        }
+      }
+      final chatAmt = int.tryParse(_chatCtrl.text.trim()) ?? 0;
+      if (_chatN > 0 && chatAmt > 0 && _stake > 0 && (widget.game == 'tiah' || widget.game == 'anticote')) {
+        // Pari CHAT placé dès la création de la partie.
+        try {
+          shown = await Wallet.cardsChatJoin(gameId: v['id'] as String, n: _chatN, amount: chatAmt);
         } catch (e) {
           if (mounted) _snack(e);
         }
@@ -2888,6 +2900,34 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
                 value: _public,
                 onChanged: (v) => setState(() => _public = v),
               ),
+              if (_stake > 0 && (widget.game == 'tiah' || widget.game == 'anticote')) ...[
+                Text(tr('Pari CHAT à la création (facultatif)', 'CHAT bet on creation (optional)'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+                Text(
+                  tr('Choisis le rang de la carte du milieu (1er CHAT, 2ÈME CHAT…). Les autres joueurs rejoignent avec la même mise et leur propre CHAT : la carte de plus grande valeur gagne la cagnotte.',
+                      'Pick the rank of the middle card (1st CHAT, 2nd CHAT…). Other players join with the same stake and their own CHAT: the highest card value wins the pot.'),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+                Wrap(spacing: 6, runSpacing: 0, children: [
+                  for (var i = 1; i <= (widget.game == 'tiah' ? 10 : _max + 1); i++)
+                    ChoiceChip(
+                      label: Text(_chatLabel(i)),
+                      selected: _chatN == i,
+                      selectedColor: _gold,
+                      onSelected: (_) => setState(() => _chatN = _chatN == i ? 0 : i),
+                    ),
+                ]),
+                TextField(
+                  controller: _chatCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: tr('Mise du pari CHAT en FCFA (vide = aucun)', 'CHAT bet stake in FCFA (empty = none)'),
+                    hintStyle: const TextStyle(color: Colors.white38),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               if (_stake > 0 && widget.game != 'fapfap') ...[
                 Text(tr('Défi à la création (facultatif)', 'Challenge on creation (optional)'),
                     style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
@@ -2989,7 +3029,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
       _rx = DateTime.now();
     }
     _poll();
-    _timer = Timer.periodic(const Duration(milliseconds: 1200), (_) => _poll());
+    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _poll());
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -3240,6 +3280,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           children: [
             _betsPanel(v, [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)], v['game'] == 'tiah'),
+            if (v['game'] == 'tiah') _ChatPanel(gameId: widget.gameId, view: v, me: _me, onChanged: _poll),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
@@ -3408,6 +3449,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
               ),
             if (tiah && !over) _middlePile(v, players, myTurn),
             _betsPanel(v, players, tiah),
+            if (tiah) _ChatPanel(gameId: widget.gameId, view: v, me: _me, onChanged: _poll),
             if (over)
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -4091,7 +4133,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
       _rx = DateTime.now();
     }
     _fetch();
-    _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -4310,6 +4352,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           children: [
             _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: false, onChanged: _fetch),
+            _ChatPanel(gameId: widget.gameId, view: v, me: _me, onChanged: _fetch),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(14),
@@ -4506,6 +4549,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
               _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: false, onChanged: _fetch),
               const SizedBox(height: 8),
             ],
+            _ChatPanel(gameId: widget.gameId, view: v, me: _me, onChanged: _fetch),
             if (stake > 0)
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -4863,7 +4907,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
       _rx = DateTime.now();
     }
     _fetch();
-    _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -5681,7 +5725,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
       _rx = DateTime.now();
     }
     _fetch();
-    _pollT = Timer.periodic(const Duration(milliseconds: 900), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -6438,6 +6482,236 @@ class _DuelPanelState extends State<_DuelPanel> {
               ],
             ]),
           ),
+      ]),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- pari CHAT
+
+String _chatLabel(int n) {
+  if (n == 1) return tr('1ER CHAT', '1ST CHAT');
+  final en = n == 2 ? 'ND' : n == 3 ? 'RD' : 'TH';
+  return tr('${n}ÈME CHAT', '$n$en CHAT');
+}
+
+/// Pari CHAT (TIAH et ANTI-COTE) : on parie sur le rang d'une carte du milieu (1er CHAT, 2ÈME CHAT…).
+/// Placé avant le départ ; réglé dès la distribution : la carte de plus grande valeur gagne.
+class _ChatPanel extends StatefulWidget {
+  const _ChatPanel({required this.gameId, required this.view, required this.me, required this.onChanged});
+
+  final String gameId;
+  final Map<String, dynamic> view;
+  final String me;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_ChatPanel> createState() => _ChatPanelState();
+}
+
+class _ChatPanelState extends State<_ChatPanel> {
+  bool _busy = false;
+
+  Future<void> _run(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await f();
+      await widget.onChanged();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Wallet.errorText(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pick({required int amount, required int max}) async {
+    final amountCtrl = TextEditingController(text: '${amount > 0 ? amount : Wallet.minStake}');
+    var n = 0;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF14202B),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: EdgeInsets.fromLTRB(18, 18, 18, 18 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(amount > 0 ? tr('Rejoindre le pari CHAT', 'Join the CHAT bet') : tr('Lancer un pari CHAT', 'Start a CHAT bet'),
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              Text(
+                tr('Choisis le rang de la carte du milieu sur laquelle tu paries. La carte de plus grande valeur gagne la cagnotte. Égalité : la cagnotte est partagée. Commission : 5 %.',
+                    'Pick the rank of the middle card you bet on. The highest card value wins the pot. Tie: the pot is shared. Commission: 5%.'),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 4, children: [
+                for (var i = 1; i <= max; i++)
+                  ChoiceChip(
+                    label: Text(_chatLabel(i)),
+                    selected: n == i,
+                    selectedColor: _gold,
+                    onSelected: (_) => setS(() => n = i),
+                  ),
+              ]),
+              const SizedBox(height: 10),
+              if (amount > 0)
+                Text('${tr('Mise du pari', 'Bet stake')} : ${_fcfa(amount)}',
+                    style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w900))
+              else
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(labelText: tr('Mise du pari CHAT (FCFA)', 'CHAT bet stake (FCFA)')),
+                ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton(
+                  onPressed: () {
+                    if (n == 0) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(tr('Choisis un CHAT.', 'Pick a CHAT.'))));
+                      return;
+                    }
+                    final a = amount > 0 ? amount : (int.tryParse(amountCtrl.text.trim()) ?? 0);
+                    if (a < Wallet.minStake) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text(tr('Mise minimum : ${_fcfa(Wallet.minStake)}', 'Minimum: ${_fcfa(Wallet.minStake)}'))));
+                      return;
+                    }
+                    amountCtrl.text = '$a';
+                    Navigator.of(ctx).pop(true);
+                  },
+                  child: Text(tr('Confirmer', 'Confirm'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+    final a = amount > 0 ? amount : (int.tryParse(amountCtrl.text.trim()) ?? 0);
+    amountCtrl.dispose();
+    if (ok == true && n > 0) {
+      await _run(() => Wallet.cardsChatJoin(gameId: widget.gameId, n: n, amount: a));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = widget.view;
+    final game = '${v['game']}';
+    if (game != 'tiah' && game != 'anticote') return const SizedBox.shrink();
+    final chat = v['chat'] is Map ? Map<String, dynamic>.from(v['chat'] as Map) : null;
+    final waiting = v['status'] == 'waiting';
+    final stake = (v['stake'] as num?)?.toInt() ?? 0;
+    final players = [for (final p in (v['players'] as List? ?? [])) Map<String, dynamic>.from(p as Map)];
+    final iAmIn = players.any((p) => p['uid'] == widget.me);
+    final canBet = waiting && stake > 0 && iAmIn;
+    final maxN = game == 'tiah' ? 10 : ((v['maxPlayers'] as num?)?.toInt() ?? 4) + 1;
+    if (chat == null && !canBet) return const SizedBox.shrink();
+
+    final status = chat == null ? 'none' : '${chat['status']}';
+    final amount = (chat?['amount'] as num?)?.toInt() ?? 0;
+    final entries = [for (final e in (chat?['entries'] as List? ?? [])) Map<String, dynamic>.from(e as Map)];
+    final winners = [for (final w in (chat?['winners'] as List? ?? [])) '$w'];
+    final voidUids = [for (final w in (chat?['voidUids'] as List? ?? [])) '$w'];
+    final cards = [for (final c in (chat?['cards'] as List? ?? [])) (c as num).toInt()];
+    final mine = entries.any((e) => e['uid'] == widget.me);
+    final settled = status == 'settled' || status == 'void';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black26,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: settled && status == 'settled' ? _gold.withOpacity(0.6) : Colors.white12),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('🐱', style: TextStyle(fontSize: 18)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              amount > 0 ? '${tr('Pari CHAT', 'CHAT bet')} · ${_fcfa(amount)}' : tr('Pari CHAT', 'CHAT bet'),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
+            ),
+          ),
+          if (waiting && stake > 0 && iAmIn && !mine && (chat == null || status == 'open'))
+            TextButton(
+              onPressed: _busy ? null : () => _pick(amount: amount, max: maxN),
+              child: Text(chat == null ? tr('+ Lancer', '+ Start') : tr('+ Rejoindre', '+ Join'),
+                  style: const TextStyle(color: _gold, fontWeight: FontWeight.w900)),
+            ),
+          if (waiting && mine)
+            TextButton(
+              onPressed: _busy ? null : () => _run(() => Wallet.cardsChatLeave(widget.gameId)),
+              child: Text(tr('Retirer ma mise', 'Withdraw'), style: const TextStyle(color: Colors.white70)),
+            ),
+        ]),
+        if (chat == null)
+          Text(
+            tr('Parie sur le rang d\'une carte du milieu (1er CHAT, 2ÈME CHAT…) : la carte de plus grande valeur gagne la cagnotte. À placer avant le départ.',
+                'Bet on the rank of a middle card (1st CHAT, 2nd CHAT…): the highest card value wins the pot. Place it before the start.'),
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          )
+        else ...[
+          for (final e in entries)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(children: [
+                Expanded(
+                  child: Text(
+                    '${e['name']}${e['uid'] == widget.me ? ' (${tr('toi', 'you')})' : ''} · ${_chatLabel((e['n'] as num).toInt())}',
+                    style: TextStyle(
+                        color: winners.contains(e['uid']) ? _gold : Colors.white,
+                        fontWeight: winners.contains(e['uid']) ? FontWeight.w900 : FontWeight.w600,
+                        fontSize: 13),
+                  ),
+                ),
+                if (settled && e['value'] != null)
+                  Text('${e['value']}${winners.contains(e['uid']) ? '  🏆' : ''}${voidUids.contains(e['uid']) ? '  ↩' : ''}',
+                      style: TextStyle(color: winners.contains(e['uid']) ? _gold : Colors.white70, fontWeight: FontWeight.w900)),
+              ]),
+            ),
+          if (!settled)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '${tr('Cagnotte', 'Pot')} : ${_fcfa(amount * entries.length)} · ${tr('commission', 'commission')} 5 %',
+                style: const TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+            ),
+          if (settled && cards.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 6, children: [
+              for (var i = 0; i < cards.length; i++)
+                Column(mainAxisSize: MainAxisSize.min, children: [
+                  _CardView(card: _decode(cards[i]), w: 30),
+                  Text('${i + 1}', style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800)),
+                ]),
+            ]),
+          ],
+          if (status == 'settled')
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                winners.length == 1
+                    ? '${tr('Gagnant', 'Winner')} : ${entries.where((e) => e['uid'] == winners.first).map((e) => '${e['name']}').join()} · ${_fcfa((chat?['each'] as num?)?.toInt() ?? 0)}'
+                    : '${tr('Égalité : partage', 'Tie: shared')} ${_fcfa((chat?['each'] as num?)?.toInt() ?? 0)} ${tr('chacun', 'each')}',
+                style: const TextStyle(color: _gold, fontWeight: FontWeight.w900),
+              ),
+            ),
+          if (status == 'void' || ('${chat?['note']}').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('${chat?['note']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            ),
+        ],
       ]),
     );
   }

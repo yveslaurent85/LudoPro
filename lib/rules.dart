@@ -129,14 +129,14 @@ String _rTiah() => tr(
           '• Le meilleur total (21 maximum) gagne. Deux as en main = TOUCX (22) : il bat tout.\n'
           '• Égalité : le gain est partagé. Chaque joueur a 10 secondes pour agir.\n'
           '• Mise : le gagnant prend la cagnotte moins la commission de Katika. '
-          'Des paris entre joueurs (duel) sont possibles pendant la manche.',
+          'Des paris entre joueurs (duel) sont possibles pendant la manche.\n• Pari CHAT : avant le départ, chaque joueur choisit un CHAT (1ER CHAT = 1re carte du milieu, 2ÈME CHAT = la suivante, etc.) avec la même mise. La carte de plus grande valeur gagne la cagnotte (commission 5 %). Égalité : la cagnotte est partagée. Un CHAT qui n\'existe pas est remboursé.',
       'TIAH (2-6 players): reach 21 without going over.\n'
           '• Everyone gets 2 cards. 10 cards are laid face up in the middle.\n'
           '• In turn, a player opens his cards: the middle cards, in order, come to him '
           'while his total stays at 21 or less. A card is never skipped.\n'
           '• The best total (21 max) wins. Two aces = TOUCX (22): beats everything.\n'
           '• Tie: the prize is shared. Each player has 10 seconds to act.\n'
-          '• Stakes: the winner takes the pot minus Katika\'s commission. Duel bets are possible during the round.',
+          '• Stakes: the winner takes the pot minus Katika\'s commission. Duel bets are possible during the round.\n• CHAT bet: before the start, each player picks a CHAT (1ST CHAT = first middle card, 2ND CHAT = the next, etc.) with the same stake. The highest card value wins the pot (5% commission). Tie: the pot is shared. A CHAT that does not exist is refunded.',
     );
 
 String _rBoubayah() => tr(
@@ -184,7 +184,7 @@ String _rAntiCote() => tr(
           '• Égalité : tout le monde rejoue et remet sa mise, les Koratés le double (cagnotte) ; le vainqueur prend tout.\n'
           '• 10 secondes par action. À 3 joueurs ou plus : localisation obligatoire, 150 m minimum.\n'
           '• Défis : pendant la création de la table, deux joueurs peuvent se défier en misant entre eux. '
-          'Le gagnant de la manche gagne son défi ; si un tiers gagne, le meilleur total gagne le défi.',
+          'Le gagnant de la manche gagne son défi ; si un tiers gagne, le meilleur total gagne le défi.\n• Pari CHAT : avant le départ, chaque joueur choisit un CHAT (1ER CHAT = 1re carte du milieu, 2ÈME CHAT = la suivante, etc.) avec la même mise. La carte de plus grande valeur gagne la cagnotte (commission 5 %). Égalité : la cagnotte est partagée. Un CHAT qui n\'existe pas est remboursé.',
       'ANTI-COTE (2-5 players, online only)\n'
           '• 3 cards each, plus (players + 1) cards face up in the middle.\n'
           '• Everyone plays 1 card of the suit of the first middle card (otherwise any). The highest opens first, '
@@ -195,7 +195,7 @@ String _rAntiCote() => tr(
           '• Tie: everyone replays and re-stakes, Koraté players double (jackpot); the winner takes all.\n'
           '• 10 seconds per action. With 3+ players: location required, 150 m minimum.\n'
           '• Challenges: while the table is being created, two players can bet against each other. '
-          'The round winner wins his challenge; if a third player wins, the best total wins it.',
+          'The round winner wins his challenge; if a third player wins, the best total wins it.\n• CHAT bet: before the start, each player picks a CHAT (1ST CHAT = first middle card, 2ND CHAT = the next, etc.) with the same stake. The highest card value wins the pot (5% commission). Tie: the pot is shared. A CHAT that does not exist is refunded.',
     );
 
 String _rTchek() => tr(

@@ -279,6 +279,13 @@ class Wallet {
   static Future<Map<String, dynamic>> adminFindGame(String q) =>
       _call('adminFindGame', <String, dynamic>{'q': q});
 
+  /// Pari CHAT (TIAH, ANTI-COTE) : choisir le rang d'une carte du milieu avant le départ.
+  static Future<Map<String, dynamic>> cardsChatJoin({required String gameId, required int n, int amount = 0}) =>
+      _call('cardsChatJoin', <String, dynamic>{'gameId': gameId, 'n': n, if (amount > 0) 'amount': amount});
+
+  static Future<Map<String, dynamic>> cardsChatLeave(String gameId) =>
+      _call('cardsChatLeave', <String, dynamic>{'gameId': gameId});
+
   // ---- KATIKA PES (PES 2016) ----
   static Future<Map<String, dynamic>> pesList() => _call('pesList', <String, dynamic>{});
   static Future<Map<String, dynamic>> pesGet(String id) => _call('pesGet', <String, dynamic>{'id': id});
