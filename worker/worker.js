@@ -37,7 +37,7 @@ const PARTNER_MIN_REFERRALS = 25; // retrait partenaire : nombre de filleuls act
 const PARTNER_MIN_WAGERED = 1000; // ... chacun ayant misé au moins ce total (FCFA) : mises des parties + paris (Duel, Défi 7)
 const PARTNER_WITHDRAW_MIN = 100; // gains de partenaire minimum pour les transférer vers le solde
 const REVIVE_AFTER_MIN = 180; // parties bloquées depuis plus de 3 h
-const REFERRAL_PERCENT = 20; // part de la commission reversée au parrain (affilié)
+const REFERRAL_PERCENT = 15; // part de la commission reversée au parrain (affilié)
 const JACKPOT_MIN = 550; // le jackpot se déclenche entre ces deux montants
 const JACKPOT_MAX = 650;
 const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir les retirer (FCFA)
@@ -2201,7 +2201,7 @@ function adminRow(kind, mode, d) {
 // ou si l'administration le décide explicitement (aucune commission rétroactive).
 // La commission du partenaire = ZONE rate % (15 % max) de la part de commission de chaque joueur.
 
-const ZONE_MAX_RATE = 15;
+const ZONE_MAX_RATE = 10; // commission du partenaire de zone : 10 %
 const ZONE_PAYOUT_MIN = 1000;
 const CM_REGIONS = ['Adamaoua', 'Centre', 'Est', 'Extrême-Nord', 'Littoral', 'Nord', 'Nord-Ouest', 'Ouest', 'Sud', 'Sud-Ouest'];
 
@@ -2459,7 +2459,7 @@ async function adminZones({ uid, env }) {
         status: String(z.status || 'active'),
         partnerUid: String(z.partnerUid || ''),
         partnerName: String(z.partnerName || ''),
-        rate: intOr(z.rate, ZONE_MAX_RATE),
+        rate: Math.min(ZONE_MAX_RATE, intOr(z.rate, ZONE_MAX_RATE)),
         players: counts[i],
         attached: att[i],
       }))
@@ -5896,6 +5896,7 @@ const cardsTotal = (hand) => (hand || []).reduce((a, c) => a + cardVal(c), 0);
 /** TOUCX : deux as en main (22) ; bat tout, même 21, et ne peut jamais être égalé. */
 const cardsIsToucx = (hand) => (hand || []).length === 2 && (hand || []).every((c) => cardVal(c) === 11);
 const cardsBoubaTotal = (d, uid) => ((d.bouba && d.bouba[uid]) || []).reduce((a, c) => a + cardVal(c), 0);
+const FOMEKOU_BOOST_PERCENT = 6; // chance par joueur de recevoir FOMEKOU à la distribution (≈1 % sans ce réglage)
 const cardsIsFomekou = (d, uid) => {
   const b = (d.bouba && d.bouba[uid]) || [];
   return b.length === 2 && cardVal(b[0]) === 3 && cardVal(b[1]) === 3;
@@ -7415,7 +7416,20 @@ async function cardsStart({ uid, data, env }) {
       const bouba = Object.fromEntries(uids.map((u) => [u, []]));
       const from = clockwise(di + 1, uids.length); // distribution et révélation après le distributeur
       for (let r = 0; r < 3; r++) for (const u of from) plain[u].push(deck.pop());
-      for (let r = 0; r < 2; r++) for (const u of from) bouba[u].push(deck.pop());
+      // FOMEKOU plus fréquent : chaque joueur, à égalité, a FOMEKOU_BOOST_PERCENT % de chances de recevoir
+      // directement deux 3 (s'il en reste deux dans le paquet) ; sinon distribution normale.
+      for (const u of from) {
+        if (crypto.getRandomValues(new Uint32Array(1))[0] % 100 < FOMEKOU_BOOST_PERCENT) {
+          const idx = [];
+          for (let i = 0; i < deck.length && idx.length < 2; i++) if (cardVal(deck[i]) === 3) idx.push(i);
+          if (idx.length === 2) {
+            bouba[u].push(deck[idx[0]], deck[idx[1]]);
+            deck.splice(idx[1], 1);
+            deck.splice(idx[0], 1);
+          }
+        }
+      }
+      for (let r = 0; r < 2; r++) for (const u of from) if (bouba[u].length < 2) bouba[u].push(deck.pop());
       set.plain = plain;
       set.bouba = bouba;
       set.deck = [];
@@ -7947,7 +7961,6 @@ async function pesCreate({ uid, data, env }) {
   const rules = zoneClean(data.rules, 200);
   const platform = PES_PLATFORMS.includes(data.platform) ? data.platform : '';
   if (!platform) throw new HttpError('invalid-argument', 'Choisis ta plateforme (PS4, PC, Xbox…).');
-  if (!ef) throw new HttpError('invalid-argument', "Indique ton identifiant PES 2016 (pseudo en ligne).");
   if (stake !== 0) {
     if (!pesPaidOn(env)) {
       throw new HttpError('failed-precondition', "Les défis avec mise ne sont pas encore ouverts : joue en mode gratuit (mise 0).");
@@ -7971,7 +7984,7 @@ async function pesCreate({ uid, data, env }) {
       create: true,
       set: {
         status: 'open', stake, paid: stake > 0, rules, platform,
-        hostUid: uid, hostName: tournName(u), hostEf: ef,
+        hostUid: uid, hostName: tournName(u), hostEf: ef || tournName(u),
         uids: [uid], guestUid: '', guestName: '', guestEf: '',
         createdAtMs: Date.now(),
       },
@@ -8039,7 +8052,6 @@ async function pesAccept({ uid, data, env }) {
   const id = idStr(data.id);
   const ef = zoneClean(data.efId, 40);
   if (!id) throw new HttpError('invalid-argument', 'Défi inconnu.');
-  if (!ef) throw new HttpError('invalid-argument', "Indique ton identifiant PES 2016 (pseudo en ligne).");
   const { active } = await pesActiveCount(env, uid);
   if (active >= PES_MAX_ACTIVE) throw new HttpError('failed-precondition', `Tu as déjà ${PES_MAX_ACTIVE} défis en cours.`);
   let hostUid = '';
