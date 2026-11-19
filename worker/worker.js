@@ -2609,6 +2609,33 @@ async function adminZonePlayers({ uid, data, env }) {
   };
 }
 
+/** Commissions versées au partenaire d'une zone : total, nombre, par jeu, et dernières lignes. */
+async function adminZoneCommissions({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const zid = zoneKey(zoneClean(data.zoneId));
+  const list = await queryDocs(env, 'partner_commissions', eqFilter('zoneId', zid), 500);
+  let total = 0;
+  const byGame = {};
+  for (const c of list) {
+    const amt = Math.max(0, intOr(c.amount, 0));
+    total += amt;
+    const g = String(c.game || '?');
+    byGame[g] = (byGame[g] || 0) + amt;
+  }
+  const rows = list
+    .map((c) => ({
+      player: String(c.playerName || ''),
+      game: String(c.game || ''),
+      base: intOr(c.base, 0),
+      rate: intOr(c.rate, 0),
+      amount: Math.max(0, intOr(c.amount, 0)),
+      at: typeof c.createdAt === 'string' ? c.createdAt : '',
+    }))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+    .slice(0, 60);
+  return { total, count: list.length, byGame, rows, partnerUid: list[0] ? String(list[0].partnerUid || '') : '' };
+}
+
 /** Accepte ou refuse un changement de ville. Acceptation : nouveau rattachement dès maintenant,
  *  les commissions passées restent à l'ancien partenaire. */
 async function adminCityChangeDecide({ uid, data, env }) {
@@ -9579,6 +9606,7 @@ const HANDLERS = {
   adminZoneStatus,
   adminZoneAttach,
   adminZonePlayers,
+  adminZoneCommissions,
   adminCityChangeDecide,
   adminZonePayoutDecide,
   adminRechargeFeed,
