@@ -3850,10 +3850,10 @@ async function manualInfo({ env }) {
 /** Le joueur a payé au code marchand : il envoie le montant et l'identifiant de la transaction. */
 /** Prévient l'administrateur sur ntfy, WhatsApp et/ou Telegram (selon les
  *  variables définies). Ne bloque jamais la demande du joueur. */
-async function notifyAdmin(env, text) {
+async function notifyAdmin(env, text, opts = {}) {
   const tasks = [];
   // ntfy en premier et en parallèle : un service lent (WhatsApp) ne bloque plus les autres.
-  if (env.NTFY_TOPIC) {
+  if (env.NTFY_TOPIC && !opts.skipNtfy) {
     tasks.push(
       ntfyPost(env, { Title: 'Katika', Priority: 'high', Tags: 'moneybag' }, text)
     );
@@ -3943,10 +3943,10 @@ async function manualDepositRequest({ uid, data, env }) {
       serverTime: ['createdAt'],
     });
   });
-  later(env, notifyAdmin(
-    env,
-    `⬇️ Recharge à confirmer (${operator === 'mtn' ? 'MTN MoMo' : 'Orange Money'})\n${amount} FCFA · ${phone}\nTransaction : ${txRef}\nOuvre Katika > Admin > Recharges et retraits.`
-  ));
+  const depText = `⬇️ Recharge à confirmer (${operator === 'mtn' ? 'MTN MoMo' : 'Orange Money'})\n${amount} FCFA · ${phone}\nTransaction : ${txRef}\nOuvre Katika > Admin > Recharges et retraits.`;
+  // ntfy attendu (même chemin que l'alerte « recharge validée », qui fonctionne) ; autres canaux en arrière-plan.
+  await ntfyTx(env, uid, 'inbox_tray', depText);
+  later(env, notifyAdmin(env, depText, { skipNtfy: true }));
   return { id };
 }
 
@@ -3976,10 +3976,9 @@ async function manualWithdrawRequest({ uid, data, env }) {
     });
     return balanceOf(me) - tokens;
   });
-  later(env, notifyAdmin(
-    env,
-    `⬆️ Retrait à payer\n${amount} FCFA vers ${phone}\nOuvre Katika > Admin > Recharges et retraits.`
-  ));
+  const witText = `⬆️ Retrait à payer\n${amount} FCFA vers ${phone}\nOuvre Katika > Admin > Recharges et retraits.`;
+  await ntfyTx(env, uid, 'outbox_tray', witText);
+  later(env, notifyAdmin(env, witText, { skipNtfy: true }));
   return { id, balance };
 }
 
@@ -4293,6 +4292,7 @@ async function sebpayDeposit({ uid, data, env }) {
   const tx = String(r.data.transaction_id || '');
   if (tx) await runTx(env, async (t) => t.write(`sebpayDeposits/${id}`, { set: { sebpayTx: tx } }));
   const link = typeof r.data.provider_link === 'string' && r.data.provider_link ? r.data.provider_link : null;
+  later(env, notifyAdmin(env, `🔔 Recharge lancée (${opKey === 'mtn' ? 'MTN MoMo' : 'Orange Money'})\n${pseudo || 'Un joueur'} · ${amount} FCFA · ${phone}\nEn attente de sa validation sur le téléphone.`));
   return { id, status: 'pending', providerLink: link };
 }
 
@@ -4337,6 +4337,9 @@ async function settleSebpayDepositCore(env, id) {
     });
     return { status: 'credited', amount: d.amount };
   });
+  if (res.status === 'credited') {
+    later(env, notifyAdmin(env, `✅ Recharge créditée : ${res.amount} FCFA (D${id}).`));
+  }
   if (res.status === 'mismatch') {
     await notifyAdmin(env, `⚠️ Recharge SebPay à vérifier : demandé ${res.amount}, reçu ${res.paid}. Référence D${id}.`);
   }
