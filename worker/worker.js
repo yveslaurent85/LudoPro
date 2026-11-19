@@ -2202,7 +2202,8 @@ function adminRow(kind, mode, d) {
 // La commission du partenaire = ZONE rate % (15 % max) de la part de commission de chaque joueur.
 
 const ZONE_MAX_RATE = 10; // commission du partenaire de zone : 10 %
-const ZONE_PAYOUT_MIN = 1000;
+const ZONE_PAYOUT_MIN = 5000; // retrait des commissions de zone : 5 000 FCFA minimum
+const ZONE_PAYOUT_MIN_PLAYERS = 50; // ... et au moins 50 joueurs rattachés au partenaire
 const CM_REGIONS = ['Adamaoua', 'Centre', 'Est', 'Extrême-Nord', 'Littoral', 'Nord', 'Nord-Ouest', 'Ouest', 'Sud', 'Sud-Ouest'];
 
 function zoneClean(v, max = 40) {
@@ -2410,6 +2411,7 @@ async function zoneMy({ uid, env }) {
     paid: Math.max(0, intOr(me.zonePaid, 0)),
     earned: Math.max(0, intOr(me.zoneEarned, 0)),
     min: ZONE_PAYOUT_MIN,
+    minPlayers: ZONE_PAYOUT_MIN_PLAYERS,
     payouts: payouts
       .map((p) => ({ id: p.id, amount: intOr(p.amount, 0), status: String(p.status || ''), createdAt: typeof p.createdAt === 'string' ? p.createdAt : '' }))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
@@ -2419,11 +2421,15 @@ async function zoneMy({ uid, env }) {
 /** Le partenaire demande le paiement de sa commission disponible (validé ensuite par l'administration). */
 async function zonePayoutRequest({ uid, env }) {
   const zones = await queryDocs(env, 'zones', eqFilter('partnerUid', uid), 5);
+  const attachedN = (await Promise.all(zones.map((z) => zoneCount(env, z.id, true)))).reduce((x, y) => x + y, 0);
   return runTx(env, async (tx) => {
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     if (zones.length === 0 && me.zonePartner !== true) throw new HttpError('permission-denied', 'Réservé aux partenaires.');
     const amount = Math.max(0, intOr(me.zoneBalance, 0));
+    if (attachedN < ZONE_PAYOUT_MIN_PLAYERS) {
+      throw new HttpError('failed-precondition', `Paiement possible à partir de ${ZONE_PAYOUT_MIN_PLAYERS} joueurs rattachés (tu en as ${attachedN}).`);
+    }
     if (amount < ZONE_PAYOUT_MIN) {
       throw new HttpError('failed-precondition', `Demande possible à partir de ${ZONE_PAYOUT_MIN} FCFA de commission.`);
     }
