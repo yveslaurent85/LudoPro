@@ -449,7 +449,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
 
   Future<void> _assign(Map<String, dynamic> z) async {
     final code = TextEditingController();
-    final rate = TextEditingController(text: '${_d?['maxRate'] ?? 15}');
+    final rate = TextEditingController(text: '${_d?['maxRate'] ?? 10}');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -461,7 +461,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
           TextField(
               controller: rate,
               keyboardType: TextInputType.number,
-              decoration: InputDecoration(labelText: 'Taux de commission (max ${_d?['maxRate'] ?? 15} %)')),
+              decoration: InputDecoration(labelText: 'Taux de commission (max ${_d?['maxRate'] ?? 10} %)')),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
@@ -470,7 +470,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
       ),
     );
     final c = code.text.trim();
-    final r = int.tryParse(rate.text.trim()) ?? 15;
+    final r = int.tryParse(rate.text.trim()) ?? 10;
     code.dispose();
     rate.dispose();
     if (ok == true && c.isNotEmpty) {
@@ -542,7 +542,18 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
         ),
         Text('$n joueur(s) · $a rattaché(s) au partenaire', style: const TextStyle(color: Colors.white54, fontSize: 12)),
         const SizedBox(height: 6),
-        Wrap(spacing: 6, runSpacing: 0, children: [
+        Theme(
+         data: Theme.of(context).copyWith(
+           textButtonTheme: TextButtonThemeData(
+             style: TextButton.styleFrom(
+               foregroundColor: Colors.white,
+               backgroundColor: Colors.white12,
+               disabledForegroundColor: Colors.white38,
+               textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+             ),
+           ),
+         ),
+         child: Wrap(spacing: 8, runSpacing: 6, children: [
           TextButton(onPressed: _busy ? null : () => _assign(z), child: Text(hasP ? 'Changer le partenaire' : 'Affecter un partenaire')),
           if (hasP)
             TextButton(
@@ -562,7 +573,8 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
             child: Text(suspended ? 'Réactiver' : 'Suspendre'),
           ),
           TextButton(onPressed: () => _players(z), child: const Text('Joueurs')),
-        ]),
+         ]),
+        ),
       ]),
     );
   }

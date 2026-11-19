@@ -188,7 +188,9 @@ class _PesHomeScreenState extends State<PesHomeScreen> {
                 controller: ef,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  labelText: tr('Ton identifiant PES 2016 (pseudo en ligne)', 'Your PES 2016 ID (online name)'),
+                  labelText: tr('Identifiant PES 2016 (facultatif)', 'PES 2016 ID (optional)'),
+                  helperText: tr('Laisse vide : tu joues avec ton compte Katika.', 'Leave empty: you play with your Katika account.'),
+                  helperStyle: const TextStyle(color: Colors.white54),
                   labelStyle: const TextStyle(color: Colors.white70),
                 ),
               ),
@@ -274,7 +276,10 @@ class _PesHomeScreenState extends State<PesHomeScreen> {
             controller: ef,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-                labelText: tr('Ton identifiant PES 2016', 'Your PES 2016 ID'), labelStyle: const TextStyle(color: Colors.white70)),
+                labelText: tr('Identifiant PES 2016 (facultatif)', 'PES 2016 ID (optional)'),
+                helperText: tr('Laisse vide : tu joues avec ton compte Katika.', 'Leave empty: you play with your Katika account.'),
+                helperStyle: const TextStyle(color: Colors.white54),
+                labelStyle: const TextStyle(color: Colors.white70)),
           ),
         ]),
         actions: [
