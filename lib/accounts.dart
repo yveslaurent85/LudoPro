@@ -339,6 +339,9 @@ class Wallet {
       _call('adminZoneStatus', <String, dynamic>{'zoneId': zoneId, 'status': status});
   static Future<Map<String, dynamic>> adminZoneAttach(String zoneId) =>
       _call('adminZoneAttach', <String, dynamic>{'zoneId': zoneId});
+  static Future<Map<String, dynamic>> adminZoneCommissions(String zoneId) =>
+      _call('adminZoneCommissions', <String, dynamic>{'zoneId': zoneId});
+
   static Future<Map<String, dynamic>> adminZonePlayers(String zoneId) =>
       _call('adminZonePlayers', <String, dynamic>{'zoneId': zoneId});
   static Future<Map<String, dynamic>> adminCityChangeDecide(String id, bool accept) =>

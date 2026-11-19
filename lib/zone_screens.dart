@@ -510,6 +510,50 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
     }
   }
 
+  Future<void> _commissions(Map<String, dynamic> z) async {
+    try {
+      final r = await Wallet.adminZoneCommissions('${z['id']}');
+      final rows = [for (final p in (r['rows'] as List? ?? const [])) Map<String, dynamic>.from(p as Map)];
+      final byGame = Map<String, dynamic>.from((r['byGame'] as Map?) ?? const {});
+      final total = (r['total'] as num?)?.toInt() ?? 0;
+      final count = (r['count'] as num?)?.toInt() ?? 0;
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Commissions · ${z['name']}'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(shrinkWrap: true, children: [
+              Text('Partenaire : ${'${z['partnerName']}'.isEmpty ? 'aucun' : z['partnerName']} · ${z['rate']} %',
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text('Total gagné : ${_fcfa(total)} ($count opération(s))', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+              if (byGame.isNotEmpty)
+                Text([for (final e in byGame.entries) '${e.key} : ${_fcfa((e.value as num).toInt())}'].join(' · '),
+                    style: const TextStyle(fontSize: 12)),
+              const Divider(),
+              if (rows.isEmpty)
+                const Text('Aucune commission pour le moment.')
+              else
+                for (final c in rows)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('${c['player']} · ${c['game']}'),
+                    subtitle: Text('base ${_fcfa((c['base'] as num?)?.toInt() ?? 0)} · ${c['rate']} % · ${'${c['at']}'.length >= 10 ? '${c['at']}'.substring(0, 10) : ''}'),
+                    trailing: Text('+${_fcfa((c['amount'] as num?)?.toInt() ?? 0)}', style: const TextStyle(fontWeight: FontWeight.w900)),
+                  ),
+            ]),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer'))],
+        ),
+      );
+    } catch (e) {
+      _snack(Wallet.errorText(e));
+    }
+  }
+
   Widget _title(String t) => Padding(
         padding: const EdgeInsets.only(top: 16, bottom: 8),
         child: Text(t, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
@@ -573,6 +617,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
             child: Text(suspended ? 'Réactiver' : 'Suspendre'),
           ),
           TextButton(onPressed: () => _players(z), child: const Text('Joueurs')),
+          TextButton(onPressed: () => _commissions(z), child: const Text('Commissions')),
          ]),
         ),
       ]),
