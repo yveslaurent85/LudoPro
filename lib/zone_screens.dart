@@ -828,7 +828,8 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
       perPlayer['${c['playerUid']}'] = (perPlayer['${c['playerUid']}'] ?? 0) + ((c['amount'] as num?)?.toInt() ?? 0);
     }
     final avail = (d?['available'] as num?)?.toInt() ?? 0;
-    final min = (d?['min'] as num?)?.toInt() ?? 1000;
+    final min = (d?['min'] as num?)?.toInt() ?? 5000;
+    final minPlayers = (d?['minPlayers'] as num?)?.toInt() ?? 50;
     Widget chip(String id, String label) => ChoiceChip(label: Text(label), selected: _period == id, onSelected: (_) => setState(() => _period = id));
     return Scaffold(
       body: Container(
@@ -896,11 +897,13 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
                               style: const TextStyle(color: Colors.white70, fontSize: 12)),
                         const SizedBox(height: 6),
                         FilledButton.icon(
-                          onPressed: _busy || avail < min ? null : _payout,
+                          onPressed: _busy || avail < min || players.length < minPlayers ? null : _payout,
                           icon: const Icon(Icons.payments_outlined),
-                          label: Text(avail < min
-                              ? 'Paiement possible à partir de ${_fcfa(min)}'
-                              : 'Demander le paiement de ${_fcfa(avail)}'),
+                          label: Text(players.length < minPlayers
+                              ? 'Paiement dès $minPlayers joueurs rattachés (${players.length}/$minPlayers)'
+                              : avail < min
+                                  ? 'Paiement possible à partir de ${_fcfa(min)}'
+                                  : 'Demander le paiement de ${_fcfa(avail)}'),
                         ),
                         const Padding(
                           padding: EdgeInsets.only(top: 14, bottom: 6),
