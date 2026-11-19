@@ -1015,11 +1015,16 @@ async function pushToUser(env, uid, title, body) {
 /** Envoie « Nouvelle partie » à tous les appareils inscrits, sauf au créateur. */
 async function pushNewGame(env, hostUid, info) {
   try {
+    // Anti-spam et économie de lectures : au plus une alerte « nouvelle partie » par jeu toutes les 2 minutes.
+    const key = String(info.label || info.col || 'x').replace(/[^A-Za-z0-9]/g, '').slice(0, 30) || 'x';
+    const last = await readDoc(env, `pushThrottle/${key}`);
+    if (last && Date.now() - intOr(last.ms, 0) < 120000) return;
+    await runTx(env, async (tx) => tx.write(`pushThrottle/${key}`, { set: { ms: Date.now() } }));
     const docs = await queryDocs(env, 'pushTokens', undefined, 300);
     const targets = docs.filter((x) => x.uid !== hostUid && typeof x.token === 'string');
     if (!targets.length) return;
     const access = await accessToken(env, 'https://www.googleapis.com/auth/firebase.messaging');
-    const label = GAME_LABELS[info.col] || 'Katika';
+    const label = info.label || GAME_LABELS[info.col] || 'Katika';
     const who = info.host || 'Un joueur';
     const title = `🎲 Nouvelle partie de ${label}`;
     const body = info.stake > 0
@@ -2919,6 +2924,43 @@ async function adminHouseWithdraw({ uid, env }) {
 // et une seule fois par dépôt (transaction Firestore).
 
 const TOKENS_PER_XAF = 1; // 1 FCFA = 1 jeton
+
+// --- Règle « première recharge » ----------------------------------------------------------
+// Le montant de la 1re recharge d'un compte doit être entièrement misé avant tout retrait
+// (ou transfert). Les recharges suivantes ne sont pas concernées.
+//   users/{uid}.firstDep      : montant de la 1re recharge (0 = compte ancien, déjà rechargé : exempté)
+//   users/{uid}.firstDepBase  : total misé (wagered) au moment de cette 1re recharge
+/** Avant le crédit : vrai si ce compte n'a encore jamais été rechargé (aucune recharge créditée). */
+async function isFirstDeposit(env, uid) {
+  const u = await readDoc(env, `users/${uid}`);
+  if (!u || u.firstDep !== undefined) return false;
+  for (const col of ['deposits', 'manualDeposits', 'sebpayDeposits']) {
+    const list = await queryDocs(env, col, eqFilter('uid', uid), 20);
+    if (list.some((x) => x.status === 'credited')) return false;
+  }
+  return true;
+}
+/** Dans la transaction de crédit : enregistre la 1re recharge (ou marque un ancien compte comme exempté). */
+async function markFirstDeposit(tx, uid, amount, isFirst) {
+  const u = await tx.get(`users/${uid}`);
+  if (!u || u.firstDep !== undefined) return;
+  tx.write(`users/${uid}`, { set: { firstDep: isFirst ? Math.max(0, Math.floor(amount)) : 0, firstDepBase: intOr(u.wagered, 0) } });
+}
+/** Reste à miser sur la 1re recharge (0 = aucune contrainte). */
+function wagerLeft(u) {
+  const need = intOr(u && u.firstDep, 0);
+  if (need <= 0) return 0;
+  return Math.max(0, need - Math.max(0, intOr(u.wagered, 0) - intOr(u.firstDepBase, 0)));
+}
+function assertWagerDone(u) {
+  const left = wagerLeft(u);
+  if (left > 0) {
+    throw new HttpError(
+      'failed-precondition',
+      `Retrait impossible pour l'instant : tu dois d'abord miser en entier le montant de ta première recharge (${intOr(u.firstDep, 0)} FCFA). Il te reste ${left} FCFA à miser.`,
+    );
+  }
+}
 const DEPOSIT_MIN = 25; // le mode test de Campay (demo) accepte 25 FCFA
 const DEPOSIT_MAX = 250000;
 
@@ -3036,6 +3078,7 @@ async function settleDepositCore(env, id) {
   const dep = await readDoc(env, `deposits/${id}`);
   if (!dep) return { status: 'unknown' };
   if (dep.status !== 'pending' || !dep.campayRef) return { status: dep.status };
+  const firstFlag = await isFirstDeposit(env, dep.uid);
 
   const r = await campayCall(env, 'GET', `/api/transaction/${encodeURIComponent(dep.campayRef)}/`);
   if (!r.ok) {
@@ -3060,6 +3103,7 @@ async function settleDepositCore(env, id) {
       return { status: 'mismatch' };
     }
     const tokens = d.amount * TOKENS_PER_XAF;
+    await markFirstDeposit(tx, d.uid, d.amount, firstFlag);
     tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
     tx.write(`deposits/${id}`, {
       set: { status: 'credited', tokens, operator: r.j.operator || null },
@@ -3738,6 +3782,7 @@ async function transfer({ uid, data, env }) {
     if (balanceOf(me) < amount) {
       throw new HttpError('failed-precondition', 'Solde insuffisant.');
     }
+    assertWagerDone(me); // évite de contourner la règle en envoyant l'argent à un autre compte
     const toName = String(to.pseudo || to.promoCode || raw);
     tx.write(`users/${uid}`, { incr: { balance: -amount } });
     tx.write(`users/${toUid}`, { incr: { balance: amount } });
@@ -3968,6 +4013,7 @@ async function manualWithdrawRequest({ uid, data, env }) {
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     if (balanceOf(me) < tokens) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    assertWagerDone(me);
     tx.write(`users/${uid}`, { incr: { balance: -tokens } });
     tx.write(`manualWithdrawals/${id}`, {
       create: true,
@@ -4079,6 +4125,11 @@ async function adminManualDecideCore({ uid, data, env }) {
       throw new HttpError('failed-precondition', `Plafond journalier de validation atteint (${cap} FCFA par 24 h).`);
     }
   }
+  let firstFlag = false;
+  if (kind === 'deposit' && approve) {
+    const pre0 = await readDoc(env, path);
+    if (pre0 && pre0.status === 'pending' && pre0.uid) firstFlag = await isFirstDeposit(env, pre0.uid);
+  }
   return runTx(env, async (tx) => {
     const d = await tx.get(path);
     if (!d) throw new HttpError('not-found', 'Demande introuvable.');
@@ -4090,7 +4141,10 @@ async function adminManualDecideCore({ uid, data, env }) {
     let status;
     if (kind === 'deposit') {
       status = approve ? 'credited' : 'rejected';
-      if (approve) tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
+      if (approve) {
+        await markFirstDeposit(tx, d.uid, intOr(d.amount, 0), firstFlag);
+        tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
+      }
     } else {
       status = approve ? 'paid' : 'rejected';
       if (!approve) tx.write(`users/${d.uid}`, { incr: { balance: tokens } }); // remboursé
@@ -4301,6 +4355,7 @@ async function settleSebpayDepositCore(env, id) {
   const dep = await readDoc(env, `sebpayDeposits/${id}`);
   if (!dep) return { status: 'unknown' };
   if (dep.status !== 'pending') return { status: dep.status };
+  const firstFlag = await isFirstDeposit(env, dep.uid);
 
   const r = await sebpayCall(env, 'GET', `/collections/${encodeURIComponent('D' + id)}`);
   if (!r.ok) {
@@ -4330,6 +4385,7 @@ async function settleSebpayDepositCore(env, id) {
       return { status: 'mismatch', amount: d.amount, paid };
     }
     const tokens = d.amount * TOKENS_PER_XAF;
+    await markFirstDeposit(tx, d.uid, d.amount, firstFlag);
     tx.write(`users/${d.uid}`, { incr: { balance: tokens } });
     tx.write(`sebpayDeposits/${id}`, {
       set: { status: 'credited', tokens, sebpayTx: String(r.data.transaction_id || d.sebpayTx || '') },
@@ -4383,6 +4439,7 @@ async function sebpayWithdrawRequest({ uid, data, env }) {
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     if (balanceOf(me) < tokens) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    assertWagerDone(me);
     pseudo = typeof me.pseudo === 'string' ? me.pseudo : '';
     tx.write(`users/${uid}`, { incr: { balance: -tokens } });
     tx.write(`sebpayPayouts/${id}`, {
@@ -5659,7 +5716,7 @@ async function pfCreate({ uid, data, env }) {
     throw new HttpError('failed-precondition', `Tu as déjà ${PF_MAX_OPEN_PER_HOST} défis ouverts. Annule-en un d'abord.`);
   }
   const id = newId();
-  return runTx(env, async (tx) => {
+  const created = await runTx(env, async (tx) => {
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
     if (balanceOf(me) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
@@ -5681,8 +5738,10 @@ async function pfCreate({ uid, data, env }) {
       },
       serverTime: ['createdAt'],
     });
-    return { id, balance: balanceOf(me) - stake };
+    return { id, balance: balanceOf(me) - stake, hostName: tournName(me) };
   });
+  later(env, pushNewGame(env, uid, { col: 'pileface', label: 'Pile ou Face', host: created.hostName, stake }));
+  return { id: created.id, balance: created.balance };
 }
 
 /** Relève un défi : mise identique, côté opposé, tirage immédiat, règlement automatique. */
@@ -7220,6 +7279,12 @@ function cardsNewDoc({ game, stake, maxPlayers, isPublic, uid, name, round = 1, 
   };
 }
 
+const CARDS_PUSH_LABELS = { tiah: 'Tiah', boubayah: 'Boubayah', fapfap: 'Fap-Fap', anticote: 'Anti-Cote', tchek: 'Tchek Games' };
+async function pushHostName(env, uid) {
+  const u = await readDoc(env, `users/${uid}`);
+  return u ? tournName(u) : '';
+}
+
 async function cardsCreate({ uid, data, env }) {
   const game = cardsGameOf(data.game);
   const stake = cardsStakeOf(data);
@@ -7247,6 +7312,9 @@ async function cardsCreate({ uid, data, env }) {
       serverTime: ['createdAt'],
     });
   });
+  if (data.isPublic !== false) {
+    later(env, (async () => pushNewGame(env, uid, { col: 'cards', label: CARDS_PUSH_LABELS[game] || 'cartes', host: await pushHostName(env, uid), stake }))());
+  }
   return cardsFetch(env, id, uid);
 }
 
@@ -8027,6 +8095,7 @@ async function pesCreate({ uid, data, env }) {
       serverTime: ['createdAt'],
     });
   });
+  later(env, (async () => pushNewGame(env, uid, { col: 'pes', label: 'KATIKA PES', host: await pushHostName(env, uid), stake }))());
   return pesGet({ uid, data: { id }, env });
 }
 
@@ -9536,6 +9605,8 @@ async function adminPlayerInfo({ uid, data, env }) {
     partnerBalance: intOr(u.partnerBalance, 0),
     hostess: u.hostess === true,
     wagered: intOr(u.wagered, 0),
+    firstDep: intOr(u.firstDep, 0),
+    wagerLeft: wagerLeft(u),
     phone,
     live,
   };
