@@ -17,7 +17,7 @@ import 'songo.dart';
 
 /// Adresse du site (utilisée pour les liens partagés depuis l'appli Android).
 /// Sur le site web, c'est l'adresse réelle du site qui est utilisée.
-const String kSiteUrl = 'https://katikagames.ychachouang.workers.dev';
+const String kSiteUrl = 'https://katikagames.com';
 
 String _gameName(String col) {
   switch (col) {

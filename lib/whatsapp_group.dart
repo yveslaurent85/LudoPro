@@ -4,7 +4,7 @@ import 'lang.dart';
 
 /// Lien d'invitation du groupe WhatsApp des joueurs.
 const String kWhatsAppGroupUrl =
-    'https://chat.whatsapp.com/HH79GJT4HGXLQKVgcudvXb?s=cl&p=a&mlu=4&ilr=4&iam=2';
+    'https://chat.whatsapp.com/D9HxYjOSsrVAxxJNYjOnnE?s=cl&p=a&mlu=4&ilr=4&iam=2';
 
 const Color _waGreen = Color(0xFF25D366);
 

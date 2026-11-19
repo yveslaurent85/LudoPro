@@ -561,7 +561,7 @@ class HomeScreen extends StatelessWidget {
                   Navigator.of(sheetCtx).pop();
                   try {
                     await launchUrl(
-                      Uri.parse('https://katikagames.ychachouang.workers.dev/tutoriel.html'),
+                      Uri.parse('https://katikagames.com/tutoriel.html'),
                       mode: LaunchMode.externalApplication,
                     );
                   } catch (_) {}
