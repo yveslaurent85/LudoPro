@@ -135,6 +135,7 @@ class Sfx {
   void capture() => _play('sfx_capture.wav'); // pion capturé
   void arrive() => _play('sfx_arrive.wav'); // pion arrivé à la maison
   void win() => _play('sfx_win.wav'); // victoire
+  void lose() => _play('sfx_lose.wav', 0.9); // défaite (son de détresse)
   void roll() => _play('sfx_roll.wav'); // dé qui roule
   void six() => _play('sfx_six.wav'); // le dé tombe sur 6
   void bell() {
@@ -2493,6 +2494,65 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   late int capturePay = widget.capturePayLocal;
   int _captureSeq = 0;
 
+  // Avis de capture payante : le gagnant voit « +X » et le capturé « −X », avec le nouveau solde.
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _capSub;
+  String _capSeen = '';
+  bool _capFirst = true;
+
+  void _listenCapNotice() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || !isOnline || isSpectator) return;
+    _capSub = FirebaseFirestore.instance.collection('users').doc(uid).snapshots().listen((s) {
+      final n = s.data()?['capNotice'];
+      if (n is! Map) return;
+      final id = '${n['id']}';
+      if (_capFirst) {
+        _capFirst = false;
+        _capSeen = id; // avis déjà existant à l'arrivée : on ne l'affiche pas
+        return;
+      }
+      if (id == _capSeen) return;
+      _capSeen = id;
+      if (!mounted) return;
+      _showCapNotice(Map<String, dynamic>.from(n));
+    }, onError: (Object _) {});
+  }
+
+  void _showCapNotice(Map<String, dynamic> n) {
+    final gain = n['kind'] == 'gain';
+    final amount = (n['amount'] as num?)?.toInt() ?? 0;
+    final fee = (n['fee'] as num?)?.toInt() ?? 0;
+    final bal = (n['balance'] as num?)?.toInt() ?? 0;
+    final other = '${n['other'] ?? ''}';
+    if (amount <= 0) return;
+    final net = gain ? amount - fee : -amount;
+    final m = ScaffoldMessenger.of(context);
+    m.hideCurrentSnackBar();
+    m.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: gain ? const Color(0xFF1B8A3A) : const Color(0xFFB3261E),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${net >= 0 ? '+' : '−'}${Wallet.format(net.abs())}  ${gain ? '(capture)' : '(pion capturé)'}',
+              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+            ),
+            Text(
+              gain
+                  ? '${other.isEmpty ? '' : 'Capture sur $other · '}${fee > 0 ? 'frais ${Wallet.format(fee)} déduits · ' : ''}Nouveau solde : ${Wallet.format(bal)}'
+                  : '${other.isEmpty ? '' : 'Capturé par $other · '}Nouveau solde : ${Wallet.format(bal)}',
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Captures payantes : le serveur prend [capturePay] sur le solde de chaque
   /// joueur capturé et le verse au joueur qui a capturé.
   void _chargeCaptures(int capturer, List<int> victims) {
@@ -2515,12 +2575,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         eventId: id,
       ).then((r) {
         if (!mounted) return;
-        final a = r['amount'];
-        if (a is num && a > 0 && (o == null || capturerUid == o.uid)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('+${Wallet.format(a.toInt())} (capture)')),
-          );
-        }
+        // Le gain / la perte s'affichent via l'avis de capture (voir _listenCapNotice).
         // Le capturé n'avait pas assez pour payer : il perd la partie.
         if (r['eliminated'] == true && !gameOver) {
           _applyForfeit(
@@ -3568,6 +3623,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       );
     }
     _listenOnline();
+    _listenCapNotice();
     _startPresence();
     _autoTimer = Timer.periodic(
       const Duration(seconds: 1),
@@ -3586,6 +3642,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   @override
   void dispose() {
     _sub?.cancel();
+    _capSub?.cancel();
     _replaySub?.cancel();
     _beat?.cancel();
     _presenceSub?.cancel();
