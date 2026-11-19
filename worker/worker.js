@@ -7713,6 +7713,419 @@ async function adminSportEventResult({ uid, data, env }) {
 }
 
 // ======================================================================
+// KATIKA PES — défis PES 2016 (Pro Evolution Soccer 2016) à deux, en ligne (rubrique Paris par derrière)
+// ======================================================================
+// Katika n'organise que le défi : le match se joue dans le jeu (salon / match entre amis).
+// Le résultat vient des joueurs (score + capture d'écran) et est TOUJOURS validé par l'administration
+// quand il y a de l'argent en jeu : aucun gagnant n'est déclaré sur la seule foi d'une image.
+//
+//   pes_challenges/{id} : le défi (puis le match)
+//     status : open -> accepted -> reporting -> review | disputed -> done | refunded | cancelled | suspended
+//   pes_proofs/{id}_H|G : capture de chaque joueur (consultée seulement par l'administration)
+//   pes_audit/{id}      : journal de toutes les décisions et alertes
+//
+// Argent : interrupteur PES_PAID (variable Cloudflare). Tant qu'elle n'est pas "true", seuls les
+// défis GRATUITS (mise 0) sont possibles. Commission : PES_COMMISSION (% , défaut 5).
+
+const PES_MAX_ACTIVE = 3; // défis ouverts ou en cours par joueur
+const PES_OPEN_TTL_MS = 24 * 3600 * 1000; // un défi non relevé expire (mise rendue)
+const PES_PROOF_MAX = 420000; // caractères d'une capture (déjà réduite par l'appli)
+const PES_LIVE = ['open', 'accepted', 'reporting', 'review', 'disputed'];
+const PES_PLATFORMS = ['ps4', 'ps3', 'xbox', 'pc', 'android']; // les deux joueurs doivent être sur la même plateforme
+
+const pesPaidOn = (env) => String(env.PES_PAID || '').toLowerCase() === 'true';
+const pesPct = (env) => {
+  const p = Number(env.PES_COMMISSION);
+  return Number.isFinite(p) && p >= 0 && p <= 50 ? p : 5;
+};
+
+function pesAudit(tx, uid, action, info = {}) {
+  tx.write(`pes_audit/${newId()}`, { create: true, set: { by: uid, action, ...info }, serverTime: ['createdAt'] });
+}
+
+function pesCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const b = crypto.getRandomValues(new Uint8Array(6));
+  return 'PES-' + Array.from(b, (x) => chars[x % chars.length]).join('');
+}
+
+const pesInt = (v, max) => {
+  const n = intOr(v, -1);
+  return n >= 0 && n <= max ? n : -1;
+};
+
+/** Vue d'un défi pour `me` (les identifiants et le code ne sont montrés qu'aux joueurs concernés). */
+function pesRow(c, me, admin = false) {
+  const role = c.hostUid === me ? 'host' : c.guestUid === me ? 'guest' : 'none';
+  const inside = role !== 'none' || admin;
+  const my = role === 'host' ? c.repH : role === 'guest' ? c.repG : null;
+  const opp = role === 'host' ? c.repG : role === 'guest' ? c.repH : null;
+  const rep = (r) => (r && typeof r === 'object' ? { a: intOr(r.a, 0), b: intOr(r.b, 0), extra: String(r.extra || 'none'), pkA: intOr(r.pkA, 0), pkB: intOr(r.pkB, 0), team: String(r.team || '') } : null);
+  return {
+    id: c.id,
+    status: String(c.status || ''),
+    stake: intOr(c.stake, 0),
+    paid: c.paid === true,
+    rules: String(c.rules || ''),
+    platform: String(c.platform || ''),
+    hostName: String(c.hostName || ''),
+    guestName: String(c.guestName || ''),
+    hostEf: inside || c.status === 'open' ? String(c.hostEf || '') : '',
+    guestEf: inside ? String(c.guestEf || '') : '',
+    role,
+    won: !!c.winnerUid && c.winnerUid === me,
+    matchCode: inside ? String(c.matchCode || '') : '',
+    room: inside ? String(c.room || '') : '',
+    createdAtMs: intOr(c.createdAtMs, 0),
+    myReport: inside ? rep(my) : null,
+    oppReported: !!opp,
+    bothReports: !!(c.repH && c.repG),
+    proposedWinner: inside ? String(c.proposedWinner || '') : '',
+    winnerUid: String(c.winnerUid || ''),
+    note: inside ? String(c.note || '') : '',
+    disputeReason: inside ? String(c.disputeReason || '') : '',
+    hostUid: admin ? String(c.hostUid || '') : '',
+    guestUid: admin ? String(c.guestUid || '') : '',
+    repH: admin ? rep(c.repH) : null,
+    repG: admin ? rep(c.repG) : null,
+  };
+}
+
+async function pesActiveCount(env, uid) {
+  const list = await queryDocs(env, 'pes_challenges', arrayContainsFilter('uids', uid), 60).catch(() => []);
+  return { list, active: list.filter((c) => PES_LIVE.includes(c.status)).length };
+}
+
+function pesConfig(env) {
+  return { paid: pesPaidOn(env), commission: pesPct(env), min: MIN_STAKE, max: MAX_STAKE, maxActive: PES_MAX_ACTIVE };
+}
+
+async function pesCreate({ uid, data, env }) {
+  const stake = intOr(data.stake, 0);
+  const ef = zoneClean(data.efId, 40);
+  const rules = zoneClean(data.rules, 200);
+  const platform = PES_PLATFORMS.includes(data.platform) ? data.platform : '';
+  if (!platform) throw new HttpError('invalid-argument', 'Choisis ta plateforme (PS4, PC, Xbox…).');
+  if (!ef) throw new HttpError('invalid-argument', "Indique ton identifiant PES 2016 (pseudo en ligne).");
+  if (stake !== 0) {
+    if (!pesPaidOn(env)) {
+      throw new HttpError('failed-precondition', "Les défis avec mise ne sont pas encore ouverts : joue en mode gratuit (mise 0).");
+    }
+    if (stake < MIN_STAKE || stake > MAX_STAKE) throw new HttpError('invalid-argument', 'Mise invalide.');
+  }
+  const { list, active } = await pesActiveCount(env, uid);
+  if (active >= PES_MAX_ACTIVE) throw new HttpError('failed-precondition', `Tu as déjà ${PES_MAX_ACTIVE} défis en cours.`);
+  if (list.some((c) => c.status === 'open' && c.hostUid === uid && intOr(c.stake, 0) === stake && String(c.rules || '') === rules)) {
+    throw new HttpError('failed-precondition', 'Tu as déjà publié un défi identique.');
+  }
+  const id = newId();
+  await runTx(env, async (tx) => {
+    const u = await tx.get(`users/${uid}`);
+    if (!u) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (stake > 0) {
+      if (balanceOf(u) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+      tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    }
+    tx.write(`pes_challenges/${id}`, {
+      create: true,
+      set: {
+        status: 'open', stake, paid: stake > 0, rules, platform,
+        hostUid: uid, hostName: tournName(u), hostEf: ef,
+        uids: [uid], guestUid: '', guestName: '', guestEf: '',
+        createdAtMs: Date.now(),
+      },
+      serverTime: ['createdAt'],
+    });
+  });
+  return pesGet({ uid, data: { id }, env });
+}
+
+async function pesGet({ uid, data, env }) {
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  const c = await readDoc(env, `pes_challenges/${id}`);
+  if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+  c.id = id;
+  const admin = adminIds(env).includes(uid);
+  if (c.status !== 'open' && c.hostUid !== uid && c.guestUid !== uid && !admin) {
+    throw new HttpError('permission-denied', "Ce match ne te concerne pas.");
+  }
+  return { challenge: pesRow(c, uid, admin), config: pesConfig(env) };
+}
+
+async function pesList({ uid, env }) {
+  await accessToken(env);
+  const [open, mine] = await Promise.all([
+    queryDocs(env, 'pes_challenges', eqFilter('status', 'open'), 40),
+    queryDocs(env, 'pes_challenges', arrayContainsFilter('uids', uid), 40),
+  ]);
+  const now = Date.now();
+  // Mes défis non relevés depuis 24 h : annulés, mise rendue.
+  for (const c of mine) {
+    if (c.status === 'open' && c.hostUid === uid && now - intOr(c.createdAtMs, 0) > PES_OPEN_TTL_MS) {
+      try {
+        await pesCancel({ uid, data: { id: c.id, expired: true }, env });
+        c.status = 'cancelled';
+      } catch (_) {}
+    }
+  }
+  mine.sort((a, b) => intOr(b.createdAtMs, 0) - intOr(a.createdAtMs, 0));
+  return {
+    config: pesConfig(env),
+    open: open
+      .filter((c) => c.hostUid !== uid && now - intOr(c.createdAtMs, 0) < PES_OPEN_TTL_MS)
+      .sort((a, b) => intOr(b.createdAtMs, 0) - intOr(a.createdAtMs, 0))
+      .map((c) => pesRow(c, uid)),
+    mine: mine.map((c) => pesRow(c, uid)),
+  };
+}
+
+async function pesCancel({ uid, data, env }) {
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  await runTx(env, async (tx) => {
+    const c = await tx.get(`pes_challenges/${id}`);
+    if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+    if (c.hostUid !== uid) throw new HttpError('permission-denied', "Ce défi n'est pas le tien.");
+    if (c.status !== 'open') throw new HttpError('failed-precondition', 'Un défi relevé ne peut plus être retiré : signale un problème ou contacte l\'administration.');
+    if (intOr(c.stake, 0) > 0) tx.write(`users/${uid}`, { incr: { balance: intOr(c.stake, 0) } });
+    tx.write(`pes_challenges/${id}`, { set: { status: 'cancelled', note: data.expired === true ? 'Expiré : mise rendue.' : 'Annulé : mise rendue.' }, serverTime: ['closedAt'] });
+  });
+  return { ok: true };
+}
+
+async function pesAccept({ uid, data, env }) {
+  const id = idStr(data.id);
+  const ef = zoneClean(data.efId, 40);
+  if (!id) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  if (!ef) throw new HttpError('invalid-argument', "Indique ton identifiant PES 2016 (pseudo en ligne).");
+  const { active } = await pesActiveCount(env, uid);
+  if (active >= PES_MAX_ACTIVE) throw new HttpError('failed-precondition', `Tu as déjà ${PES_MAX_ACTIVE} défis en cours.`);
+  let hostUid = '';
+  let hostName = '';
+  let stake = 0;
+  await runTx(env, async (tx) => {
+    const c = await tx.get(`pes_challenges/${id}`);
+    if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+    if (c.status !== 'open') throw new HttpError('failed-precondition', "Ce défi n'est plus disponible.");
+    if (c.hostUid === uid) throw new HttpError('failed-precondition', 'Tu ne peux pas relever ton propre défi.');
+    if (Date.now() - intOr(c.createdAtMs, 0) > PES_OPEN_TTL_MS) throw new HttpError('failed-precondition', 'Ce défi a expiré.');
+    stake = intOr(c.stake, 0);
+    if (stake > 0 && !pesPaidOn(env)) throw new HttpError('failed-precondition', "Les défis avec mise ne sont pas encore ouverts.");
+    const u = await tx.get(`users/${uid}`);
+    if (!u) throw new HttpError('failed-precondition', 'Compte introuvable.');
+    if (stake > 0) {
+      if (balanceOf(u) < stake) throw new HttpError('failed-precondition', 'Solde insuffisant.');
+      tx.write(`users/${uid}`, { incr: { balance: -stake } });
+    }
+    hostUid = c.hostUid;
+    hostName = c.hostName || '';
+    tx.write(`pes_challenges/${id}`, {
+      set: {
+        status: 'accepted', guestUid: uid, guestName: tournName(u), guestEf: ef,
+        uids: [c.hostUid, uid], matchCode: pesCode(),
+      },
+      serverTime: ['acceptedAt'],
+    });
+  });
+  later(env, pushToUser(env, hostUid, '⚽ Défi relevé', 'Ton défi PES a été relevé. Ouvre Katika PES : crée le salon dans le jeu et donne le code.'));
+  return pesGet({ uid, data: { id }, env });
+}
+
+async function pesSetRoom({ uid, data, env }) {
+  const id = idStr(data.id);
+  const room = zoneClean(data.room, 30);
+  if (!id || !room) throw new HttpError('invalid-argument', 'Indique le numéro du salon.');
+  let guestUid = '';
+  await runTx(env, async (tx) => {
+    const c = await tx.get(`pes_challenges/${id}`);
+    if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+    if (c.hostUid !== uid) throw new HttpError('permission-denied', 'Seul le joueur 1 crée le salon.');
+    if (c.status !== 'accepted' && c.status !== 'reporting') throw new HttpError('failed-precondition', "Le match n'est pas en cours.");
+    guestUid = c.guestUid;
+    tx.write(`pes_challenges/${id}`, { set: { room } });
+  });
+  later(env, pushToUser(env, guestUid, '🎮 Salon prêt', 'Le salon PES est créé : rejoins-le avec le numéro indiqué dans Katika.'));
+  return pesGet({ uid, data: { id }, env });
+}
+
+/** Le joueur transmet son résultat : score, prolongations / tirs au but, équipe, capture. */
+async function pesReport({ uid, data, env }) {
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  const a = pesInt(data.scoreMe, 30);
+  const b = pesInt(data.scoreOpp, 30);
+  const extra = data.extra === 'et' || data.extra === 'pk' ? data.extra : 'none';
+  const pkA = extra === 'pk' ? pesInt(data.pkMe, 30) : 0;
+  const pkB = extra === 'pk' ? pesInt(data.pkOpp, 30) : 0;
+  const team = zoneClean(data.team, 40);
+  if (a < 0 || b < 0 || pkA < 0 || pkB < 0) throw new HttpError('invalid-argument', 'Score invalide.');
+  const proof = typeof data.proof === 'string' ? data.proof : '';
+  if (proof && (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(proof) || proof.length > PES_PROOF_MAX)) {
+    throw new HttpError('invalid-argument', 'Capture invalide ou trop lourde.');
+  }
+  let other = '';
+  let state = '';
+  await runTx(env, async (tx) => {
+    const c = await tx.get(`pes_challenges/${id}`);
+    if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+    const isH = c.hostUid === uid;
+    if (!isH && c.guestUid !== uid) throw new HttpError('permission-denied', "Ce match ne te concerne pas.");
+    if (c.status !== 'accepted' && c.status !== 'reporting') throw new HttpError('failed-precondition', 'Le résultat ne peut plus être envoyé.');
+    if (isH ? c.repH : c.repG) throw new HttpError('failed-precondition', 'Tu as déjà envoyé ton résultat.');
+    if (intOr(c.stake, 0) > 0 && !proof) throw new HttpError('invalid-argument', "Ajoute la capture d'écran du résultat final.");
+    const mine = { a, b, extra, pkA, pkB, team, at: Date.now() };
+    const otherRep = isH ? c.repG : c.repH;
+    other = isH ? c.guestUid : c.hostUid;
+    if (proof) {
+      tx.write(`pes_proofs/${id}_${isH ? 'H' : 'G'}`, {
+        create: true,
+        set: { challengeId: id, uid, img: proof },
+        serverTime: ['createdAt'],
+      });
+    }
+    const patch = { [isH ? 'repH' : 'repG']: mine };
+    if (!otherRep) {
+      patch.status = 'reporting';
+      state = 'reporting';
+    } else {
+      // Les deux joueurs ont répondu : on compare (le score de l'un est le miroir de l'autre).
+      const h = isH ? mine : otherRep;
+      const g = isH ? otherRep : mine;
+      const hs = intOr(h.a, 0), gs = intOr(h.b, 0);
+      const same =
+        hs === intOr(g.b, -1) && gs === intOr(g.a, -1) && String(h.extra) === String(g.extra) &&
+        (h.extra !== 'pk' || (intOr(h.pkA, 0) === intOr(g.pkB, -1) && intOr(h.pkB, 0) === intOr(g.pkA, -1)));
+      let winner = '';
+      if (same) {
+        if (hs > gs) winner = c.hostUid;
+        else if (hs < gs) winner = c.guestUid;
+        else if (h.extra === 'pk' && intOr(h.pkA, 0) !== intOr(h.pkB, 0)) winner = intOr(h.pkA, 0) > intOr(h.pkB, 0) ? c.hostUid : c.guestUid;
+      }
+      if (!same) {
+        patch.status = 'disputed';
+        patch.disputeReason = 'Résultats contradictoires.';
+        state = 'disputed';
+      } else if (!winner) {
+        patch.status = 'disputed';
+        patch.disputeReason = 'Match nul non départagé : arbitrage.';
+        state = 'disputed';
+      } else if (intOr(c.stake, 0) === 0) {
+        // Mode gratuit : pas d'argent en jeu, on clôture directement.
+        patch.status = 'done';
+        patch.winnerUid = winner;
+        state = 'done';
+      } else {
+        patch.status = 'review';
+        patch.proposedWinner = winner;
+        state = 'review';
+      }
+      if (state === 'disputed') pesAudit(tx, uid, 'dispute_auto', { id, reason: patch.disputeReason });
+    }
+    tx.write(`pes_challenges/${id}`, { set: patch });
+  });
+  if (state === 'review' || state === 'disputed') {
+    later(env, notifyAdmin(env, `⚽ PES : un match attend ton arbitrage (${state === 'review' ? 'résultat à valider' : 'litige'}). Ouvre Katika > Admin > PES.`));
+  }
+  later(env, pushToUser(env, other, '⚽ Résultat envoyé', state === 'review' || state === 'done' ? "Les deux résultats concordent : en attente de validation." : state === 'disputed' ? "Les résultats ne concordent pas : l'administration va arbitrer." : "Ton adversaire a envoyé son résultat. Envoie le tien."));
+  return pesGet({ uid, data: { id }, env });
+}
+
+/** Signaler un adversaire / un problème (déconnexion, triche) : le dossier passe en arbitrage. */
+async function pesDispute({ uid, data, env }) {
+  const id = idStr(data.id);
+  const reason = zoneClean(data.reason, 300);
+  if (!id || !reason) throw new HttpError('invalid-argument', 'Explique le problème.');
+  await runTx(env, async (tx) => {
+    const c = await tx.get(`pes_challenges/${id}`);
+    if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+    if (c.hostUid !== uid && c.guestUid !== uid) throw new HttpError('permission-denied', "Ce match ne te concerne pas.");
+    if (!['accepted', 'reporting', 'review'].includes(c.status)) throw new HttpError('failed-precondition', 'Ce match ne peut plus être contesté.');
+    tx.write(`pes_challenges/${id}`, { set: { status: 'disputed', disputeReason: reason, disputeBy: uid } });
+    pesAudit(tx, uid, 'dispute', { id, reason });
+  });
+  later(env, notifyAdmin(env, '⚽ PES : un joueur a signalé un problème. Ouvre Katika > Admin > PES.'));
+  return pesGet({ uid, data: { id }, env });
+}
+
+// ---------------------------------------------------------------- administration
+
+async function pesAdminList({ uid, env }) {
+  requireAdmin(uid, env);
+  await accessToken(env);
+  const sts = ['review', 'disputed', 'reporting', 'accepted', 'open'];
+  const res = await Promise.all(sts.map((s) => queryDocs(env, 'pes_challenges', eqFilter('status', s), 25).catch(() => [])));
+  const recent = await queryDocs(env, 'pes_challenges', eqFilter('status', 'done'), 15).catch(() => []);
+  const out = {};
+  sts.forEach((s, i) => {
+    out[s] = res[i].sort((a, b) => intOr(b.createdAtMs, 0) - intOr(a.createdAtMs, 0)).map((c) => pesRow(c, uid, true));
+  });
+  out.done = recent.sort((a, b) => intOr(b.createdAtMs, 0) - intOr(a.createdAtMs, 0)).map((c) => pesRow(c, uid, true));
+  return { config: pesConfig(env), lists: out };
+}
+
+async function pesAdminProofs({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  if (!id) throw new HttpError('invalid-argument', 'Défi inconnu.');
+  const [h, g] = await Promise.all([readDoc(env, `pes_proofs/${id}_H`), readDoc(env, `pes_proofs/${id}_G`)]);
+  return { host: h ? String(h.img || '') : '', guest: g ? String(g.img || '') : '' };
+}
+
+/** decision : 'host' | 'guest' (gagnant), 'refund' (mises rendues), 'cancel' (défi suspendu, mises rendues). */
+async function pesAdminResolve({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const id = idStr(data.id);
+  const decision = data.decision;
+  const note = zoneClean(data.note, 300);
+  if (!id || !['host', 'guest', 'refund', 'cancel'].includes(decision)) throw new HttpError('invalid-argument', 'Décision invalide.');
+  const pct = pesPct(env);
+  let hostUid = '';
+  let guestUid = '';
+  await runTx(env, async (tx) => {
+    const c = await tx.get(`pes_challenges/${id}`);
+    if (!c) throw new HttpError('not-found', "Ce défi n'existe plus.");
+    if (!['open', 'accepted', 'reporting', 'review', 'disputed'].includes(c.status)) {
+      throw new HttpError('failed-precondition', 'Ce défi est déjà clôturé.');
+    }
+    hostUid = c.hostUid;
+    guestUid = c.guestUid;
+    const stake = intOr(c.stake, 0);
+    const players = [c.hostUid, c.guestUid].filter(Boolean);
+    let status = 'refunded';
+    let winnerUid = '';
+    if ((decision === 'host' || decision === 'guest') && !c.guestUid) {
+      throw new HttpError('failed-precondition', "Personne n'a relevé ce défi.");
+    }
+    if (decision === 'host' || decision === 'guest') {
+      winnerUid = decision === 'host' ? c.hostUid : c.guestUid;
+      status = 'done';
+      if (stake > 0) {
+        const pool = stake * 2;
+        const prize = prizeOf(pool, pct);
+        const commission = pool - prize;
+        tx.write(`users/${winnerUid}`, { incr: { balance: prize } });
+        const ref = await referralPayout(tx, players, commission, { gameId: id, mode: 'pes', ref: id });
+        for (const p of players) tx.write(`users/${p}`, { incr: { wagered: stake } });
+        await houseAdd(tx, commission - ref.referral - ref.partner);
+        tx.write(`pes_challenges/${id}`, { set: { prize, commission } });
+      }
+    } else if (stake > 0) {
+      for (const p of players) tx.write(`users/${p}`, { incr: { balance: stake } });
+    }
+    if (decision === 'cancel') status = 'suspended';
+    tx.write(`pes_challenges/${id}`, {
+      set: { status, winnerUid, note: note || (decision === 'refund' ? 'Mises rendues.' : decision === 'cancel' ? 'Défi suspendu : mises rendues.' : ''), resolvedBy: uid },
+      serverTime: ['closedAt'],
+    });
+    pesAudit(tx, uid, 'resolve', { id, decision, winnerUid, stake, note, before: String(c.status) });
+  });
+  const text = decision === 'host' || decision === 'guest' ? "Résultat validé par l'administration." : 'Match clôturé : mises rendues.';
+  for (const p of [hostUid, guestUid]) if (p) later(env, pushToUser(env, p, '⚽ Katika PES', text));
+  return pesAdminList({ uid, env });
+}
+
+// ======================================================================
 // PARIS PAR DERRIÈRE — COURSES (pari mutuel à coefficient)
 //   races/{id}        : course créée par l'administrateur
 //   raceBets/{id}     : billet (formule, numéros, coefficient)
@@ -8987,6 +9400,17 @@ const HANDLERS = {
   localBetCreate,
   adminStats,
   adminFindGame,
+  pesList,
+  pesGet,
+  pesCreate,
+  pesCancel,
+  pesAccept,
+  pesSetRoom,
+  pesReport,
+  pesDispute,
+  pesAdminList,
+  pesAdminProofs,
+  pesAdminResolve,
   zoneMe,
   playerSetCity,
   cityChangeRequest,
