@@ -1125,25 +1125,32 @@ async function captureFee({ uid, data, env }) {
     // Le capturé n'a pas assez pour payer toute la capture : il perd la partie.
     const eliminated = balanceOf(v) < fee;
 
+    // Commission Katika (5 %) sur chaque capture payante, comme sur tous les paris.
+    const net = prizeOf(amount);
+    const cut = amount - net;
     tx.write(evPath, {
       create: true,
-      set: { amount, capturer, victim, eliminated },
+      set: { amount, net, fee: cut, capturer, victim, eliminated },
       serverTime: ['createdAt'],
     });
     tx.write(metaPath, { incr: { count: 1 } });
     if (amount > 0) {
       tx.write(`users/${victim}`, { incr: { balance: -amount } });
-      tx.write(`users/${capturer}`, { incr: { balance: amount } });
+      tx.write(`users/${capturer}`, { incr: { balance: net } });
+      if (cut > 0) {
+        const ref = await referralPayout(tx, [capturer, victim], cut, { gameId, mode: 'capture', ref: eventId });
+        await houseAdd(tx, cut - ref.referral - ref.partner);
+      }
       // Avis affiché à l'écran des deux joueurs : gain / perte + nouveau solde (aucun frais sur les captures).
       const at = Date.now();
       tx.write(`users/${capturer}`, {
-        set: { capNotice: { id: eventId, kind: 'gain', amount, fee: 0, balance: balanceOf(c) + amount, other: tournName(v), at } },
+        set: { capNotice: { id: eventId, kind: 'gain', amount, fee: cut, balance: balanceOf(c) + net, other: tournName(v), at } },
       });
       tx.write(`users/${victim}`, {
-        set: { capNotice: { id: eventId, kind: 'loss', amount, fee: 0, balance: balanceOf(v) - amount, other: tournName(c), at } },
+        set: { capNotice: { id: eventId, kind: 'loss', amount, fee: cut, balance: balanceOf(v) - amount, other: tournName(c), at } },
       });
     }
-    return { amount, eliminated, balance: balanceOf(c) + amount };
+    return { amount, net, fee: cut, eliminated, balance: balanceOf(c) + net };
   });
 }
 
