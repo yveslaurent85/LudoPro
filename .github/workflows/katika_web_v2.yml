@@ -36,8 +36,8 @@ jobs:
       - name: Compiler Katika Web
         run: flutter build web --release --base-href /jouer/
 
-      - name: Accélérer le démarrage (écran Katika, mise en mémoire)
-        run: python3 web_boost.py build/web
+      - name: Ajouter le fichier des notifications
+        run: cp web_extra/firebase-messaging-sw.js build/web/firebase-messaging-sw.js
 
       - name: Sauvegarder les fichiers compilés
         uses: actions/upload-artifact@v4
@@ -66,6 +66,7 @@ jobs:
             mkdir -p jouer
             cp -r ../build/web/. jouer/
             touch .nojekyll
+            cp ../web_extra/firebase-messaging-sw.js firebase-messaging-sw.js
 
             git add -A
             if git diff --cached --quiet; then
