@@ -4029,8 +4029,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         hasRolled = false;
         message = captured
             ? ((isOnline || widget.localGameId != null) && capturePay > 0
-                ? 'Capture ! +${Wallet.format(capturePay * victims.length)}. '
-                    'Tu rejoues.'
+                ? 'Capture ! +${Wallet.format((capturePay * 95 ~/ 100) * victims.length)} '
+                    '(après 5 % de frais). Tu rejoues.'
                 : 'Capture ! Tu rejoues.')
             : newPosition == 56
                 ? 'Un pion est arrivé ! Tu rejoues.'

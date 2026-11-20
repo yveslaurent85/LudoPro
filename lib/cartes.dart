@@ -203,13 +203,27 @@ class _PopIn extends StatelessWidget {
   }
 }
 
+/// Son de fin de manche : victoire pour le gagnant, son de détresse pour le perdant (rien si égalité / spectateur).
+void _playResultSound(Sfx sfx, Map<String, dynamic> v, String me) {
+  final winners = [for (final w in (v['winnerUids'] as List? ?? const [])) '$w'];
+  final players = [for (final p in (v['players'] as List? ?? const [])) '${(p as Map)['uid']}'];
+  if (winners.isEmpty || winners.length == players.length || !players.contains(me)) return;
+  if (winners.contains(me)) {
+    sfx.win();
+  } else {
+    sfx.lose();
+  }
+}
+
 /// Animation de fin de manche : confettis, nom du gagnant et montant total des gains qui défile.
 class _WinBurst extends StatefulWidget {
-  const _WinBurst({super.key, required this.title, required this.amount, this.subtitle = ''});
+  const _WinBurst({super.key, required this.title, required this.amount, this.subtitle = '', this.lost = false, this.balance});
 
   final String title;
   final String subtitle;
-  final int amount; // 0 : partie gratuite, pas de montant
+  final int amount; // gagnant : gains ; perdant : mise perdue ; 0 : partie gratuite, pas de montant
+  final bool lost; // écran du perdant : « Vous avez perdu, réessayez »
+  final int? balance; // nouveau solde du joueur
 
   @override
   State<_WinBurst> createState() => _WinBurstState();
@@ -252,14 +266,15 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
       child: Container(
         color: Colors.black.withOpacity(0.72),
         child: Stack(children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _c,
-                builder: (context, _) => CustomPaint(painter: _ConfettiPainter(_bits, _c.value)),
+          if (!widget.lost)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _c,
+                  builder: (context, _) => CustomPaint(painter: _ConfettiPainter(_bits, _c.value)),
+                ),
               ),
             ),
-          ),
           Center(
             child: TweenAnimationBuilder<double>(
               tween: Tween<double>(begin: 0.3, end: 1),
@@ -271,21 +286,41 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
                 padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(26),
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color(0xFF1B8A3A), Color(0xFF0B5A25)],
+                    colors: widget.lost
+                        ? const [Color(0xFFB3261E), Color(0xFF5E100B)]
+                        : const [Color(0xFF1B8A3A), Color(0xFF0B5A25)],
                   ),
-                  border: Border.all(color: _gold, width: 3),
-                  boxShadow: [BoxShadow(color: _gold.withOpacity(0.45), blurRadius: 30, spreadRadius: 2)],
+                  border: Border.all(color: widget.lost ? Colors.white38 : _gold, width: 3),
+                  boxShadow: [BoxShadow(color: (widget.lost ? Colors.black : _gold).withOpacity(0.45), blurRadius: 30, spreadRadius: 2)],
                 ),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Text('🏆', style: TextStyle(fontSize: 58)),
+                  Text(widget.lost ? '😢' : '🏆', style: const TextStyle(fontSize: 58)),
                   const SizedBox(height: 4),
+                  if (!widget.lost)
+                    Text(tr('🎉 Félicitations ! 🎉', '🎉 Congratulations! 🎉'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: _goldSoft, fontSize: 18, fontWeight: FontWeight.w900)),
                   Text(widget.title,
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900)),
-                  if (widget.amount > 0) ...[
+                  if (widget.lost)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(tr('Réessayez, la prochaine sera la bonne !', 'Try again, the next one is yours!'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w700)),
+                    ),
+                  if (widget.lost && widget.amount > 0) ...[
+                    const SizedBox(height: 10),
+                    Text(tr('Mise perdue', 'Stake lost'),
+                        style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w700)),
+                    Text('− ${_fcfa(widget.amount)}',
+                        style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w900)),
+                  ],
+                  if (!widget.lost && widget.amount > 0) ...[
                     const SizedBox(height: 10),
                     Text(tr('Total des gains', 'Total winnings'),
                         style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w700)),
@@ -298,7 +333,19 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
                               color: _gold, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 1)),
                     ),
                   ],
-                  if (widget.subtitle.isNotEmpty) ...[
+                  if (widget.balance != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(14)),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Text(tr('Nouveau solde', 'New balance'),
+                            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700)),
+                        Text(_fcfa(widget.balance!),
+                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+                      ]),
+                    ),
+                  ] else if (widget.subtitle.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(widget.subtitle,
                         textAlign: TextAlign.center,
@@ -3029,13 +3076,25 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
       _rx = DateTime.now();
     }
     _poll();
-    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _poll());
+    _timer = Timer.periodic(const Duration(milliseconds: 800), (_) => _smartPoll());
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
   }
 
   Timer? _tick;
+  final Set<String> _resSound = {};
+
+  // Rafraîchissement adapté : rapide quand on attend le coup d'un adversaire, lent à son propre tour.
+  int _pollTick = 0;
+  void _smartPoll() {
+    _pollTick++;
+    final v = _v;
+    final playing = v != null && v['status'] == 'playing' && v['over'] != true;
+    final mine = playing && '${v['turnUid']}' == _me;
+    final every = mine ? 5 : (playing ? 1 : 2);
+    if (_pollTick % every == 0) _poll();
+  }
 
   @override
   void dispose() {
@@ -3047,7 +3106,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
 
   // Fin de manche : le résultat du dernier joueur s'affiche d'abord, puis le
   // vainqueur est annoncé quelques secondes plus tard.
-  static const Duration _verdictDelay = Duration(milliseconds: 3200);
+  static const Duration _verdictDelay = Duration(milliseconds: 2000);
   final Set<String> _overShown = {};
   String? _holdId;
   DateTime? _holdUntil;
@@ -3123,6 +3182,9 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         v['status'] != 'waiting' &&
         (v['status'] != 'playing' || pl.any((p) => (p as Map)['opened'] == true))) {
       _dealtFor = '${v['id']}';
+    }
+    if (v['over'] == true && _overShown.contains('${v['id']}') && _resSound.add('${v['id']}') && _v != null) {
+      _playResultSound(_sfx, v, _me);
     }
     setState(() {
       _v = v;
@@ -3384,6 +3446,8 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
+    final lost = !won && players.any((p) => p['uid'] == _me);
+    final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
       if (p['uid'] == winners.first) nm = '${p['name']}';
@@ -3398,9 +3462,10 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
           stream: Wallet.watch(_me),
           builder: (c, s) => _WinBurst(
             key: ValueKey('burst-${v['nextId']}-${v['pile']}-${winners.join()}'),
-            title: title,
-            amount: stake > 0 ? prize * winners.length : 0,
-            subtitle: s.hasData ? tr('Ton solde : ${s.data} FCFA', 'Your balance: ${s.data} FCFA') : '',
+            title: lost ? tr('Vous avez perdu', 'You lost') : title,
+            lost: lost,
+            amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
+            balance: s.hasData ? s.data : null,
           ),
         ),
       ),
@@ -4133,7 +4198,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
       _rx = DateTime.now();
     }
     _fetch();
-    _pollT = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 800), (_) => _smartPoll());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -4170,11 +4235,11 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     if (firstOver) {
       // Le dernier total reste affiché 2 s avant le résultat final.
       _holdId = id;
-      _holdUntil = DateTime.now().add(const Duration(seconds: 2));
-      Timer(const Duration(seconds: 2), () {
+      _holdUntil = DateTime.now().add(const Duration(seconds: 1));
+      Timer(const Duration(seconds: 1), () {
         if (!mounted) return;
         setState(() {});
-        if (((v['winnerUids'] as List?) ?? const []).contains(_me)) _sfx.win();
+        _playResultSound(_sfx, v, _me);
       });
     }
     _lastCount = cnt;
@@ -4183,6 +4248,17 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
       _rx = DateTime.now();
       _err = null;
     });
+  }
+
+  // Rafraîchissement adapté : rapide quand on attend le coup d'un adversaire, lent à son propre tour.
+  int _pollTick = 0;
+  void _smartPoll() {
+    _pollTick++;
+    final v = _v;
+    final playing = v != null && v['status'] == 'playing' && v['over'] != true;
+    final mine = playing && '${v['turnUid']}' == _me;
+    final every = mine ? 5 : (playing ? 1 : 2);
+    if (_pollTick % every == 0) _fetch();
   }
 
   Future<void> _fetch() async {
@@ -4467,6 +4543,8 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
+    final lost = !won && players.any((p) => p['uid'] == _me);
+    final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
       if (p['uid'] == winners.first) nm = '${p['name']}';
@@ -4482,9 +4560,10 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
           stream: Wallet.watch(_me),
           builder: (c, s) => _WinBurst(
             key: ValueKey('acburst-${v['id']}'),
-            title: title,
-            amount: stake > 0 ? prize * winners.length : 0,
-            subtitle: s.hasData ? tr('Ton solde : ${s.data} FCFA', 'Your balance: ${s.data} FCFA') : '',
+            title: lost ? tr('Vous avez perdu', 'You lost') : title,
+            lost: lost,
+            amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
+            balance: s.hasData ? s.data : null,
           ),
         ),
       ),
@@ -4907,7 +4986,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
       _rx = DateTime.now();
     }
     _fetch();
-    _pollT = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 800), (_) => _smartPoll());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -4932,7 +5011,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     if (_v == null && v['status'] != 'waiting' && (cnt > 0 || v['over'] == true)) _dealtFor = id;
     if (_v != null && cnt > _lastCount) _sfx.land();
     if (v['over'] == true && _sounded.add(id) && _v != null) {
-      if (((v['winnerUids'] as List?) ?? const []).contains(_me)) _sfx.win();
+      _playResultSound(_sfx, v, _me);
     }
     _lastCount = cnt;
     setState(() {
@@ -4940,6 +5019,17 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
       _rx = DateTime.now();
       _err = null;
     });
+  }
+
+  // Rafraîchissement adapté : rapide quand on attend le coup d'un adversaire, lent à son propre tour.
+  int _pollTick = 0;
+  void _smartPoll() {
+    _pollTick++;
+    final v = _v;
+    final playing = v != null && v['status'] == 'playing' && v['over'] != true;
+    final mine = playing && '${v['turnUid']}' == _me;
+    final every = mine ? 5 : (playing ? 1 : 2);
+    if (_pollTick % every == 0) _fetch();
   }
 
   Future<void> _fetch() async {
@@ -5210,6 +5300,8 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
+    final lost = !won && players.any((p) => p['uid'] == _me);
+    final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
       if (p['uid'] == winners.first) nm = '${p['name']}';
@@ -5225,9 +5317,10 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
           stream: Wallet.watch(_me),
           builder: (c, s) => _WinBurst(
             key: ValueKey('acburst-${v['id']}'),
-            title: title,
-            amount: stake > 0 ? prize * winners.length : 0,
-            subtitle: s.hasData ? tr('Ton solde : ${s.data} FCFA', 'Your balance: ${s.data} FCFA') : '',
+            title: lost ? tr('Vous avez perdu', 'You lost') : title,
+            lost: lost,
+            amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
+            balance: s.hasData ? s.data : null,
           ),
         ),
       ),
@@ -5725,7 +5818,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
       _rx = DateTime.now();
     }
     _fetch();
-    _pollT = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
+    _pollT = Timer.periodic(const Duration(milliseconds: 800), (_) => _smartPoll());
     _tickT = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _v != null && _v!['over'] != true) setState(() {});
     });
@@ -5756,7 +5849,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     if (_v == null && v['status'] != 'waiting' && (cnt > 0 || v['over'] == true)) _dealtFor = id;
     if (_v != null && cnt > _lastCount) _sfx.land();
     if (v['over'] == true && _sounded.add(id) && _v != null) {
-      if (((v['winnerUids'] as List?) ?? const []).contains(_me)) _sfx.win();
+      _playResultSound(_sfx, v, _me);
     }
     _lastCount = cnt;
     setState(() {
@@ -5764,6 +5857,17 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
       _rx = DateTime.now();
       _err = null;
     });
+  }
+
+  // Rafraîchissement adapté : rapide quand on attend le coup d'un adversaire, lent à son propre tour.
+  int _pollTick = 0;
+  void _smartPoll() {
+    _pollTick++;
+    final v = _v;
+    final playing = v != null && v['status'] == 'playing' && v['over'] != true;
+    final mine = playing && '${v['turnUid']}' == _me;
+    final every = mine ? 5 : (playing ? 1 : 2);
+    if (_pollTick % every == 0) _fetch();
   }
 
   Future<void> _fetch() async {
@@ -6043,6 +6147,8 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
+    final lost = !won && players.any((p) => p['uid'] == _me);
+    final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
       if (p['uid'] == winners.first) nm = '${p['name']}';
@@ -6058,9 +6164,10 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
           stream: Wallet.watch(_me),
           builder: (c, s) => _WinBurst(
             key: ValueKey('fapburst-${v['id']}'),
-            title: title,
-            amount: stake > 0 ? prize * winners.length : 0,
-            subtitle: s.hasData ? tr('Ton solde : ${s.data} FCFA', 'Your balance: ${s.data} FCFA') : '',
+            title: lost ? tr('Vous avez perdu', 'You lost') : title,
+            lost: lost,
+            amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
+            balance: s.hasData ? s.data : null,
           ),
         ),
       ),
