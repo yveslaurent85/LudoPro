@@ -532,7 +532,8 @@ async function referralPayout(tx, participants, commission, info = {}) {
     if (!r || r === u) continue;
     // Hôtesse : son code sert seulement à compter les inscrits, sans commission.
     const rh = await tx.get(`users/${r}`);
-    if (rh && rh.hostess === true) continue;
+    if (!rh) continue; // parrain dont le compte a été supprimé
+    if (rh.hostess === true) continue;
     if (bonus > 0) gains.set(r, (gains.get(r) || 0) + bonus);
 
     if (partnerBonus > 0) {
@@ -9543,6 +9544,95 @@ async function cardsReplay({ uid, data, env }) {
 
 /** Administrateur : fiche complète d'un joueur : parrain, filleuls, gains de
  *  parrainage, statut partenaire / hôtesse, parties en cours. data : { uid } */
+// ----------------------------------------------------------------------
+// Administration des comptes : retirer de l'argent, supprimer un compte.
+// Journal : admin_debits/{id} et account_deletions/{id}.
+// ----------------------------------------------------------------------
+
+/** L'administrateur retire un montant du solde d'un joueur (jamais en dessous de 0). */
+async function adminDebitAccount({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const target = typeof data.uid === 'string' ? data.uid : '';
+  const amount = intOr(data.amount, 0);
+  const reason = zoneClean(data.reason, 120);
+  if (!target) throw new HttpError('invalid-argument', 'Joueur invalide.');
+  if (amount < 1) throw new HttpError('invalid-argument', 'Indique un montant à retirer.');
+  return runTx(env, async (tx) => {
+    const u = await tx.get(`users/${target}`);
+    if (!u) throw new HttpError('not-found', 'Joueur introuvable.');
+    const before = balanceOf(u);
+    if (amount > before) throw new HttpError('failed-precondition', `Solde insuffisant : ce joueur a ${before} FCFA.`);
+    tx.write(`users/${target}`, { incr: { balance: -amount } });
+    tx.write(`admin_debits/${newId()}`, {
+      create: true,
+      set: { uid: target, pseudo: tournName(u), amount, before, after: before - amount, by: uid, reason },
+      serverTime: ['createdAt'],
+    });
+    return { ok: true, balance: before - amount };
+  });
+}
+
+/** Supprime un compte joueur (fiche + connexion). Refuse : compte admin, soi-même, partie en cours, partenaire/hôtesse,
+ *  ou solde positif sans confirmation explicite (force = true : le solde est perdu, noté dans le journal). */
+async function adminDeleteAccount({ uid, data, env }) {
+  requireAdmin(uid, env);
+  const target = typeof data.uid === 'string' ? data.uid : '';
+  if (!target) throw new HttpError('invalid-argument', 'Joueur invalide.');
+  if (target === uid || adminIds(env).includes(target)) {
+    throw new HttpError('failed-precondition', 'Impossible de supprimer un compte administrateur.');
+  }
+  const u0 = await readDoc(env, `users/${target}`);
+  if (!u0) throw new HttpError('not-found', 'Joueur introuvable.');
+  if (u0.partner === true || u0.zonePartner === true || u0.hostess === true || u0.cashier === true) {
+    throw new HttpError('failed-precondition', "Ce compte est partenaire, hôtesse ou caissière : retire d'abord ce statut.");
+  }
+  if (balanceOf(u0) > 0 && data.force !== true) {
+    throw new HttpError('failed-precondition', `Ce joueur a encore ${balanceOf(u0)} FCFA : retire d'abord son solde, ou confirme la suppression.`);
+  }
+  for (const [col] of REPLAY_COLS) {
+    let docs = [];
+    try {
+      docs = await queryDocs(env, col, arrayContainsFilter('uids', target), 30);
+    } catch (_) {
+      continue;
+    }
+    if (docs.some((d) => d.over !== true && (d.status === 'playing' || d.status === 'waiting'))) {
+      throw new HttpError('failed-precondition', 'Ce joueur est dans une partie en cours : attends la fin.');
+    }
+  }
+  const tokens = await queryDocs(env, 'pushTokens', eqFilter('uid', target), 20);
+  await runTx(env, async (tx) => {
+    const u = await tx.get(`users/${target}`);
+    if (!u) throw new HttpError('not-found', 'Joueur introuvable.');
+    tx.write(`account_deletions/${newId()}`, {
+      create: true,
+      set: {
+        uid: target, pseudo: tournName(u), promoCode: String(u.promoCode || ''), balance: balanceOf(u),
+        wagered: intOr(u.wagered, 0), by: uid, forced: data.force === true,
+      },
+      serverTime: ['createdAt'],
+    });
+    if (typeof u.promoCode === 'string' && u.promoCode) tx.delete(`promoCodes/${u.promoCode}`);
+    for (const t of tokens) tx.delete(`pushTokens/${t.id}`);
+    tx.delete(`users/${target}`);
+  });
+  // Suppression de la connexion (sinon le joueur retrouverait un compte vide en se reconnectant).
+  let authDeleted = false;
+  try {
+    const access = await accessToken(env, 'https://www.googleapis.com/auth/cloud-platform');
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/projects/${projectId(env)}/accounts:delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${access}` },
+      body: JSON.stringify({ localId: target }),
+    });
+    authDeleted = r.ok;
+    if (!r.ok) console.error('auth delete', r.status, await r.text());
+  } catch (e) {
+    console.error('auth delete', e);
+  }
+  return { ok: true, authDeleted };
+}
+
 async function adminPlayerInfo({ uid, data, env }) {
   requireAdmin(uid, env);
   const target = typeof data.uid === 'string' ? data.uid : '';
@@ -9618,6 +9708,8 @@ async function adminPlayerInfo({ uid, data, env }) {
     partnerBalance: intOr(u.partnerBalance, 0),
     hostess: u.hostess === true,
     wagered: intOr(u.wagered, 0),
+    balance: balanceOf(u),
+    isAdminAccount: adminIds(env).includes(target),
     firstDep: intOr(u.firstDep, 0),
     wagerLeft: wagerLeft(u),
     phone,
@@ -9627,6 +9719,8 @@ async function adminPlayerInfo({ uid, data, env }) {
 
 const HANDLERS = {
   adminPlayerInfo,
+  adminDebitAccount,
+  adminDeleteAccount,
   playerGames,
   cardsReplay,
   deuxDesAct,
