@@ -396,6 +396,14 @@ class Wallet {
       _call('txHistory', <String, dynamic>{if (uid != null) 'uid': uid});
 
   /// Administrateur : fiche complète d'un joueur (parrain, filleuls, parties en cours...).
+  /// Admin : retirer un montant du solde d'un joueur. Renvoie { balance }.
+  static Future<Map<String, dynamic>> adminDebitAccount(String uid, int amount, String reason) =>
+      _call('adminDebitAccount', <String, dynamic>{'uid': uid, 'amount': amount, 'reason': reason});
+
+  /// Admin : supprimer un compte joueur. Renvoie { ok, authDeleted }.
+  static Future<Map<String, dynamic>> adminDeleteAccount(String uid, {bool force = false}) =>
+      _call('adminDeleteAccount', <String, dynamic>{'uid': uid, 'force': force});
+
   static Future<Map<String, dynamic>> adminPlayerInfo(String uid) =>
       _call('adminPlayerInfo', <String, dynamic>{'uid': uid});
 
