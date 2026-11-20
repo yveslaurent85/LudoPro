@@ -279,6 +279,11 @@ class Wallet {
   static Future<Map<String, dynamic>> adminFindGame(String q) =>
       _call('adminFindGame', <String, dynamic>{'q': q});
 
+  /// Notifications push : enregistre (enabled = true) ou retire cet appareil.
+  static Future<void> setPush(String token, bool enabled) async {
+    await _call('setPush', <String, dynamic>{'token': token, 'enabled': enabled});
+  }
+
   /// Pari CHAT (TIAH, ANTI-COTE) : choisir le rang d'une carte du milieu avant le départ.
   static Future<Map<String, dynamic>> cardsChatJoin({required String gameId, required int n, int amount = 0}) =>
       _call('cardsChatJoin', <String, dynamic>{'gameId': gameId, 'n': n, if (amount > 0) 'amount': amount});

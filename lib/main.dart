@@ -40,6 +40,7 @@ import 'player_stats.dart';
 import 'update_check.dart';
 import 'zone_screens.dart';
 import 'pes_screens.dart';
+import 'push_setup.dart';
 import 'stake_field.dart';
 import 'firebase_web.dart';
 import 'damier.dart';
@@ -583,6 +584,11 @@ class HomeScreen extends StatelessWidget {
                 if (user != null && kZonePartner.value)
                   item(Icons.handshake, 'Mon espace partenaire', const Color(0xFFB8860B),
                       () => go((_) => const PartnerZoneScreen())),
+                if (user != null)
+                  item(Icons.notifications_active, tr('Notifications', 'Notifications'), const Color(0xFFD84315), () {
+                    Navigator.of(sheetCtx).pop();
+                    pushMenuAction(context);
+                  }),
                 item(Icons.chat, 'Groupe WhatsApp', const Color(0xFF25D366), () {
                   Navigator.of(sheetCtx).pop();
                   openWhatsAppGroup(context);
