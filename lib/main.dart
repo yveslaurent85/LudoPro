@@ -4932,7 +4932,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
 
   /// Le dé d'un joueur : on le touche pour lancer, ou on le glisse puis on le lâche.
   Widget diceSlot(int p) {
-    if (!activeIdx.contains(p)) return const SizedBox(width: 52, height: 52);
+    if (!activeIdx.contains(p)) return const SizedBox(width: 74, height: 74);
 
     final player = players[p];
     final isActive = p == currentPlayer && !gameOver;
@@ -4960,8 +4960,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
           : null,
       child: SizedBox(
         key: diceKeys[p],
-        width: 52,
-        height: 52,
+        width: 74,
+        height: 74,
         child: AnimatedBuilder(
           animation: _pulse,
           builder: (context, child) => Transform.scale(
@@ -4986,8 +4986,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       return Positioned(
         left: dragPos.dx,
         top: dragPos.dy,
-        width: 58,
-        height: 58,
+        width: 82,
+        height: 82,
         child: IgnorePointer(
           child: diceBox(lastRoll[currentPlayer], color, glow: true),
         ),
@@ -5005,8 +5005,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         final rolling = flightPhase == 1;
         // Le dé tourne sur place, sans se déplacer ni changer de taille.
         const bounce = 0.0;
-        const size = 70.0;
-        const grow = (size - 52.0) / 2;
+        const size = 100.0;
+        const grow = (size - 74.0) / 2;
 
         return Positioned(
           left: pos.dx - grow,

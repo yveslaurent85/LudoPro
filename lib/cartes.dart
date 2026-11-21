@@ -6063,13 +6063,20 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
 
   int _flyCode = -1; // carte en train de partir vers la table (réponse instantanée)
 
-  void _playCard(_Card c) {
+  void _playCard(_Card c, {bool early = false}) {
     if (_busy) return;
     _sfx.land();
     setState(() => _flyCode = c.code);
-    _do(() => Wallet.cardsPlay(widget.gameId, c.code)).whenComplete(() {
+    _do(() => Wallet.cardsPlay(widget.gameId, c.code, early: early)).whenComplete(() {
       if (mounted) setState(() => _flyCode = -1);
     });
+  }
+
+  /// « Passe » au 4e pli : le serveur joue la carte qui ne peut pas gagner.
+  void _passTurn() {
+    if (_busy) return;
+    _sfx.land();
+    _do(() => Wallet.cardsPlay(widget.gameId, 0, pass: true));
   }
 
   Future<void> _do(Future<Map<String, dynamic>> Function() f) async {
@@ -6374,6 +6381,8 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final nextId = '${v['nextId']}';
     final myHand = _cardsOf(v['myHand']);
     final legal = {for (final x in (v['legal'] as List? ?? [])) (x as num).toInt()};
+    final earlyOk = {for (final x in (v['earlyOk'] as List? ?? [])) (x as num).toInt()};
+    final canPass = v['canPass'] == true && myTurn;
     final trick = [for (final t in (v['trick'] as List? ?? [])) Map<String, dynamic>.from(t as Map)];
     final prev = v['prevTrick'] is Map ? Map<String, dynamic>.from(v['prevTrick'] as Map) : null;
     final n = players.length;
@@ -6520,13 +6529,42 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                   style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
+                if (canPass)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _gold,
+                          side: const BorderSide(color: _gold, width: 2),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: _busy ? null : _passTurn,
+                        icon: const Icon(Icons.skip_next),
+                        label: Text(tr('Passe (je laisse jouer la dernière carte)', 'Pass (let the last card be played)'),
+                            style: const TextStyle(fontWeight: FontWeight.w900)),
+                      ),
+                    ),
+                  ),
+                if (!myTurn && earlyOk.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      tr('Tu as joué un 10 : tu peux déjà jouer ta prochaine carte de la même famille.',
+                          'You played a 10: you may already play your next card of the same suit.'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: _goldSoft, fontSize: 12, fontWeight: FontWeight.w800),
+                    ),
+                  ),
                 _FanHand(
                   cards: myHand,
-                  legal: legal,
-                  canPlay: myTurn && !_busy,
+                  legal: (!myTurn && earlyOk.isNotEmpty) ? earlyOk : legal,
+                  canPlay: (myTurn || earlyOk.isNotEmpty) && !_busy,
                   fly: _flyCode,
                   hidden: _hidden,
-                  onPlay: _playCard,
+                  onPlay: (cd) => _playCard(cd, early: !myTurn && earlyOk.isNotEmpty),
                 ),
               ]),
       ),
@@ -6564,6 +6602,13 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
         if (table.isNotEmpty) ...[
           const SizedBox(height: 6),
           _fapPlayed(table),
+        ],
+        if (v['early'] is Map && '${(v['early'] as Map)['uid']}' == uid) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            Text(tr('Joué d\'avance : ', 'Played ahead: '), style: const TextStyle(color: _goldSoft, fontSize: 11, fontWeight: FontWeight.w800)),
+            _CardView(card: _decode(((v['early'] as Map)['card'] as num).toInt()), w: 40),
+          ]),
         ],
         if (over && revealed.isNotEmpty) ...[
           const SizedBox(height: 6),
@@ -6819,7 +6864,7 @@ class _ChatPanelState extends State<_ChatPanel> {
     }
   }
 
-  Future<void> _pick({required int amount, required int max}) async {
+  Future<void> _pick({required int amount, required int max, Set<int> taken = const <int>{}}) async {
     final amountCtrl = TextEditingController(text: '${amount > 0 ? amount : Wallet.minStake}');
     var n = 0;
     final ok = await showModalBottomSheet<bool>(
@@ -6846,7 +6891,9 @@ class _ChatPanelState extends State<_ChatPanel> {
                     label: Text(_chatLabel(i)),
                     selected: n == i,
                     selectedColor: _gold,
-                    onSelected: (_) => setS(() => n = i),
+                    disabledColor: Colors.white12,
+                    tooltip: taken.contains(i) ? tr('Déjà pris', 'Already taken') : null,
+                    onSelected: taken.contains(i) ? null : (_) => setS(() => n = i),
                   ),
               ]),
               const SizedBox(height: 10),
@@ -6937,7 +6984,7 @@ class _ChatPanelState extends State<_ChatPanel> {
           ),
           if (waiting && stake > 0 && iAmIn && !mine && (chat == null || status == 'open'))
             TextButton(
-              onPressed: _busy ? null : () => _pick(amount: amount, max: maxN),
+              onPressed: _busy ? null : () => _pick(amount: amount, max: maxN, taken: {for (final e in entries) (e['n'] as num).toInt()}),
               child: Text(chat == null ? tr('+ Lancer', '+ Start') : tr('+ Rejoindre', '+ Join'),
                   style: const TextStyle(color: _gold, fontWeight: FontWeight.w900)),
             ),

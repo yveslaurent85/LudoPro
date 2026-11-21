@@ -55,11 +55,8 @@ class PromoLink {
 
   /// Lien à partager pour ce code.
   static String linkFor(String code) {
-    var base = '$_site/jouer/';
-    if (kIsWeb) {
-      final o = Uri.base.origin;
-      if (o.startsWith('http')) base = '$o/jouer/';
-    }
+    // Toujours le domaine officiel, même si l'appli est ouverte depuis une autre adresse.
+    const base = '$_site/jouer/';
     return '$base?ref=${Uri.encodeQueryComponent(code)}';
   }
 }

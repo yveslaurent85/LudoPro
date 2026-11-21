@@ -774,8 +774,16 @@ class Wallet {
       _call('cardsLoc', <String, dynamic>{'gameId': gameId, 'loc': loc});
 
   /// Fap-Fap : jouer une carte (0..43 : valeur * 4 + famille).
-  static Future<Map<String, dynamic>> cardsPlay(String gameId, int card, {int suit = -1, bool tchek = false}) =>
-      _call('cardsPlay', <String, dynamic>{'gameId': gameId, 'card': card, 'suit': suit, 'tchek': tchek});
+  static Future<Map<String, dynamic>> cardsPlay(String gameId, int card,
+          {int suit = -1, bool tchek = false, bool early = false, bool pass = false}) =>
+      _call('cardsPlay', <String, dynamic>{
+        'gameId': gameId,
+        'card': card,
+        'suit': suit,
+        'tchek': tchek,
+        if (early) 'early': true,
+        if (pass) 'pass': true,
+      });
 
   /// Tchek Games : piocher (1 carte, ou toute la pénalité en cours).
   static Future<Map<String, dynamic>> cardsDraw(String gameId) =>
