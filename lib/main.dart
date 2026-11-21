@@ -2889,9 +2889,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     return _balancedFace();
   }
 
-  /// Équilibrage : le joueur trop en avance (> 15 % de parcours sur le
-  /// meilleur adversaire) tire plutôt de petits chiffres ; le joueur trop
-  /// en retard tire plutôt de grands chiffres.
+  /// Équilibrage : le vainqueur peut devancer ses adversaires jusqu'à 30 %
+  /// du parcours. Au-delà de 20 % d'avance sur le meilleur adversaire, le
+  /// joueur tire de plus en plus de petits chiffres (blocage net à 30 %) ;
+  /// le joueur trop en retard (> 20 %) tire plutôt de grands chiffres.
   int _balancedFace() {
     final cp = currentPlayer;
     final mine = progressOf(players[cp]);
@@ -2909,15 +2910,15 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     if (!any) return face;
     final ahead = mine - bestOther;
     final behind = bestOther - mine;
-    if (ahead > 0.08) {
-      final tries = ahead > 0.15 ? 3 : (ahead > 0.11 ? 2 : 1);
+    if (ahead > 0.20) {
+      final tries = ahead > 0.30 ? 3 : (ahead > 0.25 ? 2 : 1);
       for (int k = 0; k < tries; k++) {
         final f = random.nextInt(6) + 1;
         if (f < face) face = f;
       }
-      if (ahead > 0.15 && face > 3) face = 1 + random.nextInt(3);
-    } else if (behind > 0.08) {
-      final tries = behind > 0.15 ? 3 : (behind > 0.11 ? 2 : 1);
+      if (ahead > 0.30 && face > 3) face = 1 + random.nextInt(3);
+    } else if (behind > 0.20) {
+      final tries = behind > 0.30 ? 3 : (behind > 0.25 ? 2 : 1);
       for (int k = 0; k < tries; k++) {
         final f = random.nextInt(6) + 1;
         if (f > face) face = f;
