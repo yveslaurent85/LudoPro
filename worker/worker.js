@@ -8689,7 +8689,7 @@ async function adminRaceResult({ uid, data, env }) {
 // ======================================================================
 // Parties ouvertes : annulées après 30 min si personne n'a rejoint (mises remboursées)
 // ======================================================================
-const WAITING_CANCEL_MIN = 30;
+const WAITING_CANCEL_MIN = 60;
 
 async function sweepWaitingGames(env) {
   await accessToken(env);
