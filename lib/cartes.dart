@@ -242,8 +242,40 @@ class _PopIn extends StatelessWidget {
   }
 }
 
+/// Temps pendant lequel la dernière carte et son score restent affichés avant de déclarer le vainqueur.
+const int _kRevealMs = 2000;
+
+/// Retient quand la fin de manche est vue pour la première fois et dit si les 2 s sont écoulées.
+class _Reveal {
+  String _key = '';
+  bool _done = false;
+  Timer? _t;
+
+  bool check(Map<String, dynamic> v, VoidCallback rebuild) {
+    if (v['over'] != true) return true;
+    final k = '${v['id']}-${v['pile']}-${((v['winnerUids'] as List?) ?? const []).join()}-${v['trickNo']}';
+    if (k != _key) {
+      _key = k;
+      _done = false;
+      _t?.cancel();
+      _t = Timer(const Duration(milliseconds: _kRevealMs), () {
+        _done = true;
+        rebuild();
+      });
+    }
+    return _done;
+  }
+
+  void dispose() => _t?.cancel();
+}
+
 /// Son de fin de manche : victoire pour le gagnant, son de détresse pour le perdant (rien si égalité / spectateur).
+/// Il part 2 s après la fin, en même temps que l'annonce du vainqueur.
 void _playResultSound(Sfx sfx, Map<String, dynamic> v, String me) {
+  Future<void>.delayed(const Duration(milliseconds: _kRevealMs), () => _playResultSoundNow(sfx, v, me));
+}
+
+void _playResultSoundNow(Sfx sfx, Map<String, dynamic> v, String me) {
   final winners = [for (final w in (v['winnerUids'] as List? ?? const [])) '$w'];
   final players = [for (final p in (v['players'] as List? ?? const [])) '${(p as Map)['uid']}'];
   if (winners.isEmpty || winners.length == players.length || !players.contains(me)) return;
@@ -268,8 +300,10 @@ class _WinBurst extends StatefulWidget {
     this.onBack,
     this.rows = const [],
     this.nextOpened = false,
+    this.revealDelayMs = 0,
   });
 
+  final int revealDelayMs; // > 0 : la fenêtre n'apparaît qu'après ce délai (dernière carte et score visibles)
   final String title;
   final String subtitle;
   final int amount; // gagnant : gains ; perdant : mise perdue ; 0 : partie gratuite, pas de montant
@@ -305,6 +339,8 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
   int _left = _kReplaySeconds;
   bool _replayBusy = false;
   bool _visible = true;
+  bool _ready = true;
+  Timer? _wait;
   late final List<List<double>> _bits; // x, vitesse, phase, taille, couleur, rotation
 
   @override
@@ -317,6 +353,12 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
           rnd.nextInt(5).toDouble(), rnd.nextDouble() * 6.28]
     ];
     _c = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+    if (widget.revealDelayMs > 0) {
+      _ready = false;
+      _wait = Timer(Duration(milliseconds: widget.revealDelayMs), () {
+        if (mounted) setState(() => _ready = true);
+      });
+    }
     if (widget.onReplay == null) {
       _auto = Timer(const Duration(seconds: 10), () {
         if (mounted) setState(() => _visible = false);
@@ -341,6 +383,7 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
 
   @override
   void dispose() {
+    _wait?.cancel();
     _auto?.cancel();
     _cd?.cancel();
     _c.dispose();
@@ -462,7 +505,7 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
 
   @override
   Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
+    if (!_visible || !_ready) return const SizedBox.shrink();
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onReplay == null ? () => setState(() => _visible = false) : null,
@@ -2000,6 +2043,7 @@ class _TiahLocalPageState extends State<TiahLocalPage> {
           if (_phase == 2 && !_dealing && _t != null && _winners.isNotEmpty && _winners.length < _n)
             Positioned.fill(
               child: _WinBurst(
+                revealDelayMs: _kRevealMs,
                 key: ValueKey('burst-$_round'),
                 title: _winners.length == 1
                     ? tr('${_t!.names[_winners.first]} gagne !', '${_t!.names[_winners.first]} wins!')
@@ -2664,6 +2708,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
             if (_over && !_dealing && _t != null && _winners.isNotEmpty && _winners.length < _n)
               Positioned.fill(
                 child: _WinBurst(
+                  revealDelayMs: _kRevealMs,
                   key: ValueKey('burst-$_round'),
                   title: _winners.length == 1
                       ? tr('${_t!.names[_winners.first]} gagne !', '${_t!.names[_winners.first]} wins!')
@@ -3264,6 +3309,10 @@ class CardsOnlineRoom extends StatefulWidget {
 }
 
 class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
+  final _Reveal _rev = _Reveal();
+  bool _revealed(Map<String, dynamic> v) => _rev.check(v, () {
+        if (mounted) setState(() {});
+      });
   final Sfx _sfx = Sfx();
   Timer? _timer;
   Map<String, dynamic>? _v;
@@ -3304,6 +3353,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
 
   @override
   void dispose() {
+    _rev.dispose();
     _holdTimer?.cancel();
     _tick?.cancel();
     _timer?.cancel();
@@ -3648,6 +3698,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
     final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
     if (winners.isEmpty || winners.length == players.length) return body;
+    if (!_revealed(v)) return body;
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
@@ -3689,7 +3740,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final over = v['over'] == true;
     final turn = '${v['turnUid']}';
     final myTurn = !over && turn == _me;
-    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    final winners = _revealed(v) ? [for (final w in (v['winnerUids'] as List? ?? [])) '$w'] : <String>[];
     String nameOf(String uid) => _firstOf(players.where((p) => p['uid'] == uid).map((p) => '${p['name']}')) ?? '?';
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final refund = over && winners.length == players.length;
@@ -3726,7 +3777,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
             if (tiah && !over) _middlePile(v, players, myTurn),
             _betsPanel(v, players, tiah),
             if (tiah) _ChatPanel(gameId: widget.gameId, view: v, me: _me, onChanged: _poll),
-            if (over)
+            if (over && _revealed(v))
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
@@ -4298,6 +4349,10 @@ class AntiCoteOnlineRoom extends StatefulWidget {
 }
 
 class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBindingObserver {
+  final _Reveal _rev = _Reveal();
+  bool _revealed(Map<String, dynamic> v) => _rev.check(v, () {
+        if (mounted) setState(() {});
+      });
   final Sfx _sfx = Sfx();
   Timer? _pollT;
   Timer? _tickT;
@@ -4417,6 +4472,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
 
   @override
   void dispose() {
+    _rev.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _protect(false);
     _geoT?.cancel();
@@ -4750,6 +4806,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
     final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
     if (winners.isEmpty || winners.length == players.length) return body;
+    if (!_revealed(v)) return body;
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
@@ -4791,7 +4848,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     final over = v['over'] == true;
     final turn = '${v['turnUid']}';
     final myTurn = !over && turn == _me;
-    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    final winners = _revealed(v) ? [for (final w in (v['winnerUids'] as List? ?? [])) '$w'] : <String>[];
     String nameOf(String uid) => _firstOf(players.where((p) => p['uid'] == uid).map((p) => '${p['name']}')) ?? '?';
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final pot = (v['pot'] as num?)?.toInt() ?? 0;
@@ -4879,7 +4936,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
                 ),
               ),
-            if (over)
+            if (over && _revealed(v))
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
@@ -5091,6 +5148,10 @@ class TchekOnlineRoom extends StatefulWidget {
 }
 
 class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingObserver {
+  final _Reveal _rev = _Reveal();
+  bool _revealed(Map<String, dynamic> v) => _rev.check(v, () {
+        if (mounted) setState(() {});
+      });
   final Sfx _sfx = Sfx();
   Timer? _pollT;
   Timer? _tickT;
@@ -5210,6 +5271,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
 
   @override
   void dispose() {
+    _rev.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _protect(false);
     _geoT?.cancel();
@@ -5512,6 +5574,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
     final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
     if (winners.isEmpty || winners.length == players.length) return body;
+    if (!_revealed(v)) return body;
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
@@ -5553,7 +5616,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     final over = v['over'] == true;
     final turn = '${v['turnUid']}';
     final myTurn = !over && turn == _me;
-    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    final winners = _revealed(v) ? [for (final w in (v['winnerUids'] as List? ?? [])) '$w'] : <String>[];
     String nameOf(String uid) => _firstOf(players.where((p) => p['uid'] == uid).map((p) => '${p['name']}')) ?? '?';
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final iWon = over && winners.contains(_me);
@@ -5613,7 +5676,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
               _DuelPanel(gameId: widget.gameId, view: v, me: _me, tchek: true, onChanged: _fetch),
               const SizedBox(height: 8),
             ],
-            if (over)
+            if (over && _revealed(v))
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
@@ -5928,6 +5991,10 @@ class FapFapOnlineRoom extends StatefulWidget {
 }
 
 class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBindingObserver {
+  final _Reveal _rev = _Reveal();
+  bool _revealed(Map<String, dynamic> v) => _rev.check(v, () {
+        if (mounted) setState(() {});
+      });
   final Sfx _sfx = Sfx();
   Timer? _pollT;
   Timer? _tickT;
@@ -6047,6 +6114,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
 
   @override
   void dispose() {
+    _rev.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _protect(false);
     _geoT?.cancel();
@@ -6371,6 +6439,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final players = [for (final p in v['players'] as List) Map<String, dynamic>.from(p as Map)];
     final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
     if (winners.isEmpty || winners.length == players.length) return body;
+    if (!_revealed(v)) return body;
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
@@ -6412,7 +6481,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final over = v['over'] == true;
     final turn = '${v['turnUid']}';
     final myTurn = !over && turn == _me;
-    final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
+    final winners = _revealed(v) ? [for (final w in (v['winnerUids'] as List? ?? [])) '$w'] : <String>[];
     String nameOf(String uid) => _firstOf(players.where((p) => p['uid'] == uid).map((p) => '${p['name']}')) ?? '?';
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final iWon = over && winners.contains(_me);
@@ -6454,7 +6523,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                   Text('⏱ $_secLeft s', style: const TextStyle(color: Colors.white70)),
                 ]),
               ),
-            if (over)
+            if (over && _revealed(v))
               Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
@@ -6491,6 +6560,27 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                   Text(tr('Prochain distributeur : ${nameOf('${v['nextDealerUid']}')}',
                           'Next dealer: ${nameOf('${v['nextDealerUid']}')}'),
                       style: const TextStyle(color: _goldSoft, fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            // Fin de manche : le dernier pli (toutes les cartes, dont celle du dernier joueur) reste affiché.
+            if (over && prev != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(16)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(tr('Dernier pli', 'Last trick'),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 10, runSpacing: 6, children: [
+                    for (final t in (prev['plays'] as List? ?? const []))
+                      Column(mainAxisSize: MainAxisSize.min, children: [
+                        _PopIn(
+                            key: ValueKey('lt-${(t as Map)['card']}'),
+                            child: _CardView(card: _decode((t['card'] as num).toInt()), w: 60)),
+                        Text(nameOf('${t['uid']}'), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                      ]),
+                  ]),
                 ]),
               ),
             // pli en cours

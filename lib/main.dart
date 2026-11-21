@@ -63,13 +63,20 @@ Future<void> main() async {
       options: kIsWeb ? kWebFirebaseOptions : null,
     );
     firebaseReady = true;
-    AppNotices.start();
   } catch (_) {
     // L'appli s'ouvre quand même : le mode présentiel reste jouable.
     firebaseReady = false;
   }
   await promo;
   runApp(const LudoProApp());
+  // Avis (gains de paris, notifications) : démarrés après l'affichage, jamais bloquants.
+  if (firebaseReady) {
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      try {
+        AppNotices.start();
+      } catch (_) {}
+    });
+  }
 }
 
 /// Éclaircit (amount > 0) ou assombrit (amount < 0) une couleur.
