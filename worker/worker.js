@@ -1016,10 +1016,11 @@ async function pushToUser(env, uid, title, body) {
 /** Envoie « Nouvelle partie » à tous les appareils inscrits, sauf au créateur. */
 async function pushNewGame(env, hostUid, info) {
   try {
-    // Anti-spam et économie de lectures : au plus une alerte « nouvelle partie » par jeu toutes les 2 minutes.
-    const key = String(info.label || info.col || 'x').replace(/[^A-Za-z0-9]/g, '').slice(0, 30) || 'x';
+    // Anti-spam : au plus une alerte par créateur et par jeu toutes les 20 secondes
+    // (chaque partie créée par quelqu'un d'autre prévient les joueurs).
+    const key = (String(info.label || info.col || 'x').replace(/[^A-Za-z0-9]/g, '').slice(0, 20) || 'x') + '_' + String(hostUid || '').slice(0, 24);
     const last = await readDoc(env, `pushThrottle/${key}`);
-    if (last && Date.now() - intOr(last.ms, 0) < 120000) return;
+    if (last && Date.now() - intOr(last.ms, 0) < 20000) return;
     await runTx(env, async (tx) => tx.write(`pushThrottle/${key}`, { set: { ms: Date.now() } }));
     const docs = await queryDocs(env, 'pushTokens', undefined, 300);
     const targets = docs.filter((x) => x.uid !== hostUid && typeof x.token === 'string');
@@ -1033,6 +1034,8 @@ async function pushNewGame(env, hostUid, info) {
       : `${who} a créé une partie 🔥 Rejoins-le !`;
     const url = `https://fcm.googleapis.com/v1/projects/${projectId(env)}/messages:send`;
     const dead = [];
+    let sent = 0;
+    let firstErr = '';
     await Promise.allSettled(
       targets.map(async (t) => {
         const res = await fetch(url, {
@@ -1042,20 +1045,32 @@ async function pushNewGame(env, hostUid, info) {
             message: {
               token: t.token,
               notification: { title, body },
-              webpush: { headers: { Urgency: 'high', TTL: '3600' } },
+              webpush: {
+                headers: { Urgency: 'high', TTL: '3600' },
+                fcm_options: { link: 'https://katikagames.com/jouer/' },
+              },
             },
           }),
         });
-        if (res.status === 404) dead.push(t.id);
+        if (res.ok) sent++;
+        else {
+          if (res.status === 404) dead.push(t.id);
+          if (!firstErr) firstErr = `HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 160)}`;
+        }
       }),
     );
+    if (sent === 0 && firstErr) {
+      console.error('pushNewGame', firstErr);
+      later(env, notifyAdmin(env, `⚠️ Notification « nouvelle partie ${label} » : 0/${targets.length} envoyée(s). ${firstErr}`));
+    }
     if (dead.length) {
       await runTx(env, async (tx) => {
         for (const id of dead) tx.delete(`pushTokens/${id}`);
       });
     }
-  } catch (_) {
+  } catch (e) {
     /* une notification ratée ne doit jamais bloquer la création de la partie */
+    console.error('pushNewGame', e && e.message ? e.message : e);
   }
 }
 
