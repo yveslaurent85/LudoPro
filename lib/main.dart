@@ -41,6 +41,7 @@ import 'update_check.dart';
 import 'zone_screens.dart';
 import 'pes_screens.dart';
 import 'push_setup.dart';
+import 'app_notices.dart';
 import 'stake_field.dart';
 import 'firebase_web.dart';
 import 'damier.dart';
@@ -62,6 +63,7 @@ Future<void> main() async {
       options: kIsWeb ? kWebFirebaseOptions : null,
     );
     firebaseReady = true;
+    AppNotices.start();
   } catch (_) {
     // L'appli s'ouvre quand même : le mode présentiel reste jouable.
     firebaseReady = false;
@@ -83,6 +85,7 @@ class LudoProApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: kMessengerKey,
       title: 'Katika Dés et Ludo by CKY',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

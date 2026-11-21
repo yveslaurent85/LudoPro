@@ -383,6 +383,15 @@ class Wallet {
     return _call('transfer', <String, dynamic>{'to': to, 'amount': amount});
   }
 
+  /// Suggestions de destinataires dès 2 caractères : [{name, code}].
+  static Future<List<Map<String, String>>> searchPlayers(String q) async {
+    final r = await _call('searchPlayers', <String, dynamic>{'q': q});
+    return [
+      for (final p in (r['players'] as List? ?? const []))
+        {'name': '${(p as Map)['name']}', 'code': '${p['code']}'},
+    ];
+  }
+
   /// Administrateur : compte dans les statistiques les parties en ligne
   /// terminées avant [before] (ISO UTC). Renvoie { counted, processed,
   /// remaining } : à relancer tant que remaining > 0.

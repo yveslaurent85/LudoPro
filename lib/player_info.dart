@@ -317,8 +317,8 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
     try {
       final r = await Wallet.adminDebitAccount(widget.uid, a, why);
       if (!mounted) return;
-      _snack(tr('${_fcfa(a)} retirés. Nouveau solde : ${_fcfa(_i(r['balance']))}',
-          '${_fcfa(a)} removed. New balance: ${_fcfa(_i(r['balance']))}'));
+      _snack(tr('${_fcfa(a)} retirés et ajoutés à ton compte joueur. Nouveau solde du joueur : ${_fcfa(_i(r['balance']))}',
+          '${_fcfa(a)} removed and added to your player account. Player balance: ${_fcfa(_i(r['balance']))}'));
       _load();
     } catch (e) {
       if (mounted) _snack(Wallet.errorText(e));

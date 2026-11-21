@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -26,8 +28,57 @@ class _TransferScreenState extends State<TransferScreen> {
 
   late final String uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  // Suggestions de destinataires (dès 2 caractères)
+  Timer? _deb;
+  List<Map<String, String>> _sugg = [];
+  bool _searching = false;
+  String _pickedName = '';
+  String _pickedCode = '';
+  int _searchSeq = 0;
+
+  void _onTo(String v) {
+    _deb?.cancel();
+    final q = v.trim();
+    if (q != _pickedName) _pickedCode = '';
+    if (q.length < 2) {
+      setState(() {
+        _sugg = [];
+        _searching = false;
+      });
+      return;
+    }
+    setState(() => _searching = true);
+    _deb = Timer(const Duration(milliseconds: 250), () async {
+      final seq = ++_searchSeq;
+      try {
+        final r = await Wallet.searchPlayers(q);
+        if (!mounted || seq != _searchSeq) return;
+        setState(() {
+          _sugg = r;
+          _searching = false;
+        });
+      } catch (_) {
+        if (mounted && seq == _searchSeq) setState(() => _searching = false);
+      }
+    });
+  }
+
+  void _pick(Map<String, String> p) {
+    _deb?.cancel();
+    _searchSeq++;
+    setState(() {
+      _pickedName = p['name'] ?? '';
+      _pickedCode = p['code'] ?? '';
+      toCtrl.text = _pickedName;
+      toCtrl.selection = TextSelection.collapsed(offset: toCtrl.text.length);
+      _sugg = [];
+      _searching = false;
+    });
+  }
+
   @override
   void dispose() {
+    _deb?.cancel();
     toCtrl.dispose();
     amountCtrl.dispose();
     super.dispose();
@@ -76,12 +127,15 @@ class _TransferScreenState extends State<TransferScreen> {
       success = null;
     });
     try {
-      final res = await Wallet.transfer(to, amount);
+      final res = await Wallet.transfer(_pickedCode.isNotEmpty && to == _pickedName ? _pickedCode : to, amount);
       if (!mounted) return;
       setState(() {
         success = '✅ ${Wallet.format(amount)} envoyés à ${res['toName']}.';
         toCtrl.clear();
         amountCtrl.clear();
+        _pickedName = '';
+        _pickedCode = '';
+        _sugg = [];
       });
     } catch (e) {
       if (!mounted) return;
@@ -183,9 +237,47 @@ class _TransferScreenState extends State<TransferScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: toCtrl,
+                      onChanged: _onTo,
+                      autocorrect: false,
                       style: const TextStyle(color: Colors.white),
-                      decoration: _dec('Pseudo ou code promo du joueur'),
+                      decoration: _dec('Tape 2 lettres du pseudo du joueur'),
                     ),
+                    if (_searching)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: LinearProgressIndicator(minHeight: 2, color: _gold),
+                      ),
+                    if (_sugg.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(top: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Column(
+                          children: [
+                            for (final p in _sugg)
+                              ListTile(
+                                dense: true,
+                                leading: const CircleAvatar(
+                                  radius: 14,
+                                  backgroundColor: Color(0xFF1E6BFF),
+                                  child: Icon(Icons.person, size: 16, color: Colors.white),
+                                ),
+                                title: Text(p['name'] ?? '',
+                                    style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF0B2FA6))),
+                                subtitle: Text('@${p['code']}', style: const TextStyle(fontSize: 11)),
+                                onTap: () => _pick(p),
+                              ),
+                          ],
+                        ),
+                      )
+                    else if (toCtrl.text.trim().length >= 2 && !_searching && _pickedCode.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text('Aucun joueur trouvé avec ces lettres.',
+                            style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      ),
                     const SizedBox(height: 16),
                     const Text(
                       'Montant (FCFA)',

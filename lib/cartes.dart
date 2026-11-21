@@ -90,6 +90,49 @@ List<_Card> _newDeck({required bool withAce}) {
   return d;
 }
 
+/// Positions (x, y entre 0 et 1) des symboles d'une carte de 3 à 10, comme sur une vraie carte.
+const Map<int, List<List<double>>> _pipLayout = {
+  3: [[0.5, 0], [0.5, 0.5], [0.5, 1]],
+  4: [[0, 0], [1, 0], [0, 1], [1, 1]],
+  5: [[0, 0], [1, 0], [0.5, 0.5], [0, 1], [1, 1]],
+  6: [[0, 0], [1, 0], [0, 0.5], [1, 0.5], [0, 1], [1, 1]],
+  7: [[0, 0], [1, 0], [0.5, 0.25], [0, 0.5], [1, 0.5], [0, 1], [1, 1]],
+  8: [[0, 0], [1, 0], [0.5, 0.25], [0, 0.5], [1, 0.5], [0.5, 0.75], [0, 1], [1, 1]],
+  9: [[0, 0], [1, 0], [0, 1 / 3], [1, 1 / 3], [0.5, 0.5], [0, 2 / 3], [1, 2 / 3], [0, 1], [1, 1]],
+  10: [[0, 0], [1, 0], [0.5, 1 / 6], [0, 1 / 3], [1, 1 / 3], [0, 2 / 3], [1, 2 / 3], [0.5, 5 / 6], [0, 1], [1, 1]],
+};
+
+List<Widget> _pips(_Card c, double w, Color col) {
+  final pts = _pipLayout[c.v];
+  if (pts == null) {
+    // As : un seul grand symbole au centre.
+    return [
+      Positioned(
+        left: w * 0.34,
+        top: w * 0.36,
+        child: Text(c.symbol, style: TextStyle(color: col, fontSize: w * 0.62, height: 1)),
+      ),
+    ];
+  }
+  final ps = w * 0.17; // taille d'un symbole
+  final left = w * 0.38; // zone visible même quand les cartes se chevauchent dans la main
+  final areaW = w * 0.34 - ps;
+  final top = w * 0.12;
+  final areaH = w * 0.98 - ps;
+  return [
+    for (final p in pts)
+      Positioned(
+        left: left + p[0] * areaW,
+        top: top + p[1] * areaH,
+        width: ps,
+        height: ps,
+        child: Center(
+          child: Text(c.symbol, style: TextStyle(color: col, fontSize: ps * 0.95, height: 1)),
+        ),
+      ),
+  ];
+}
+
 class _CardView extends StatelessWidget {
   const _CardView({required this.card, this.up = true, this.w = 54});
 
@@ -143,22 +186,18 @@ class _CardView extends StatelessWidget {
       child: Stack(
         children: [
           Positioned(left: w * 0.07, top: w * 0.04, child: index()),
-          // Nom de la famille : bandeau de couleur, bien lisible (visible aussi dans l'éventail).
+          // Autant de symboles que la valeur de la carte (5 pour le 5, 9 pour le 9…).
+          ..._pips(c, w, col),
+          // Nom de la famille : bandeau de couleur en bas, bien lisible (visible aussi dans l'éventail).
           Positioned(
             left: w * 0.05,
-            top: w * 0.04 + w * 0.64,
+            bottom: w * 0.04,
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: w * 0.05, vertical: 1),
               decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(4)),
               child: Text(c.family,
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: nameFs, height: 1.15)),
             ),
-          ),
-          // Grand symbole, comme sur une vraie carte.
-          Positioned(
-            right: w * 0.07,
-            top: big ? h * 0.26 : h * 0.34,
-            child: Text(c.symbol, style: TextStyle(color: col, fontSize: w * (big ? 0.62 : 0.5), height: 1)),
           ),
           if (big)
             Positioned(right: w * 0.07, bottom: w * 0.04, child: Transform.rotate(angle: pi, child: index())),
@@ -6519,6 +6558,16 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                 ),
               ])
             : Column(mainAxisSize: MainAxisSize.min, children: [
+                if (((v['passedUids'] as List?) ?? const []).contains(_me))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      tr('⏭ Tu es en passe : tes 2 cartes sont gardées, elles seront jouées à la fin.',
+                          '⏭ You passed: your 2 cards are kept and will be played at the end.'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: _goldSoft, fontSize: 12, fontWeight: FontWeight.w800),
+                    ),
+                  ),
                 Text(
                   myTurn
                       ? (trick.isEmpty
@@ -6603,6 +6652,14 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
             child: Text('${p['name']}${mine ? ' (${tr('toi', 'you')})' : ''}',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
           ),
+          if (((v['passedUids'] as List?) ?? const []).contains(uid))
+            Container(
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(color: const Color(0xFFEF6C00), borderRadius: BorderRadius.circular(10)),
+              child: Text(tr('⏭ EN PASSE', '⏭ PASSED'),
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
+            ),
           if (isTurn) const Text('⏳', style: TextStyle(fontSize: 16)),
           if (win) const Text('🏆', style: TextStyle(fontSize: 18)),
           if (!over) Text('🂠 $left', style: const TextStyle(color: Colors.white60, fontSize: 12)),
