@@ -9149,12 +9149,12 @@ function ludoBalancedFace(d, c, rnd) {
   if (!any) return face;
   const ahead = mine - best;
   const behind = best - mine;
-  if (ahead > 0.08) {
-    const tries = ahead > 0.15 ? 3 : ahead > 0.11 ? 2 : 1;
+  if (ahead > 0.2) {
+    const tries = ahead > 0.3 ? 3 : ahead > 0.25 ? 2 : 1;
     for (let k = 0; k < tries; k++) face = Math.min(face, r6());
-    if (ahead > 0.15 && face > 3) face = 1 + Math.floor(rnd() * 3);
-  } else if (behind > 0.08) {
-    const tries = behind > 0.15 ? 3 : behind > 0.11 ? 2 : 1;
+    if (ahead > 0.3 && face > 3) face = 1 + Math.floor(rnd() * 3);
+  } else if (behind > 0.2) {
+    const tries = behind > 0.3 ? 3 : behind > 0.25 ? 2 : 1;
     for (let k = 0; k < tries; k++) face = Math.max(face, r6());
   }
   return face;
