@@ -34,13 +34,8 @@ String _gameName(String col) {
   }
 }
 
-String _siteBase() {
-  if (kIsWeb) {
-    final o = Uri.base.origin;
-    if (o.startsWith('http')) return '$o/jouer/';
-  }
-  return '$kSiteUrl/jouer/';
-}
+// Toujours le domaine officiel, même si l'appli est ouverte depuis une autre adresse.
+String _siteBase() => '$kSiteUrl/jouer/';
 
 String _link(String col, String id, String mode) =>
     '${_siteBase()}?g=$col.$id&m=$mode';
