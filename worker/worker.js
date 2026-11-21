@@ -6802,6 +6802,7 @@ function cardsView(id, g, uid) {
           early: g.early || null,
           earlyOk: fapEarlyOptions(g, uid),
           canPass: turnUid === uid && fapPassCard(g, uid) >= 0,
+          showPass: turnUid === uid && intOr(g.trickNo, 0) === 3 && Array.isArray(g.trick) && g.trick.length > 0 && ((g.hands && g.hands[uid]) || []).length === 2,
           trick: Array.isArray(g.trick) ? g.trick : [],
           prevTrick: g.prevTrick || null,
           trickNo: intOr(g.trickNo, 0),
