@@ -304,7 +304,7 @@ class _PileFaceScreenState extends State<PileFaceScreen> {
   void initState() {
     super.initState();
     _load();
-    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+    _timer = Timer.periodic(const Duration(seconds: 8), (_) {
       if (mounted && !_busy) _load(silent: true);
     });
   }
@@ -1319,17 +1319,18 @@ class _PileFaceLocalPageState extends State<PileFaceLocalPage> {
                     ? tr('La pièce tourne…', 'Flipping…')
                     : _playStake > 0
                         ? (_shown
-                            ? tr('Revanche · même mise ${_pfFcfa(_playStake)}', 'Rematch · same stake ${_pfFcfa(_playStake)}')
+                            ? tr('Je rejoue · même mise ${_pfFcfa(_playStake)}', 'I play again · same stake ${_pfFcfa(_playStake)}')
                             : tr('Lancer la pièce', 'Flip the coin'))
-                        : (_shown ? tr('Rejouer', 'Flip again') : tr('Lancer la pièce', 'Flip the coin')),
+                        : (_shown ? tr('Je rejoue', 'I play again') : tr('Lancer la pièce', 'Flip the coin')),
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
             ),
           ),
           TextButton(
             onPressed: _spinning ? null : _backToSetup,
-            child: Text(tr('Changer la mise ou les joueurs', 'Change stake or players'),
-                style: const TextStyle(color: Colors.white70)),
+            child: Text(
+                _shown ? tr('Je ne rejoue pas', "I'm not playing again") : tr('Changer la mise ou les joueurs', 'Change stake or players'),
+                style: TextStyle(color: _shown ? const Color(0xFFFF8A80) : Colors.white70, fontWeight: FontWeight.w800)),
           ),
         ],
       ),

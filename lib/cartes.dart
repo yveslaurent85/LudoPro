@@ -391,7 +391,7 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
             child: Text(
               _replayBusy
                   ? tr('Patiente…', 'Please wait…')
-                  : (widget.nextOpened ? tr('Rejoindre', 'Join') : tr('Rejouer', 'Play again')) +
+                  : (widget.nextOpened ? tr('Je rejoins', 'I join') : tr('Je rejoue', 'I play again')) +
                       (widget.replayNeed > 0 ? ' · ${_fcfa(widget.replayNeed)}' : ''),
               style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
             ),
@@ -403,12 +403,12 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
           height: 48,
           child: FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1E6BFF),
+              backgroundColor: const Color(0xFFD64545),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
             onPressed: widget.onBack,
-            icon: const Icon(Icons.arrow_back),
-            label: Text(tr('Retour aux parties', 'Back to games'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+            icon: const Icon(Icons.close),
+            label: Text(tr('Je ne rejoue pas', "I'm not playing again"), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
           ),
         ),
         Center(

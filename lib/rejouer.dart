@@ -459,7 +459,7 @@ class _RematchPanelState extends State<RematchPanel> {
                 side: const BorderSide(color: Colors.white54),
               ),
               onPressed: () => _vote(false),
-              child: const Text('Non merci'),
+              child: Text(tr('Je ne rejoue pas', "I'm not playing again")),
             ),
           ),
           const SizedBox(width: 10),
@@ -470,7 +470,7 @@ class _RematchPanelState extends State<RematchPanel> {
                 foregroundColor: Colors.white,
               ),
               onPressed: low ? null : () => _vote(true),
-              child: Text(low ? tr('Solde insuffisant', 'Insufficient balance') : 'Rejouer'),
+              child: Text(low ? tr('Solde insuffisant', 'Insufficient balance') : tr('Je rejoue', 'I play again')),
             ),
           ),
         ],
@@ -482,7 +482,7 @@ class _RematchPanelState extends State<RematchPanel> {
           if (next == null)
             TextButton(
               onPressed: () => _vote(true),
-              child: const Text('Changer d\'avis'),
+              child: Text(tr('Je rejoue', 'I play again')),
             ),
         ],
       );
@@ -530,7 +530,7 @@ class _RematchPanelState extends State<RematchPanel> {
           ),
           TextButton(
             onPressed: () => _vote(false),
-            child: const Text('Finalement non'),
+            child: Text(tr('Je ne rejoue pas', "I'm not playing again")),
           ),
         ],
       );
@@ -641,20 +641,25 @@ class _LocalRematchPanelState extends State<LocalRematchPanel> {
 
   Widget _pick(int id, bool yes) {
     final selected = _choice[id] == yes;
-    return GestureDetector(
-      onTap: () => setState(() => _choice[id] = yes),
-      child: Container(
-        width: 38,
-        height: 32,
-        margin: const EdgeInsets.only(left: 6),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          color: selected
-              ? (yes ? const Color(0xFF22B14C) : const Color(0xFFE5262B))
-              : Colors.white.withOpacity(0.12),
+    final col = yes ? const Color(0xFF22B14C) : const Color(0xFFE5262B);
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _choice[id] = yes),
+        child: Container(
+          height: 36,
+          margin: EdgeInsets.only(left: yes ? 0 : 6),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: selected ? col : Colors.white.withOpacity(0.12),
+            border: Border.all(color: selected ? col : Colors.white24),
+          ),
+          child: Text(
+            yes ? tr('✅ Je rejoue', '✅ I play again') : tr('❌ Je ne rejoue pas', "❌ I'm not playing again"),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
+          ),
         ),
-        child: Text(yes ? '✅' : '❌'),
       ),
     );
   }
@@ -669,24 +674,26 @@ class _LocalRematchPanelState extends State<LocalRematchPanel> {
         widget.stake > 0
             ? tr('Chaque joueur qui rejoue repaie sa mise (${Wallet.format(widget.stake)}).',
                 'Each player who plays again pays the stake (${Wallet.format(widget.stake)}).')
-            : tr('Chaque joueur choisit : ✅ rejouer ou ❌ arrêter.',
-                'Each player picks: ✅ play again or ❌ stop.'),
+            : tr('Chaque joueur choisit : « Je rejoue » ou « Je ne rejoue pas ».',
+                'Each player picks: "I play again" or "I\'m not playing again".'),
         style: _small,
       ),
       const SizedBox(height: 8),
       for (int i = 0; i < widget.ids.length; i++)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  widget.names[i],
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                ),
+              Text(
+                widget.names[i],
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
               ),
-              _pick(widget.ids[i], true),
-              _pick(widget.ids[i], false),
+              const SizedBox(height: 3),
+              Row(children: [
+                _pick(widget.ids[i], true),
+                _pick(widget.ids[i], false),
+              ]),
             ],
           ),
         ),
