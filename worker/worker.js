@@ -35,13 +35,36 @@ const JACKPOT_PERCENT = 0; // part de la commission versée au jackpot (inutilis
 const PARTNER_PERCENT = 40; // part du partenaire sur (commission - part du parrain)
 const PARTNER_MIN_REFERRALS = 25; // retrait partenaire : nombre de filleuls actifs requis
 const PARTNER_MIN_WAGERED = 1000; // ... chacun ayant misé au moins ce total (FCFA) : mises des parties + paris (Duel, Défi 7)
-const PARTNER_WITHDRAW_MIN = 100; // gains de partenaire minimum pour les transférer vers le solde
+const PARTNER_WITHDRAW_MIN = 500; // gains de partenaire minimum pour les transférer vers le solde
 const REVIVE_AFTER_MIN = 180; // parties bloquées depuis plus de 3 h
-const REFERRAL_PERCENT = 15; // part de la commission reversée au parrain (affilié)
+const REFERRAL_PERCENT = 12.5; // palier de départ (1 à 10 filleuls) ; voir REFERRAL_TIERS
+// Commission des affiliés par paliers, selon le nombre de joueurs inscrits avec leur code : [jusqu'à N filleuls, %].
+const REFERRAL_TIERS = [[10, 12.5], [20, 15], [30, 20], [40, 25], [65, 30], [100, 35], [150, 37.5]];
+const REFERRAL_TOP_PERCENT = 40; // au-delà de 150 filleuls
+function referralPercentFor(n) {
+  const c = Math.max(0, Math.floor(Number(n) || 0));
+  for (const [max, p] of REFERRAL_TIERS) if (c <= max) return p;
+  return REFERRAL_TOP_PERCENT;
+}
+
+/** Nombre de filleuls d'un joueur (requête de comptage, hors transaction). */
+async function referralCountOf(env, uid) {
+  try {
+    const r = await fsCall(env, 'runAggregationQuery', {
+      structuredAggregationQuery: {
+        structuredQuery: { from: [{ collectionId: 'users' }], where: eqFilter('referrerUid', uid) },
+        aggregations: [{ alias: 'n', count: {} }],
+      },
+    });
+    return Number(r[0].result.aggregateFields.n.integerValue) || 0;
+  } catch (_) {
+    return -1;
+  }
+}
 const JACKPOT_MIN = 550; // le jackpot se déclenche entre ces deux montants
 const JACKPOT_MAX = 650;
 const HOUSE_WITHDRAW_MIN = 2500; // commissions de Katika : seuil pour pouvoir les retirer (FCFA)
-const REFERRAL_WITHDRAW_MIN = 100; // gains de parrainage minimum pour pouvoir les retirer vers le solde
+const REFERRAL_WITHDRAW_MIN = 500; // gains de parrainage minimum pour pouvoir les retirer vers le solde
 
 // Parties en ligne gérées : le Ludo (« games »), Deux dés (« deuxdes »), Songô et Damier.
 const ONLINE_COLLECTIONS = ['games', 'deuxdes', 'songo', 'damier', 'pileface', 'cards'];
@@ -312,6 +335,7 @@ async function runTx(env, fn) {
     const deletes = [];
 
     const tx = {
+      env,
       async get(path) {
         const r = await fsCall(env, 'batchGet', {
           documents: [docName(env, path)],
@@ -421,6 +445,12 @@ function newId() {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
 
+/** Identifiant de partie : uniquement des chiffres (10 chiffres, jamais de 0 au début). */
+function newGameId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(10));
+  return Array.from(bytes, (b, i) => (i === 0 ? 1 + (b % 9) : b % 10)).join('');
+}
+
 /** Gain du gagnant : la cagnotte moins la commission (5 % en ligne et en présentiel). */
 function prizeOf(pot, percent = COMMISSION_PERCENT) {
   // percent peut avoir une décimale (ex. 7,5 %) : on calcule en dixièmes.
@@ -521,8 +551,6 @@ async function referralPayout(tx, participants, commission, info = {}) {
   const list = [...new Set(participants.filter((u) => typeof u === 'string'))];
   if (!(commission > 0) || list.length === 0) return { referral: 0, partner: 0 };
   const share = commission / list.length;
-  const bonus = Math.floor((share * REFERRAL_PERCENT) / 100);
-  const partnerBonus = Math.floor(((share - bonus) * PARTNER_PERCENT) / 100);
 
   const gains = new Map();
   const pGains = new Map();
@@ -534,6 +562,17 @@ async function referralPayout(tx, participants, commission, info = {}) {
     const rh = await tx.get(`users/${r}`);
     if (!rh) continue; // parrain dont le compte a été supprimé
     if (rh.hostess === true) continue;
+    // Palier du parrain selon son nombre de filleuls (compteur refCount, calculé une fois si absent).
+    let nKids = typeof rh.refCount === 'number' ? rh.refCount : -1;
+    if (nKids < 0 && tx.env) {
+      nKids = await referralCountOf(tx.env, r);
+      if (nKids >= 0) {
+        tx.write(`users/${r}`, { set: { refCount: nKids } });
+        rh.refCount = nKids;
+      }
+    }
+    const bonus = Math.floor((share * referralPercentFor(Math.max(0, nKids))) / 100);
+    const partnerBonus = Math.floor(((share - bonus) * PARTNER_PERCENT) / 100);
     if (bonus > 0) gains.set(r, (gains.get(r) || 0) + bonus);
 
     if (partnerBonus > 0) {
@@ -827,6 +866,13 @@ async function applyPromo({ uid, data, env }) {
       set: { referrerUid: owner.uid, referrerCode: key },
       serverTime: ['referredAt'],
     });
+    // Compteur de filleuls du parrain (sert aux paliers de commission).
+    if (typeof sponsor.refCount === 'number') {
+      tx.write(`users/${owner.uid}`, { incr: { refCount: 1 } });
+    } else {
+      const n = await referralCountOf(env, owner.uid);
+      if (n >= 0) tx.write(`users/${owner.uid}`, { set: { refCount: n + 1 } });
+    }
     return { sponsor: sponsor.pseudo || key };
   });
 }
@@ -879,7 +925,14 @@ async function referralInfo({ uid, data, env }) {
     referrals = Number(r[0].result.aggregateFields.n.integerValue) || 0;
   } catch (_) {}
 
-  return { ...info, referrals, percent: REFERRAL_PERCENT };
+  const tiers = [];
+  let prev = 0;
+  for (const [max, p] of REFERRAL_TIERS) {
+    tiers.push({ from: prev + 1, to: max, percent: p });
+    prev = max;
+  }
+  tiers.push({ from: prev + 1, to: 0, percent: REFERRAL_TOP_PERCENT });
+  return { ...info, referrals, percent: referralPercentFor(referrals), tiers };
 }
 
 /** Paie la mise. Salle pleine + tout le monde a payé (+ binômes formés en
@@ -1508,7 +1561,7 @@ async function startLocalGame({ uid: hostUid, data, env }) {
   if (dup && !(game === 'ludo' && data.team === true && Object.values(seatCount).every((n) => n <= 2))) {
     throw new HttpError('invalid-argument', 'Un compte joue deux fois.');
   }
-  const id = newId();
+  const id = newGameId();
   const escMult = game === 'fapfap' ? 2 : 1; // Fap-Fap : 2 x M bloqués
   await runTx(env, async (tx) => {
     if (stake > 0) {
@@ -5110,7 +5163,7 @@ function tournGameDoc(t, tid, mid, seats, teamMode) {
  *      ou { round, idx, kind, teams:[{id,name,uids,names}×2] } (Katika) */
 async function createTournMatch(env, t, tid, spec) {
   const mid = newId();
-  const gid = newId();
+  const gid = newGameId();
   let seats;
   const base = { tid, round: spec.round, idx: spec.idx, kind: spec.kind, mode: t.type };
   const mdoc = { ...base, gameId: gid, status: 'playing', startedMs: Date.now() };
@@ -5668,7 +5721,7 @@ async function dbFlush(env, rid, patch) {
 /** Débite les 2 mises et crée la partie de Damier. Renvoie l'identifiant, ou '' si un solde manque. */
 async function dbStartMatch(env, rid, room, pair, byUid, matchNo) {
   const stake = intOr(room.stake, 0);
-  const gid = newId();
+  const gid = newGameId();
   const timeMs = intOr(room.timeMin, 10) * 60000;
   const names = pair.map((u) => byUid.get(u).name || 'Joueur');
   const board = dbInitialBoard();
@@ -5805,7 +5858,7 @@ async function pfCreate({ uid, data, env }) {
   if (open.filter((g) => g.status === 'waiting').length >= PF_MAX_OPEN_PER_HOST) {
     throw new HttpError('failed-precondition', `Tu as déjà ${PF_MAX_OPEN_PER_HOST} défis ouverts. Annule-en un d'abord.`);
   }
-  const id = newId();
+  const id = newGameId();
   const created = await runTx(env, async (tx) => {
     const me = await tx.get(`users/${uid}`);
     if (!me) throw new HttpError('failed-precondition', 'Compte introuvable.');
@@ -7490,7 +7543,7 @@ async function cardsCreate({ uid, data, env }) {
   if (open.filter((g) => g.status === 'waiting').length >= CARDS_MAX_OPEN_PER_HOST) {
     throw new HttpError('failed-precondition', `Tu as déjà ${CARDS_MAX_OPEN_PER_HOST} salles ouvertes.`);
   }
-  const id = newId();
+  const id = newGameId();
   const fapLoc0 = isFl(game) && maxPlayers >= 3 ? fapLoc(data) : null; // position obligatoire à 3-4 joueurs (pas à 2)
   await runTx(env, async (tx) => {
     const me = await tx.get(`users/${uid}`);
@@ -7858,7 +7911,7 @@ async function cardsRematch({ uid, data, env }) {
       if (balanceOf(me) < esc) throw new HttpError('failed-precondition', 'Solde insuffisant.');
       tx.write(`users/${uid}`, { incr: { balance: -esc } });
     }
-    const id = newId();
+    const id = newGameId();
     const doc = cardsNewDoc({
       game: g.game,
       stake,
@@ -8278,7 +8331,7 @@ async function pesCreate({ uid, data, env }) {
   if (list.some((c) => c.status === 'open' && c.hostUid === uid && intOr(c.stake, 0) === stake && String(c.rules || '') === rules)) {
     throw new HttpError('failed-precondition', 'Tu as déjà publié un défi identique.');
   }
-  const id = newId();
+  const id = newGameId();
   await runTx(env, async (tx) => {
     const u = await tx.get(`users/${uid}`);
     if (!u) throw new HttpError('failed-precondition', 'Compte introuvable.');
