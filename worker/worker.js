@@ -6133,6 +6133,7 @@ function fapPlay(d, uid, card) {
   patch.trickNo = intOr(d.trickNo, 0) + 1;
   patch.leaderIdx = seq.indexOf(win.uid);
   patch.turnIdx = patch.leaderIdx;
+  patch.early = null;
   if (patch.trickNo >= 5 || Object.values(hands).every((h) => h.length === 0)) {
     Object.assign(patch, {
       over: true,
@@ -6142,8 +6143,55 @@ function fapPlay(d, uid, card) {
       fapRule: cardVal(win.card) === 3 ? 'last3' : 'last',
       nextDealerUid: win.uid,
     });
+    return patch;
+  }
+  // Le gagnant du pli entame : sa carte jouée d'avance (après un 10) puis sa dernière carte
+  // (une seule carte en main) partent automatiquement.
+  const lh = hands[win.uid] || [];
+  const ea = d.early && d.early.uid === win.uid && lh.includes(d.early.card) ? d.early.card : -1;
+  const auto = ea >= 0 ? ea : lh.length === 1 ? lh[0] : -1;
+  if (auto >= 0) {
+    const p2 = fapPlay({ ...d, ...patch, early: null }, win.uid, auto);
+    return { ...patch, ...p2, early: null };
   }
   return patch;
+}
+
+/** Après avoir joué un 10 de la famille demandée (le pli est gagné), cartes de la même
+ *  famille que le joueur peut déjà jouer pour le pli suivant, sans attendre les adversaires. */
+function fapEarlyOptions(d, uid) {
+  if (!d || d.game !== 'fapfap' || d.status !== 'playing' || d.over === true) return [];
+  const trick = Array.isArray(d.trick) ? d.trick : [];
+  if (!trick.length || d.early) return [];
+  const lead = cardSuit(trick[0].card);
+  const mine = trick.find((t) => t.uid === uid);
+  if (!mine || cardVal(mine.card) !== 10 || cardSuit(mine.card) !== lead) return [];
+  const hand = (d.hands && d.hands[uid]) || [];
+  return hand.filter((c) => cardSuit(c) === lead);
+}
+
+function fapEarly(d, uid, card) {
+  if (!fapEarlyOptions(d, uid).includes(card)) {
+    throw new HttpError('failed-precondition', 'Tu peux jouer d\'avance seulement après un 10, avec une carte de la même famille.');
+  }
+  return { early: { uid, card } };
+}
+
+/** « Passe » au 4e pli (2 cartes en main) : on joue la carte qui ne peut pas gagner,
+ *  un 3 ou une carte de la famille demandée plus petite que la meilleure du pli. */
+function fapPassCard(d, uid) {
+  if (!d || d.game !== 'fapfap' || d.status !== 'playing' || d.over === true) return -1;
+  if (intOr(d.trickNo, 0) !== 3) return -1;
+  const trick = Array.isArray(d.trick) ? d.trick : [];
+  const hand = (d.hands && d.hands[uid]) || [];
+  if (!trick.length || hand.length !== 2) return -1;
+  const lead = cardSuit(trick[0].card);
+  let top = 0;
+  for (const t of trick) if (cardSuit(t.card) === lead) top = Math.max(top, cardVal(t.card));
+  const ok = fapLegal(hand, trick).filter((c) => cardVal(c) === 3 || (cardSuit(c) === lead && cardVal(c) < top));
+  if (!ok.length) return -1;
+  ok.sort((a, b) => cardVal(a) - cardVal(b) || a - b);
+  return ok[0];
 }
 
 /** Délai dépassé : on joue la plus faible carte légale. */
@@ -6680,7 +6728,7 @@ function cardsView(id, g, uid) {
     const row = { uid: p.uid, name: p.name || 'Joueur', opened: isOpen };
     if (g.game === 'fapfap') {
       const hand = (g.hands && g.hands[p.uid]) || [];
-      row.count = hand.length;
+      row.count = hand.length - (g.early && g.early.uid === p.uid ? 1 : 0);
       row.table = (g.tbl && g.tbl[p.uid]) || [];
       if (over && hand.length) row.cards = hand; // gain par combinaison : mains dévoilées
       if (over && hand.length === 5) {
@@ -6750,7 +6798,10 @@ function cardsView(id, g, uid) {
     turnLeftMs: turnUid ? Math.max(0, cardsTurnMs(g) - (Date.now() - intOr(g.turnAt, 0))) : 0,
     ...(g.game === 'fapfap'
       ? {
-          myHand: (g.hands && g.hands[uid]) || [],
+          myHand: ((g.hands && g.hands[uid]) || []).filter((c) => !(g.early && g.early.uid === uid && g.early.card === c)),
+          early: g.early || null,
+          earlyOk: fapEarlyOptions(g, uid),
+          canPass: turnUid === uid && fapPassCard(g, uid) >= 0,
           trick: Array.isArray(g.trick) ? g.trick : [],
           prevTrick: g.prevTrick || null,
           trickNo: intOr(g.trickNo, 0),
@@ -6907,6 +6958,9 @@ async function cardsChatJoin({ uid, data, env }) {
     }
     const max = cardsChatMax(g);
     if (n < 1 || n > max) throw new HttpError('invalid-argument', `CHAT invalide : choisis de 1 à ${max}.`);
+    if (cb.entries.some((e) => intOr(e.n, 0) === n)) {
+      throw new HttpError('failed-precondition', 'Ce CHAT est déjà pris par un autre joueur : choisis-en un autre.');
+    }
     const amount = cb.entries.length ? intOr(cb.amount, 0) : intOr(data.amount, -1);
     if (amount < BET_MIN || amount > BET_MAX) throw new HttpError('invalid-argument', 'Mise invalide.');
     const u = await tx.get(`users/${uid}`);
@@ -7607,7 +7661,7 @@ async function cardsLoc({ uid, data, env }) {
 /** Fap-Fap : jouer une carte (le serveur vérifie le tour, la main et la famille demandée). */
 async function cardsPlay({ uid, data, env }) {
   const gid = idStr(data.gameId);
-  const card = intOr(data.card, -1);
+  const card = data.pass === true ? 0 : intOr(data.card, -1);
   if (!gid || card < 0) throw new HttpError('invalid-argument', 'Carte invalide.');
   await accessToken(env);
   // (le temps écoulé est rejoué par cardsFetch)
@@ -7617,7 +7671,17 @@ async function cardsPlay({ uid, data, env }) {
     if (!d || (d.game !== 'fapfap' && d.game !== 'anticote' && d.game !== 'tchek')) throw new HttpError('invalid-argument', 'Jeu inconnu.');
     if (d.status !== 'playing' || d.over === true) throw new HttpError('failed-precondition', 'La manche est terminée.');
     const cur = (d.seq || [])[intOr(d.turnIdx, 0)];
+    if (data.early === true && d.game === 'fapfap') {
+      tx.write(path, { set: fapEarly(d, uid, card) });
+      return;
+    }
     if (cur !== uid) throw new HttpError('failed-precondition', "Ce n'est pas encore ton tour.");
+    if (data.pass === true && d.game === 'fapfap') {
+      const pc = fapPassCard(d, uid);
+      if (pc < 0) throw new HttpError('failed-precondition', 'Tu ne peux pas passer : il te faut un 3 ou une carte plus petite que la famille demandée.');
+      tx.write(path, { set: fapPlay(d, uid, pc) });
+      return;
+    }
     if (d.game === 'tchek') {
       tx.write(path, { set: tcPlay(d, uid, card, intOr(data.suit, -1), data.tchek === true) });
     } else if (d.game === 'anticote') {
