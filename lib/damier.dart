@@ -3645,7 +3645,7 @@ class _DamierRoomState extends State<_DamierRoom> {
         }
 
         return PopScope(
-          canPop: stake == 0 || over || seat < 0,
+          canPop: stake == 0 || over || seat < 0 || d['status'] == 'waiting',
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
               ScaffoldMessenger.of(context).showSnackBar(

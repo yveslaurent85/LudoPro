@@ -217,21 +217,54 @@ void _playResultSound(Sfx sfx, Map<String, dynamic> v, String me) {
 
 /// Animation de fin de manche : confettis, nom du gagnant et montant total des gains qui défile.
 class _WinBurst extends StatefulWidget {
-  const _WinBurst({super.key, required this.title, required this.amount, this.subtitle = '', this.lost = false, this.balance});
+  const _WinBurst({
+    super.key,
+    required this.title,
+    required this.amount,
+    this.subtitle = '',
+    this.lost = false,
+    this.balance,
+    this.onReplay,
+    this.replayNeed = 0,
+    this.onBack,
+    this.rows = const [],
+    this.nextOpened = false,
+  });
 
   final String title;
   final String subtitle;
   final int amount; // gagnant : gains ; perdant : mise perdue ; 0 : partie gratuite, pas de montant
   final bool lost; // écran du perdant : « Vous avez perdu, réessayez »
   final int? balance; // nouveau solde du joueur
+  // Rejouer : bouton + décompte de 1 min 30 + « Solde insuffisant » (null = pas de proposition).
+  final Future<void> Function()? onReplay;
+  final int replayNeed; // montant à avoir pour rejouer (mise bloquée)
+  final VoidCallback? onBack;
+  final List<_RpRow> rows;
+  final bool nextOpened; // quelqu'un a déjà relancé la manche suivante
 
   @override
   State<_WinBurst> createState() => _WinBurstState();
 }
 
+/// Une ligne de la liste « Rejouer ? » (nom du joueur, c'est moi ou non).
+class _RpRow {
+  const _RpRow(this.name, this.me);
+  final String name;
+  final bool me;
+}
+
+/// Durée pour rejouer après la fin d'une partie.
+const int _kReplaySeconds = 90;
+
+String _mmss(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+
 class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixin {
   late final AnimationController _c;
   Timer? _auto;
+  Timer? _cd;
+  int _left = _kReplaySeconds;
+  bool _replayBusy = false;
   bool _visible = true;
   late final List<List<double>> _bits; // x, vitesse, phase, taille, couleur, rotation
 
@@ -245,16 +278,147 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
           rnd.nextInt(5).toDouble(), rnd.nextDouble() * 6.28]
     ];
     _c = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
-    _auto = Timer(const Duration(seconds: 10), () {
-      if (mounted) setState(() => _visible = false);
-    });
+    if (widget.onReplay == null) {
+      _auto = Timer(const Duration(seconds: 10), () {
+        if (mounted) setState(() => _visible = false);
+      });
+    } else {
+      _cd = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        if (_left > 0) setState(() => _left--);
+      });
+    }
+  }
+
+  Future<void> _doReplay() async {
+    if (_replayBusy || _left <= 0 || widget.onReplay == null) return;
+    setState(() => _replayBusy = true);
+    try {
+      await widget.onReplay!();
+    } finally {
+      if (mounted) setState(() => _replayBusy = false);
+    }
   }
 
   @override
   void dispose() {
     _auto?.cancel();
+    _cd?.cancel();
     _c.dispose();
     super.dispose();
+  }
+
+  Widget _replaySection() {
+    final low = widget.replayNeed > 0 && widget.balance != null && widget.balance! < widget.replayNeed;
+    final over = _left <= 0;
+    final canReplay = !low && !over && !_replayBusy;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.95), borderRadius: BorderRadius.circular(16)),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(tr('Rejouer ?', 'Play again?'),
+                style: const TextStyle(color: Color(0xFF1B1B1B), fontSize: 18, fontWeight: FontWeight.w900)),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: over ? const Color(0xFFB3261E) : (_left <= 15 ? const Color(0xFFEF6C00) : const Color(0xFF1E6BFF)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text('⏱ ${_mmss(_left)}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14)),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        for (final r in widget.rows)
+          Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF4F6F8),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE0E4E8)),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Text(r.me ? tr('Vous', 'You') : r.name,
+                    style: const TextStyle(color: Color(0xFF1B1B1B), fontSize: 15, fontWeight: FontWeight.w800)),
+              ),
+              Text(
+                r.me ? (low ? tr('Solde insuffisant', 'Insufficient balance') : (over ? '—' : tr('Prêt', 'Ready'))) : (over ? '—' : '…'),
+                style: TextStyle(
+                  color: r.me && low ? const Color(0xFFB3261E) : const Color(0xFF6B7280),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ]),
+          ),
+        if (widget.nextOpened && !over)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(tr('La manche suivante est lancée : rejoins-la !', 'The next round has started: join it!'),
+                style: const TextStyle(color: Color(0xFF1B8A3A), fontWeight: FontWeight.w800, fontSize: 13)),
+          ),
+        if (low)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              tr('Il te faut ${_fcfa(widget.replayNeed)} pour rejouer. Recharge ton compte.',
+                  'You need ${_fcfa(widget.replayNeed)} to play again. Top up your account.'),
+              style: const TextStyle(color: Color(0xFFB3261E), fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        if (over)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(tr('Temps écoulé : le délai pour rejouer est terminé.', 'Time is up: the replay window has closed.'),
+                style: const TextStyle(color: Color(0xFFB3261E), fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1B8A3A),
+              disabledBackgroundColor: const Color(0xFFB0B7BF),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: canReplay ? _doReplay : null,
+            child: Text(
+              _replayBusy
+                  ? tr('Patiente…', 'Please wait…')
+                  : (widget.nextOpened ? tr('Rejoindre', 'Join') : tr('Rejouer', 'Play again')) +
+                      (widget.replayNeed > 0 ? ' · ${_fcfa(widget.replayNeed)}' : ''),
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1E6BFF),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: widget.onBack,
+            icon: const Icon(Icons.arrow_back),
+            label: Text(tr('Retour aux parties', 'Back to games'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          ),
+        ),
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() => _visible = false),
+            child: Text(tr('Voir la table', 'View the table'), style: const TextStyle(color: Color(0xFF6B7280))),
+          ),
+        ),
+      ]),
+    );
   }
 
   @override
@@ -262,7 +426,7 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
     if (!_visible) return const SizedBox.shrink();
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => setState(() => _visible = false),
+      onTap: widget.onReplay == null ? () => setState(() => _visible = false) : null,
       child: Container(
         color: Colors.black.withOpacity(0.72),
         child: Stack(children: [
@@ -352,8 +516,11 @@ class _WinBurstState extends State<_WinBurst> with SingleTickerProviderStateMixi
                         style: const TextStyle(color: Colors.white70, fontSize: 12)),
                   ],
                   const SizedBox(height: 14),
-                  Text(tr('Touche pour continuer', 'Tap to continue'),
-                      style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  if (widget.onReplay == null)
+                    Text(tr('Touche pour continuer', 'Tap to continue'),
+                        style: const TextStyle(color: Colors.white54, fontSize: 12))
+                  else
+                    _replaySection(),
                 ]),
               ),
             ),
@@ -3256,13 +3423,9 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     return Row(children: [
       IconButton(
-        onPressed: () {
-          if (v['status'] == 'waiting') {
-            _leave();
-          } else {
-            Navigator.of(context).maybePop();
-          }
-        },
+        // Sortir de l'écran ne supprime PAS la partie : elle reste ouverte.
+        // Pour la supprimer, utiliser le bouton « Supprimer la partie ».
+        onPressed: () => Navigator.of(context).maybePop(),
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
       Expanded(
@@ -3419,7 +3582,10 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
           ),
           TextButton(
             onPressed: _leave,
-            child: Text(tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
+            child: Text(
+                _v?['hostUid'] == _me
+                    ? tr('Supprimer la partie (mise remboursée)', 'Delete game (stake refunded)')
+                    : tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
                 style: const TextStyle(color: Colors.white70)),
           ),
         ]),
@@ -3447,6 +3613,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
     final lost = !won && players.any((p) => p['uid'] == _me);
+    final nid = ('${v['nextId'] ?? ''}' == 'null') ? '' : '${v['nextId'] ?? ''}';
     final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
@@ -3461,11 +3628,16 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         child: StreamBuilder<int>(
           stream: Wallet.watch(_me),
           builder: (c, s) => _WinBurst(
-            key: ValueKey('burst-${v['nextId']}-${v['pile']}-${winners.join()}'),
+            key: ValueKey('burst-${v['id']}-${v['pile']}-${winners.join()}'),
             title: lost ? tr('Vous avez perdu', 'You lost') : title,
             lost: lost,
             amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
             balance: s.hasData ? s.data : null,
+            onReplay: !players.any((p) => p['uid'] == _me) ? null : () => _goNext(() => nid.isEmpty ? Wallet.cardsRematch(widget.gameId) : Wallet.cardsJoin(gameId: nid)),
+            replayNeed: stake * ((v['game'] == 'fapfap' || v['game'] == 'anticote') ? 2 : 1),
+            onBack: () => Navigator.of(context).maybePop(),
+            rows: [for (final p in players) _RpRow('${p['name']}', p['uid'] == _me)],
+            nextOpened: nid.isNotEmpty,
           ),
         ),
       ),
@@ -4336,13 +4508,9 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     return Row(children: [
       IconButton(
-        onPressed: () {
-          if (v['status'] == 'waiting') {
-            _leave();
-          } else {
-            Navigator.of(context).maybePop();
-          }
-        },
+        // Sortir de l'écran ne supprime PAS la partie : elle reste ouverte.
+        // Pour la supprimer, utiliser le bouton « Supprimer la partie ».
+        onPressed: () => Navigator.of(context).maybePop(),
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
       const GameInfoButton(gameKey: 'anticote'),
@@ -4524,7 +4692,10 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
           ),
           TextButton(
             onPressed: _leave,
-            child: Text(tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
+            child: Text(
+                _v?['hostUid'] == _me
+                    ? tr('Supprimer la partie (mise remboursée)', 'Delete game (stake refunded)')
+                    : tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
                 style: const TextStyle(color: Colors.white70)),
           ),
         ]),
@@ -4544,6 +4715,7 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
     final lost = !won && players.any((p) => p['uid'] == _me);
+    final nid = ('${v['nextId'] ?? ''}' == 'null') ? '' : '${v['nextId'] ?? ''}';
     final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
@@ -4564,6 +4736,11 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
             lost: lost,
             amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
             balance: s.hasData ? s.data : null,
+            onReplay: !players.any((p) => p['uid'] == _me) ? null : () => _goNext(() => nid.isEmpty ? Wallet.cardsRematch(widget.gameId) : Wallet.cardsJoin(gameId: nid)),
+            replayNeed: stake * ((v['game'] == 'fapfap' || v['game'] == 'anticote') ? 2 : 1),
+            onBack: () => Navigator.of(context).maybePop(),
+            rows: [for (final p in players) _RpRow('${p['name']}', p['uid'] == _me)],
+            nextOpened: nid.isNotEmpty,
           ),
         ),
       ),
@@ -5096,13 +5273,9 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     return Row(children: [
       IconButton(
-        onPressed: () {
-          if (v['status'] == 'waiting') {
-            _leave();
-          } else {
-            Navigator.of(context).maybePop();
-          }
-        },
+        // Sortir de l'écran ne supprime PAS la partie : elle reste ouverte.
+        // Pour la supprimer, utiliser le bouton « Supprimer la partie ».
+        onPressed: () => Navigator.of(context).maybePop(),
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
       const GameInfoButton(gameKey: 'tchek'),
@@ -5281,7 +5454,10 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
           ),
           TextButton(
             onPressed: _leave,
-            child: Text(tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
+            child: Text(
+                _v?['hostUid'] == _me
+                    ? tr('Supprimer la partie (mise remboursée)', 'Delete game (stake refunded)')
+                    : tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
                 style: const TextStyle(color: Colors.white70)),
           ),
         ]),
@@ -5301,6 +5477,7 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
     final lost = !won && players.any((p) => p['uid'] == _me);
+    final nid = ('${v['nextId'] ?? ''}' == 'null') ? '' : '${v['nextId'] ?? ''}';
     final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
@@ -5321,6 +5498,11 @@ class _TchekOnlineRoomState extends State<TchekOnlineRoom> with WidgetsBindingOb
             lost: lost,
             amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
             balance: s.hasData ? s.data : null,
+            onReplay: !players.any((p) => p['uid'] == _me) ? null : () => _goNext(() => nid.isEmpty ? Wallet.cardsRematch(widget.gameId) : Wallet.cardsJoin(gameId: nid)),
+            replayNeed: stake * ((v['game'] == 'fapfap' || v['game'] == 'anticote') ? 2 : 1),
+            onBack: () => Navigator.of(context).maybePop(),
+            rows: [for (final p in players) _RpRow('${p['name']}', p['uid'] == _me)],
+            nextOpened: nid.isNotEmpty,
           ),
         ),
       ),
@@ -5945,13 +6127,9 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     return Row(children: [
       IconButton(
-        onPressed: () {
-          if (v['status'] == 'waiting') {
-            _leave();
-          } else {
-            Navigator.of(context).maybePop();
-          }
-        },
+        // Sortir de l'écran ne supprime PAS la partie : elle reste ouverte.
+        // Pour la supprimer, utiliser le bouton « Supprimer la partie ».
+        onPressed: () => Navigator.of(context).maybePop(),
         icon: const Icon(Icons.arrow_back, color: Colors.white),
       ),
       const GameInfoButton(gameKey: 'fapfap'),
@@ -6128,7 +6306,10 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
           ),
           TextButton(
             onPressed: _leave,
-            child: Text(tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
+            child: Text(
+                _v?['hostUid'] == _me
+                    ? tr('Supprimer la partie (mise remboursée)', 'Delete game (stake refunded)')
+                    : tr('Quitter (mise remboursée)', 'Leave (stake refunded)'),
                 style: const TextStyle(color: Colors.white70)),
           ),
         ]),
@@ -6148,6 +6329,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
     final lost = !won && players.any((p) => p['uid'] == _me);
+    final nid = ('${v['nextId'] ?? ''}' == 'null') ? '' : '${v['nextId'] ?? ''}';
     final lostAmt = v['corat'] == true ? 0 : stake;
     String nm = '?';
     for (final p in players) {
@@ -6168,6 +6350,11 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
             lost: lost,
             amount: lost ? lostAmt : (stake > 0 ? prize * winners.length : 0),
             balance: s.hasData ? s.data : null,
+            onReplay: !players.any((p) => p['uid'] == _me) ? null : () => _goNext(() => nid.isEmpty ? Wallet.cardsRematch(widget.gameId) : Wallet.cardsJoin(gameId: nid)),
+            replayNeed: stake * ((v['game'] == 'fapfap' || v['game'] == 'anticote') ? 2 : 1),
+            onBack: () => Navigator.of(context).maybePop(),
+            rows: [for (final p in players) _RpRow('${p['name']}', p['uid'] == _me)],
+            nextOpened: nid.isNotEmpty,
           ),
         ),
       ),

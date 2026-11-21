@@ -2384,7 +2384,7 @@ class _OnlineRoomState extends State<_OnlineRoom> {
         final stake = (d['stake'] as num?)?.toInt() ?? 0;
 
         return PopScope(
-          canPop: stake == 0 || over || seat < 0,
+          canPop: stake == 0 || over || seat < 0 || d['status'] == 'waiting',
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
               ScaffoldMessenger.of(context).showSnackBar(

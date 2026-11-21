@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -307,6 +308,34 @@ class RematchPanel extends StatefulWidget {
 class _RematchPanelState extends State<RematchPanel> {
   final String uid = FirebaseAuth.instance.currentUser?.uid ?? '';
   bool _busy = false;
+  // Délai pour rejouer (1 min 30) et solde du joueur (pour « Solde insuffisant »).
+  static const int _kSeconds = 90;
+  int _left = _kSeconds;
+  Timer? _cd;
+  StreamSubscription<int>? _balSub;
+  int? _bal;
+
+  @override
+  void initState() {
+    super.initState();
+    _cd = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _left > 0) setState(() => _left--);
+    });
+    if (uid.isNotEmpty) {
+      _balSub = Wallet.watch(uid).listen((b) {
+        if (mounted) setState(() => _bal = b);
+      }, onError: (Object _) {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _cd?.cancel();
+    _balSub?.cancel();
+    super.dispose();
+  }
+
+  static String _clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
   bool _joinStarted = false;
   String? _error;
 
@@ -413,9 +442,14 @@ class _RematchPanelState extends State<RematchPanel> {
     final accepted = _accepted.length;
     final stake = (widget.data['stake'] as num?)?.toInt() ?? 0;
     final next = _next;
+    final low = stake > 0 && _bal != null && _bal! < stake;
+    final timeUp = _left <= 0;
 
     Widget action;
-    if (me == null) {
+    if (me == null && timeUp) {
+      action = Text(tr('Temps écoulé : le délai pour rejouer est terminé.', 'Time is up: the replay window has closed.'),
+          style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12, fontWeight: FontWeight.w700));
+    } else if (me == null) {
       action = Row(
         children: [
           Expanded(
@@ -435,8 +469,8 @@ class _RematchPanelState extends State<RematchPanel> {
                 backgroundColor: const Color(0xFF22B14C),
                 foregroundColor: Colors.white,
               ),
-              onPressed: () => _vote(true),
-              child: const Text('Rejouer'),
+              onPressed: low ? null : () => _vote(true),
+              child: Text(low ? tr('Solde insuffisant', 'Insufficient balance') : 'Rejouer'),
             ),
           ),
         ],
@@ -503,7 +537,19 @@ class _RematchPanelState extends State<RematchPanel> {
     }
 
     return _box([
-      Text(tr('🔁 Rejouer ?', '🔁 Play again?'), style: _title),
+      Row(children: [
+        Expanded(child: Text(tr('🔁 Rejouer ?', '🔁 Play again?'), style: _title)),
+        if (next == null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: timeUp ? const Color(0xFFB3261E) : (_left <= 15 ? const Color(0xFFEF6C00) : const Color(0xFF1E6BFF)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text('⏱ ${_clock(_left)}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+          ),
+      ]),
       if (stake > 0)
         Padding(
           padding: const EdgeInsets.only(top: 2),
@@ -528,7 +574,14 @@ class _RematchPanelState extends State<RematchPanel> {
               Text(
                 votes[p['uid']] == true
                     ? '✅'
-                    : (votes[p['uid']] == false ? '❌' : '⏳'),
+                    : (votes[p['uid']] == false
+                        ? '❌'
+                        : (p['uid'] == uid && low ? tr('Solde insuffisant', 'Insufficient balance') : '⏳')),
+                style: TextStyle(
+                  color: p['uid'] == uid && low && votes[p['uid']] == null ? const Color(0xFFFF8A80) : Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
