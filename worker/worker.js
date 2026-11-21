@@ -1061,7 +1061,6 @@ async function pushNewGame(env, hostUid, info) {
     );
     if (sent === 0 && firstErr) {
       console.error('pushNewGame', firstErr);
-      later(env, notifyAdmin(env, `⚠️ Notification « nouvelle partie ${label} » : 0/${targets.length} envoyée(s). ${firstErr}`));
     }
     if (dead.length) {
       await runTx(env, async (tx) => {
@@ -1871,6 +1870,19 @@ async function sideBetCancel({ uid, data, env }) {
  *  Appelée par les appareils à chaque lancer et en fin de partie ;
  *  sans danger si elle est appelée plusieurs fois.
  *  La commission de chaque pari gagné est ajoutée à la partie (betCommission). */
+/** Avis de gain / perte d'un pari, affiché chez le joueur (+gain net ou −mise) avec son nouveau solde.
+ *  Le solde est lu par l'appli dans le même document (users/{uid}), donc toujours à jour. */
+function betNote(tx, uid, delta, label, detail) {
+  if (!uid || !delta) return;
+  tx.write(`users/${uid}`, { set: { betNotice: { id: newId(), delta, label, detail: detail || '', at: Date.now() } } });
+}
+function betNoteWinLose(tx, b, winner, label) {
+  const loser = winner === b.proposerUid ? b.opponentUid : b.proposerUid;
+  const cut = 2 * b.amount - b.prize;
+  betNote(tx, winner, b.prize - b.amount, label, cut > 0 ? `commission ${cut} FCFA déduite` : '');
+  betNote(tx, loser, -b.amount, label, '');
+}
+
 async function sideBetSync({ uid, data, env }) {
   const roomId = idStr(data.roomId);
   if (!roomId) throw new HttpError('invalid-argument', 'Partie invalide.');
@@ -1925,6 +1937,7 @@ async function sideBetSync({ uid, data, env }) {
         tx.write(path, { set: { status: 'settled', result: 'refund' }, serverTime: ['closedAt'] });
       } else {
         tx.write(`users/${winner}`, { incr: { balance: b.prize } });
+        betNoteWinLose(tx, b, winner, b.type === 'seven' ? 'Défi 7' : 'Duel');
         // Les paris (Duel, Défi 7) comptent dans le total misé des deux joueurs.
         tx.write(`users/${b.proposerUid}`, { incr: { wagered: b.amount } });
         tx.write(`users/${b.opponentUid}`, { incr: { wagered: b.amount } });
@@ -3780,6 +3793,52 @@ async function adminReviveGames({ uid, env }) {
 }
 
 /** Transfert d'argent d'un joueur vers un autre (par pseudo ou code promo). */
+/** Suggestions de destinataires : dès 2 caractères, joueurs dont le code promo (= pseudo)
+ *  commence par ce texte. On ne renvoie que le pseudo et le code, jamais l'identifiant. */
+async function searchPlayers({ uid, data, env }) {
+  const q = String(data.q || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 30);
+  if (q.length < 2) return { players: [] };
+  const col = (id) => docName(env, `promoCodes/${id}`);
+  const res = await fsCall(env, 'runQuery', {
+    structuredQuery: {
+      from: [{ collectionId: 'promoCodes' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: '__name__' }, op: 'GREATER_THAN_OR_EQUAL', value: { referenceValue: col(q) } } },
+            { fieldFilter: { field: { fieldPath: '__name__' }, op: 'LESS_THAN', value: { referenceValue: col(q + '\uf8ff') } } },
+          ],
+        },
+      },
+      orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+      limit: 8,
+    },
+  });
+  const rows = (Array.isArray(res) ? res : [])
+    .filter((r) => r.document)
+    .map((r) => ({ code: r.document.name.split('/').pop(), ...fieldsToObj(r.document.fields || {}) }))
+    .filter((r) => typeof r.uid === 'string' && r.uid !== uid);
+  if (!rows.length) return { players: [] };
+  const got = await fsCall(env, 'batchGet', { documents: rows.map((r) => docName(env, `users/${r.uid}`)) });
+  const byName = {};
+  for (const g of Array.isArray(got) ? got : []) {
+    if (g.found) byName[g.found.name.split('/').pop()] = fieldsToObj(g.found.fields || {});
+  }
+  const players = rows
+    .map((r) => {
+      const u = byName[r.uid] || {};
+      return { name: String(u.pseudo || r.code), code: r.code };
+    })
+    .slice(0, 8);
+  return { players };
+}
+
 async function transfer({ uid, data, env }) {
   const amount = intOr(data.amount, -1);
   if (amount < TRANSFER_MIN || amount > TRANSFER_MAX) {
@@ -6118,6 +6177,18 @@ function fapLegal(hand, trick) {
   return same.length ? same : [...hand];
 }
 
+/** Prochain joueur à jouer dans le pli (ceux « en passe » sont sautés) ; -1 si le pli est complet. */
+function fapNextIdx(d, trick, passedUids) {
+  const seq = d.seq || [];
+  const leader = intOr(d.leaderIdx, 0);
+  for (let k = 0; k < seq.length; k++) {
+    const idx = (leader + k) % seq.length;
+    const u = seq[idx];
+    if (!trick.some((t) => t.uid === u) && !passedUids.includes(u)) return idx;
+  }
+  return -1;
+}
+
 /** Joue la carte `card` pour `uid`. Renvoie le patch Firestore. */
 function fapPlay(d, uid, card) {
   const seq = d.seq || [];
@@ -6133,12 +6204,28 @@ function fapPlay(d, uid, card) {
   const hands = { ...(d.hands || {}), [uid]: hand };
   const tbl = { ...(d.tbl || {}) };
   tbl[uid] = [...(tbl[uid] || []), card];
-  const patch = { hands, trick, tbl, turnAt: Date.now() };
-  let leaderIdx = intOr(d.leaderIdx, 0);
-  if (trick.length < seq.length) {
-    patch.turnIdx = (leaderIdx + trick.length) % seq.length;
+  return fapAfter(d, { hands, trick, tbl, turnAt: Date.now() });
+}
+
+/** Suite d'un coup : joueur suivant, ou fin du pli. Les joueurs « en passe » jouent leur carte
+ *  gardée à la toute fin du pli (elle ne peut pas gagner), puis le gagnant entame. */
+function fapAfter(d, patch) {
+  const seq = d.seq || [];
+  const passed = Array.isArray(d.passed) ? d.passed : [];
+  const nxt = fapNextIdx(d, patch.trick, passed.map((p) => p.uid));
+  if (nxt >= 0) {
+    patch.turnIdx = nxt;
     return patch;
   }
+  const hands = patch.hands;
+  const trick = patch.trick;
+  const tbl = patch.tbl;
+  for (const p of passed) {
+    hands[p.uid] = (hands[p.uid] || []).filter((c) => c !== p.card);
+    trick.push({ uid: p.uid, card: p.card });
+    tbl[p.uid] = [...(tbl[p.uid] || []), p.card];
+  }
+  patch.passed = [];
   // pli complet : le plus haut de la famille demandée l'emporte
   const lead = cardSuit(trick[0].card);
   let win = trick[0];
@@ -6166,7 +6253,7 @@ function fapPlay(d, uid, card) {
   const ea = d.early && d.early.uid === win.uid && lh.includes(d.early.card) ? d.early.card : -1;
   const auto = ea >= 0 ? ea : lh.length === 1 ? lh[0] : -1;
   if (auto >= 0) {
-    const p2 = fapPlay({ ...d, ...patch, early: null }, win.uid, auto);
+    const p2 = fapPlay({ ...d, ...patch, passed: [], early: null }, win.uid, auto);
     return { ...patch, ...p2, early: null };
   }
   return patch;
@@ -6197,6 +6284,7 @@ function fapEarly(d, uid, card) {
 function fapPassCard(d, uid) {
   if (!d || d.game !== 'fapfap' || d.status !== 'playing' || d.over === true) return -1;
   if (intOr(d.trickNo, 0) !== 3) return -1;
+  if ((Array.isArray(d.passed) ? d.passed : []).some((p) => p.uid === uid)) return -1;
   const trick = Array.isArray(d.trick) ? d.trick : [];
   const hand = (d.hands && d.hands[uid]) || [];
   if (!trick.length || hand.length !== 2) return -1;
@@ -6207,6 +6295,22 @@ function fapPassCard(d, uid) {
   if (!ok.length) return -1;
   ok.sort((a, b) => cardVal(a) - cardVal(b) || a - b);
   return ok[0];
+}
+
+/** « Passe » : le joueur garde ses 2 cartes ; la carte qui ne peut pas gagner est jouée à la fin du pli,
+ *  sa dernière carte au pli suivant. Les adversaires voient qu'il est en passe. */
+function fapPass(d, uid) {
+  const pc = fapPassCard(d, uid);
+  if (pc < 0) throw new HttpError('failed-precondition', 'Tu ne peux pas passer : il te faut un 3 ou une carte plus petite que la famille demandée.');
+  const d2 = { ...d, passed: [...(Array.isArray(d.passed) ? d.passed : []), { uid, card: pc }] };
+  const patch = {
+    passed: d2.passed,
+    hands: { ...(d.hands || {}) },
+    trick: [...(Array.isArray(d.trick) ? d.trick : [])],
+    tbl: { ...(d.tbl || {}) },
+    turnAt: Date.now(),
+  };
+  return fapAfter(d2, patch);
 }
 
 /** Délai dépassé : on joue la plus faible carte légale. */
@@ -6815,6 +6919,7 @@ function cardsView(id, g, uid) {
       ? {
           myHand: ((g.hands && g.hands[uid]) || []).filter((c) => !(g.early && g.early.uid === uid && g.early.card === c)),
           early: g.early || null,
+          passedUids: (Array.isArray(g.passed) ? g.passed : []).map((p) => p.uid),
           earlyOk: fapEarlyOptions(g, uid),
           canPass: turnUid === uid && fapPassCard(g, uid) >= 0,
           showPass: turnUid === uid && intOr(g.trickNo, 0) === 3 && Array.isArray(g.trick) && g.trick.length > 0 && ((g.hands && g.hands[uid]) || []).length === 2,
@@ -7046,6 +7151,10 @@ async function cardsChatSettle(tx, gid, g, set) {
   const commission = pool - each * winners.length; // commission 5 % + arrondi du partage
   for (const w of winners) tx.write(`users/${w.uid}`, { incr: { balance: each } });
   for (const e of valid) tx.write(`users/${e.uid}`, { incr: { wagered: amount } });
+  for (const e of valid) {
+    if (winners.some((x) => x.uid === e.uid)) betNote(tx, e.uid, each - amount, 'Pari CHAT', commission > 0 ? `commission ${commission} FCFA déduite` : '');
+    else betNote(tx, e.uid, -amount, 'Pari CHAT', '');
+  }
   const ref = await referralPayout(tx, valid.map((e) => e.uid), commission, { gameId: gid, mode: 'chat', ref: gid });
   await houseAdd(tx, commission - ref.referral - ref.partner);
   set.betCommission = Math.max(0, intOr(g.betCommission, 0)) + commission;
@@ -7258,6 +7367,7 @@ async function cardsBetsSync(env, gid) {
         tx.write(path, { set: { status: 'settled', result: 'refund' }, serverTime: ['closedAt'] });
       } else {
         tx.write(`users/${winner}`, { incr: { balance: b.prize } });
+        betNoteWinLose(tx, b, winner, b.type === 'fetiche' ? 'Fétiche' : b.type === 'seven' ? 'Défi 7' : 'Duel');
         tx.write(`users/${b.proposerUid}`, { incr: { wagered: b.amount } });
         tx.write(`users/${b.opponentUid}`, { incr: { wagered: b.amount } });
         tx.write(`cards/${gid}`, { incr: { betCommission: 2 * b.amount - b.prize } });
@@ -7693,9 +7803,7 @@ async function cardsPlay({ uid, data, env }) {
     }
     if (cur !== uid) throw new HttpError('failed-precondition', "Ce n'est pas encore ton tour.");
     if (data.pass === true && d.game === 'fapfap') {
-      const pc = fapPassCard(d, uid);
-      if (pc < 0) throw new HttpError('failed-precondition', 'Tu ne peux pas passer : il te faut un 3 ou une carte plus petite que la famille demandée.');
-      tx.write(path, { set: fapPlay(d, uid, pc) });
+      tx.write(path, { set: fapPass(d, uid) });
       return;
     }
     if (d.game === 'tchek') {
@@ -9643,9 +9751,12 @@ async function adminDebitAccount({ uid, data, env }) {
     const before = balanceOf(u);
     if (amount > before) throw new HttpError('failed-precondition', `Solde insuffisant : ce joueur a ${before} FCFA.`);
     tx.write(`users/${target}`, { incr: { balance: -amount } });
+    // L'argent retiré revient dans le compte joueur de l'administrateur.
+    const toAdmin = target !== uid;
+    if (toAdmin) tx.write(`users/${uid}`, { incr: { balance: amount } });
     tx.write(`admin_debits/${newId()}`, {
       create: true,
-      set: { uid: target, pseudo: tournName(u), amount, before, after: before - amount, by: uid, reason },
+      set: { uid: target, pseudo: tournName(u), amount, before, after: before - amount, by: uid, reason, creditedToAdmin: toAdmin },
       serverTime: ['createdAt'],
     });
     return { ok: true, balance: before - amount };
@@ -9903,6 +10014,7 @@ const HANDLERS = {
   partnerStats,
   partnerWithdraw,
   transfer,
+  searchPlayers,
   adminTournamentCreate,
   tournamentList,
   tournamentRegister,
