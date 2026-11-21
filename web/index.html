@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Katika - Dés et Ludo by CKY">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#061A66">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Katika">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <title>Katika</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #061A66; }
+    /* Écran de chargement : fond bleu et rond qui tourne, caché dès que l'appli s'affiche. */
+    #katika-boot {
+      position: fixed; inset: 0; z-index: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(180deg, #1F5BFF 0%, #0B2FA6 55%, #061A66 100%);
+      color: #FFC21A; font: italic 900 38px Roboto, Arial, sans-serif; letter-spacing: 1px;
+    }
+    #katika-boot .ring {
+      margin-top: 22px; width: 44px; height: 44px; border-radius: 50%;
+      border: 5px solid rgba(255, 255, 255, 0.25); border-top-color: #FFC21A;
+      animation: katika-spin 0.9s linear infinite;
+    }
+    @keyframes katika-spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="katika-boot"><div>Katika</div><div class="ring"></div></div>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
