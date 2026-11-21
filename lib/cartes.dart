@@ -6383,6 +6383,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final legal = {for (final x in (v['legal'] as List? ?? [])) (x as num).toInt()};
     final earlyOk = {for (final x in (v['earlyOk'] as List? ?? [])) (x as num).toInt()};
     final canPass = v['canPass'] == true && myTurn;
+    final showPass = (v['showPass'] == true || canPass) && myTurn;
     final trick = [for (final t in (v['trick'] as List? ?? [])) Map<String, dynamic>.from(t as Map)];
     final prev = v['prevTrick'] is Map ? Map<String, dynamic>.from(v['prevTrick'] as Map) : null;
     final n = players.length;
@@ -6529,7 +6530,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                   style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
-                if (canPass)
+                if (showPass)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: SizedBox(
@@ -6537,11 +6538,18 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                       height: 44,
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: _gold,
-                          side: const BorderSide(color: _gold, width: 2),
+                          foregroundColor: canPass ? _gold : Colors.white38,
+                          side: BorderSide(color: canPass ? _gold : Colors.white24, width: 2),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
-                        onPressed: _busy ? null : _passTurn,
+                        onPressed: _busy
+                            ? null
+                            : (canPass
+                                ? _passTurn
+                                : () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                    content: Text(tr(
+                                        'Tu ne peux pas passer : il te faut un 3 ou une carte plus petite que la famille demandée.',
+                                        'You cannot pass: you need a 3 or a card lower than the led suit.'))))),
                         icon: const Icon(Icons.skip_next),
                         label: Text(tr('Passe (je laisse jouer la dernière carte)', 'Pass (let the last card be played)'),
                             style: const TextStyle(fontWeight: FontWeight.w900)),

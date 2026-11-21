@@ -1757,12 +1757,13 @@ class _SetupScreenState extends State<SetupScreen> {
     Icons.local_fire_department,
     Icons.music_note,
   ];
-  static const List<String> colorNames = ['Rouge', 'Vert', 'Bleu', 'Jaune'];
+  // Sens horaire : Rouge, Vert, Jaune, Bleu → Rouge face à Jaune, Vert face à Bleu.
+  static const List<String> colorNames = ['Rouge', 'Vert', 'Jaune', 'Bleu'];
   static const List<Color> colorList = [
     Color(0xFFE5262B),
     Color(0xFF22B14C),
-    Color(0xFF1E6BFF),
     Color(0xFFFFC21A),
+    Color(0xFF1E6BFF),
   ];
 
   late final List<TextEditingController> nameCtrls;
@@ -2325,7 +2326,7 @@ class LudoGame extends StatefulWidget {
   final int autoSecs;
   final OnlineSession? online; // null = jeu en présentiel
 
-  /// Pseudos choisis, indexés par couleur (Rouge, Vert, Bleu, Jaune).
+  /// Pseudos choisis, indexés par couleur (Rouge, Vert, Jaune, Bleu).
   /// Une chaîne vide = nom par défaut.
   final List<String>? names;
 
@@ -3476,8 +3477,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     }
   }
 
-  /// Joueurs de la partie au départ : 2 = Rouge + Bleu (face à face),
-  /// 3 = Rouge + Vert + Bleu, 4 = tous.
+  /// Joueurs de la partie au départ : 2 = Rouge + Jaune (face à face),
+  /// 3 = Rouge + Vert + Jaune, 4 = tous.
   List<int> get baseIdx => numPlayers == 2
       ? [0, 2]
       : (numPlayers == 3 ? [0, 1, 2] : [0, 1, 2, 3]);
@@ -3494,7 +3495,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   final GlobalKey boardKey = GlobalKey();
   final List<GlobalKey> diceKeys = List.generate(4, (_) => GlobalKey());
 
-  // Ordre des tours (sens horaire) : Rouge, Vert, Bleu, Jaune
+  // Ordre des tours (sens horaire) : Rouge, Vert, Jaune, Bleu
   late final List<Player> players = [
     Player(
       display: 'Rouge',
@@ -3511,16 +3512,16 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       avatar: Icons.face,
     ),
     Player(
-      display: 'Bleu',
-      color: const Color(0xFF1E6BFF),
-      lightColor: const Color(0xFFDFEAFF),
+      display: 'Jaune',
+      color: const Color(0xFFFFC21A),
+      lightColor: const Color(0xFFFFF3CC),
       start: 26,
       avatar: Icons.face_3,
     ),
     Player(
-      display: 'Jaune',
-      color: const Color(0xFFFFC21A),
-      lightColor: const Color(0xFFFFF3CC),
+      display: 'Bleu',
+      color: const Color(0xFF1E6BFF),
+      lightColor: const Color(0xFFDFEAFF),
       start: 39,
       avatar: Icons.person_outline,
     ),
@@ -4114,7 +4115,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   /// Quarts de tour dont le plateau est tourné pour que MA base soit en bas
-  /// à droite (en ligne). Rouge = 2, Vert = 1, Bleu = 0, Jaune = 3.
+  /// à droite (en ligne). Rouge = 2, Vert = 1, Jaune = 0, Bleu = 3.
   int get _rot => (isOnline && !isSpectator) ? ((2 - _myBaseColor) % 4) : 0;
 
   /// Tourne un point (ligne, colonne) du plateau de [_rot] quarts de tour
@@ -4462,9 +4463,11 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                   ),
                   ...buildBaseLogos(c, rot: _rot, labels: [
                     for (int p = 0; p < 4; p++)
-                      activeIdx.contains(p)
-                          ? '${nameOf(p)} (${(progressOf(players[p]) * 100).round()}%)'
-                          : null,
+                      forfeited.contains(p) && baseIdx.contains(p)
+                          ? 'FORFAIT'
+                          : (activeIdx.contains(p)
+                              ? '${nameOf(p)} (${(progressOf(players[p]) * 100).round()}%)'
+                              : null),
                   ]),
                   ...buildPawns(c),
                   ...buildArrival(c),

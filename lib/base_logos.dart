@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
 
 // ----------------------------------------------------------------------
-// Logos Katika dans les 4 bases du plateau (Rouge, Vert, Bleu, Jaune).
+// Logos Katika dans les 4 bases du plateau (Rouge, Vert, Jaune, Bleu).
 // Les images sont dans le dossier assets/ (voir pubspec.yaml).
 // ----------------------------------------------------------------------
 
-/// Un logo par couleur, dans l'ordre des joueurs : Rouge, Vert, Bleu, Jaune.
+/// Un logo par couleur, dans l'ordre des joueurs : Rouge, Vert, Jaune, Bleu.
 const List<String> kBaseLogos = [
   'assets/katika_logo_rouge.png',
   'assets/katika_logo.png', // vert
-  'assets/katika_logo_bleu.png',
   'assets/katika_logo_jaune.png',
+  'assets/katika_logo_bleu.png',
 ];
 
 /// Dessine chaque logo au centre de sa base. [c] = taille d'une case.
 /// À placer dans le Stack du plateau, AVANT les pions (ils passent dessus).
 /// [labels] : texte à écrire en haut de chaque base (ex. « landry (35%) »),
-/// dans l'ordre Rouge, Vert, Bleu, Jaune ; null = pas de texte (joueur absent).
+/// dans l'ordre Rouge, Vert, Jaune, Bleu ; null = pas de texte (joueur absent).
 List<Widget> buildBaseLogos(double c, {List<String?>? labels, int rot = 0}) {
   const double size = 3.4; // taille du logo, en cases (la base fait 6 cases)
   const double offset = (6 - size) / 2; // centré dans la base
@@ -33,18 +33,32 @@ List<Widget> buildBaseLogos(double c, {List<String?>? labels, int rot = 0}) {
             child: IgnorePointer(
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(
-                  labels[p]!,
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: c * 0.62,
-                    fontWeight: FontWeight.w900,
-                    shadows: const [
-                      Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(0, 1.5)),
-                    ],
-                  ),
-                ),
+                child: labels[p] == 'FORFAIT'
+                    ? Container(
+                        padding: EdgeInsets.symmetric(horizontal: c * 0.5, vertical: c * 0.1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD32F2F),
+                          borderRadius: BorderRadius.circular(c * 0.3),
+                          border: Border.all(color: Colors.white70, width: 1.5),
+                        ),
+                        child: Text(
+                          'FORFAIT',
+                          maxLines: 1,
+                          style: TextStyle(color: Colors.white, fontSize: c * 0.6, fontWeight: FontWeight.w900),
+                        ),
+                      )
+                    : Text(
+                        labels[p]!,
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: c * 0.62,
+                          fontWeight: FontWeight.w900,
+                          shadows: const [
+                            Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(0, 1.5)),
+                          ],
+                        ),
+                      ),
               ),
             ),
           ),
