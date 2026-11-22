@@ -296,11 +296,16 @@ class DeuxDesPage extends StatelessWidget {
         final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
         if (!firebaseReady) return Stream.value(const <HubGame>[]);
         return _rooms.where('status', isEqualTo: 'waiting').limit(30).snapshots().map((q) {
+          int ms(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+            final t = d.data()['createdAt'];
+            return t is Timestamp ? t.millisecondsSinceEpoch : 0;
+          }
+
           final docs = q.docs
               .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
               .where((d) => d.data()['private'] != true)
               .toList()
-            ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+            ..sort((a, b) => ms(b).compareTo(ms(a)));
           return [
             for (final d in docs)
               HubGame(
