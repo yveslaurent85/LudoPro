@@ -96,6 +96,14 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
+      // Bandeau 1xBet (728x90) collé en bas : il est posé par web/index.html ;
+      // l'appli laisse la même hauteur libre pour ne rien cacher.
+      builder: (context, child) {
+        if (!kIsWeb) return child ?? const SizedBox.shrink();
+        final w = MediaQuery.of(context).size.width;
+        final h = 90.0 * (w >= 728 ? 1.0 : w / 728);
+        return Padding(padding: EdgeInsets.only(bottom: h), child: child);
+      },
       home: const SharedLinkGate(child: CashierGate(child: CityGate(child: HomeScreen()))),
     );
   }
