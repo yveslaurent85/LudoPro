@@ -1590,7 +1590,7 @@ class _LudoModePage extends StatelessWidget {
       accent: const Color(0xFF22B14C),
       infoKey: 'ludo',
       onPresentiel: onLocal,
-      onOnline: () => _push(context, const OnlineScreen()),
+      onOnline: (mode) => _push(context, OnlineLobbyScreen(startMode: mode)),
       onTournois: () => _push(context, const TournamentsScreen()),
       onJoin: (g) => _push(context, OnlineLobbyScreen(joinId: g.id)),
       source: () {

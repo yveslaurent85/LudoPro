@@ -51,7 +51,8 @@ class GameHubPage extends StatefulWidget {
   final Color accent;
   final String? infoKey;
   final VoidCallback? onPresentiel; // null : jeu 100 % en ligne
-  final VoidCallback onOnline; // créer ou rejoindre (salon en ligne)
+  /// Salon en ligne ; [mode] : « create », « code » (partie privée) ou « live » (en direct).
+  final void Function(String mode) onOnline;
   final VoidCallback? onTournois;
   final void Function(HubGame game) onJoin;
   final Stream<List<HubGame>> Function() source;
@@ -62,6 +63,7 @@ class GameHubPage extends StatefulWidget {
 
 class _GameHubPageState extends State<GameHubPage> {
   late final Stream<List<HubGame>> _stream = widget.source();
+  bool _menu = false; // menu « Créer ou rejoindre » déplié
 
   Widget _chip(String label, IconData icon, Color bg, Color fg, VoidCallback? f, {bool outline = false}) {
     return Padding(
@@ -162,6 +164,32 @@ class _GameHubPageState extends State<GameHubPage> {
     );
   }
 
+  Widget _menuItem(IconData icon, Color color, String label, String mode, bool line) {
+    return InkWell(
+      onTap: () {
+        setState(() => _menu = false);
+        widget.onOnline(mode);
+      },
+      child: Container(
+        height: 62,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          border: line ? const Border(bottom: BorderSide(color: _hubLine)) : null,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 18),
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(color: _hubInk, fontSize: 17, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _pill(String t, Color bg, Color fg) => Container(
         margin: const EdgeInsets.only(left: 6),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -255,7 +283,8 @@ class _GameHubPageState extends State<GameHubPage> {
                         children: [
                           Expanded(
                             child: _bigButton(tr('Créer ou rejoindre en ligne', 'Create or join online'),
-                                Icons.add_circle_outline, _hubBlue, widget.onOnline),
+                                _menu ? Icons.keyboard_arrow_up : Icons.add_circle_outline, _hubBlue,
+                                () => setState(() => _menu = !_menu)),
                           ),
                           const SizedBox(width: 10),
                           Container(
@@ -278,6 +307,25 @@ class _GameHubPageState extends State<GameHubPage> {
                           ),
                         ],
                       ),
+                      if (_menu) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: _hubLine),
+                            boxShadow: const [BoxShadow(color: Color(0x1F12183A), blurRadius: 18, offset: Offset(0, 8))],
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
+                            children: [
+                              _menuItem(Icons.add_box_outlined, _hubGreen, tr('Créer une nouvelle partie', 'Create a new game'), 'create', true),
+                              _menuItem(Icons.vpn_key_outlined, _hubBlue, tr('Rejoindre cette partie privée ?', 'Join a private game?'), 'code', true),
+                              _menuItem(Icons.sensors, _hubRed, tr('En direct', 'Live'), 'live', false),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Container(
                         decoration: BoxDecoration(

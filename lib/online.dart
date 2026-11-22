@@ -342,7 +342,10 @@ Widget _tile(
 // ----------------------------------------------------------------------
 
 class OnlineLobbyScreen extends StatefulWidget {
-  const OnlineLobbyScreen({super.key, this.joinId});
+  const OnlineLobbyScreen({super.key, this.joinId, this.startMode});
+
+  /// « create » : options de création ouvertes ; « live » : parties en cours dépliées.
+  final String? startMode;
 
   /// Partie à rejoindre dès l'ouverture (depuis la liste de la page du jeu).
   final String? joinId;
@@ -386,6 +389,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.startMode == 'create') creating = true;
+    if (widget.startMode == 'live') showLive = true;
     final j = widget.joinId;
     if (j != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

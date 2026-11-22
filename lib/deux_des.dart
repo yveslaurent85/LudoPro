@@ -281,14 +281,14 @@ class DeuxDesPage extends StatelessWidget {
       accent: const Color(0xFFE07B00),
       infoKey: 'deuxdes',
       onPresentiel: () => _go(context, (_) => const _LocalSetup()),
-      onOnline: () {
+      onOnline: (mode) {
         if (!firebaseReady) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Le jeu en ligne est indisponible.')),
           );
           return;
         }
-        _go(context, (_) => const _OnlineHub());
+        _go(context, (_) => _OnlineHub(startMode: mode));
       },
       onTournois: () => _go(context, (_) => const TournamentsScreen()),
       onJoin: (g) => _go(context, (_) => _OnlineHub(joinId: g.id)),
@@ -1539,9 +1539,10 @@ class _LocalGameState extends State<_LocalGame> {
 // ----------------------------------------------------------------------
 
 class _OnlineHub extends StatefulWidget {
-  const _OnlineHub({this.joinId});
+  const _OnlineHub({this.joinId, this.startMode});
 
   final String? joinId;
+  final String? startMode;
 
   @override
   State<_OnlineHub> createState() => _OnlineHubState();
@@ -1571,6 +1572,8 @@ class _OnlineHubState extends State<_OnlineHub> {
   @override
   void initState() {
     super.initState();
+    if (widget.startMode == 'create') creating = true;
+    if (widget.startMode == 'live') showLive = true;
     final j = widget.joinId;
     if (j != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

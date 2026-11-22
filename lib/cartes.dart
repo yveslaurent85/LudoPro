@@ -1246,7 +1246,7 @@ class _CardModePage extends StatelessWidget {
                 (_) => game == 'tiah' ? const TiahLocalPage() : const BoubayahLocalPage(),
               )
           : null,
-      onOnline: () => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game)),
+      onOnline: (mode) => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game, startMode: mode)),
       onTournois: () => _pushLoggedIn(context, (_) => const TournamentsScreen()),
       onJoin: (g) => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game, joinId: g.id, joinStake: g.stake)),
       source: () async* {
@@ -2845,9 +2845,10 @@ String? _firstOf(Iterable<String> i) => i.isEmpty ? null : i.first;
 String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : (g == 'fapfap' ? 'FAP-FAP' : (g == 'anticote' ? 'ANTI-COTE' : (g == 'tchek' ? 'TCHEK GAMES' : 'BOUBAYAH')));
 
 class CardsOnlineHub extends StatefulWidget {
-  const CardsOnlineHub({super.key, required this.game, this.joinId, this.joinStake = 0});
+  const CardsOnlineHub({super.key, required this.game, this.joinId, this.joinStake = 0, this.startMode});
 
   final String game;
+  final String? startMode;
 
   /// Partie à rejoindre dès l'ouverture (depuis la liste de la page du jeu).
   final String? joinId;
@@ -2878,6 +2879,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
     super.initState();
     _load();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load(light: true));
+    if (widget.startMode == 'create') _creating = true;
     final j = widget.joinId;
     if (j != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
