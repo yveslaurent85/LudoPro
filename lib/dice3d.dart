@@ -178,47 +178,75 @@ class _Die3DPainter extends CustomPainter {
             n[2] + a * u[2] + b * v[2],
           ];
 
-      final path = Path();
-      const corners = [
-        [-1.0, -1.0],
-        [1.0, -1.0],
-        [1.0, 1.0],
-        [-1.0, 1.0],
-      ];
-      for (int i = 0; i < 4; i++) {
-        final o = proj(at(corners[i][0], corners[i][1]));
-        if (i == 0) {
-          path.moveTo(o.dx, o.dy);
-        } else {
-          path.lineTo(o.dx, o.dy);
+      // Face en carré aux coins bien arrondis (comme un vrai dé).
+      const double rr = 0.30; // rayon des coins
+      const int seg = 6;
+      final pts = <Offset>[];
+      for (int c = 0; c < 4; c++) {
+        final cxs = (c == 0 || c == 3) ? -1.0 : 1.0;
+        final cys = (c < 2) ? -1.0 : 1.0;
+        final a0 = pi + c * pi / 2; // début de l'arc du coin c
+        final ccx = cxs * (1 - rr);
+        final ccy = cys * (1 - rr);
+        for (int i = 0; i <= seg; i++) {
+          final ang = a0 + (pi / 2) * i / seg;
+          pts.add(proj(at(ccx + rr * cos(ang), ccy + rr * sin(ang))));
         }
+      }
+      final path = Path()..moveTo(pts.first.dx, pts.first.dy);
+      for (final o in pts.skip(1)) {
+        path.lineTo(o.dx, o.dy);
       }
       path.close();
 
       final b = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2])
           .clamp(0.0, 1.0)
           .toDouble();
-      final face = Color.lerp(const Color(0xFFAEB7D3), Colors.white, b)!;
+      final face = Color.lerp(const Color(0xFFA9B3D6), const Color(0xFFFFFCF2), b)!;
+      final bounds = path.getBounds();
 
-      canvas.drawPath(path, Paint()..color = face);
+      // Fond de la face : dégradé doux (lumière en haut à gauche) + léger reflet.
+      canvas.drawPath(
+        path,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color.lerp(face, Colors.white, 0.55)!,
+              face,
+              Color.lerp(face, const Color(0xFF6F7AA3), 0.28)!,
+            ],
+            stops: const [0.0, 0.55, 1.0],
+          ).createShader(bounds),
+      );
+      // Liseré de couleur du joueur + fine ligne de relief.
       canvas.drawPath(
         path,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = max(1.2, size.width * 0.03)
+          ..strokeWidth = max(1.4, size.width * 0.035)
           ..strokeJoin = StrokeJoin.round
-          ..color = const Color(0xFF8F99B8),
+          ..color = Color.lerp(color, const Color(0xFF2A3358), 0.55)!,
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = max(0.8, size.width * 0.012)
+          ..color = Colors.white.withOpacity(0.55 * b + 0.1),
       );
 
-      // Points
+      // Points : billes brillantes (le 1 est plus gros, à la couleur du joueur).
+      final isOne = f[0].toInt() == 1;
+      final pipR = isOne ? 0.27 : 0.19;
       for (final idx in _pips[f[0].toInt()]!) {
         final gx = ((idx % 3) - 1) * 0.55;
         final gy = ((idx ~/ 3) - 1) * 0.55;
         final pip = Path();
-        for (int k = 0; k < 14; k++) {
-          final a = k * 2 * pi / 14;
-          final p = at(gx + 0.17 * cos(a), gy + 0.17 * sin(a));
-          final o = proj(p);
+        for (int k = 0; k < 18; k++) {
+          final a = k * 2 * pi / 18;
+          final o = proj(at(gx + pipR * cos(a), gy + pipR * sin(a)));
           if (k == 0) {
             pip.moveTo(o.dx, o.dy);
           } else {
@@ -226,7 +254,18 @@ class _Die3DPainter extends CustomPainter {
           }
         }
         pip.close();
-        canvas.drawPath(pip, Paint()..color = const Color(0xFF1A1F3A));
+        final pb = pip.getBounds();
+        final base = isOne ? Color.lerp(color, const Color(0xFF7A0A12), 0.35)! : const Color(0xFF141937);
+        canvas.drawPath(
+          pip,
+          Paint()
+            ..shader = RadialGradient(
+              center: const Alignment(-0.35, -0.35),
+              radius: 1.0,
+              colors: [Color.lerp(base, Colors.white, 0.45)!, base, Color.lerp(base, Colors.black, 0.4)!],
+              stops: const [0.0, 0.5, 1.0],
+            ).createShader(pb),
+        );
       }
     }
   }

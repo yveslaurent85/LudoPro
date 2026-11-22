@@ -2414,7 +2414,7 @@ class _DamierHubState extends State<_DamierHub> {
         }
         return;
       }
-      final ref = _dRooms.doc();
+      final ref = _dRooms.doc(newGameId());
       final init = DamierGame(hSeat: hSeat, hN: hSeat >= 0 ? hN : 0);
       await ref.set({
         'hostUid': user.uid,

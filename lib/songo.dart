@@ -2069,7 +2069,7 @@ class _SongoHubState extends State<_SongoHub> {
         }
         return;
       }
-      final ref = _rooms.doc();
+      final ref = _rooms.doc(newGameId());
       final init = SongoGame();
       await ref.set({
         'hostUid': user.uid,

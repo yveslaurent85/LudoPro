@@ -437,7 +437,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       final dbl2 = team && doubleSeat; // je joue 2 places (je paie 2 mises)
       // Position 54 : toujours 2 pions chacun.
       final pawns = startOut ? 2 : pawnCount;
-      final ref = _games.doc();
+      final ref = _games.doc(newGameId());
       await ref.set({
         'hostUid': user.uid,
         'hostName': _displayName(user),

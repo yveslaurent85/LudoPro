@@ -100,7 +100,7 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
   final dbl = team && old['dbl'] == true && old['hostUid'] == user.uid;
   await _checkBalance(user.uid, stake * (dbl ? 2 : 1));
 
-  final ref = FirebaseFirestore.instance.collection('games').doc();
+  final ref = FirebaseFirestore.instance.collection('games').doc(newGameId());
   final starter = _ludoWinnerUid(old);
   try {
     await ref.set({
@@ -160,7 +160,7 @@ Future<String> createDeuxDesRematchRoom(
   final stake = (old['stake'] as num?)?.toInt() ?? 0;
   await _checkBalance(user.uid, stake);
 
-  final ref = FirebaseFirestore.instance.collection('deuxdes').doc();
+  final ref = FirebaseFirestore.instance.collection('deuxdes').doc(newGameId());
   try {
     await ref.set({
       'hostUid': user.uid,

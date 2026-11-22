@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -1257,4 +1258,14 @@ class _LoginDialogState extends State<_LoginDialog> {
       ],
     );
   }
+}
+
+/// Identifiant de partie : uniquement des chiffres (10 chiffres, jamais de 0 au début).
+String newGameId() {
+  final r = Random.secure();
+  final b = StringBuffer('${1 + r.nextInt(9)}');
+  for (var i = 0; i < 9; i++) {
+    b.write(r.nextInt(10));
+  }
+  return b.toString();
 }

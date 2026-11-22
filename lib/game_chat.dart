@@ -842,7 +842,7 @@ class _FlyingEmojiState extends State<_FlyingEmoji>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 2200),
+    duration: const Duration(milliseconds: 4200), // vol lent : l'emoji se voit bien
   );
 
   @override
@@ -861,7 +861,7 @@ class _FlyingEmojiState extends State<_FlyingEmoji>
   }
 
   Offset _pos(double t) {
-    final k = Curves.easeInOutCubic.transform(t.clamp(0.0, 1.0));
+    final k = Curves.easeInOutSine.transform(t.clamp(0.0, 1.0));
     final p = Offset.lerp(widget.from, widget.to, k)!;
     final dist = (widget.to - widget.from).distance;
     final lift = math.sin(math.pi * k) * math.min(120.0, dist * 0.3 + 30);
@@ -878,35 +878,23 @@ class _FlyingEmojiState extends State<_FlyingEmoji>
           builder: (context, _) {
             final t = _c.value;
             final children = <Widget>[];
-            for (var i = 3; i >= 1; i--) {
-              final tt = t - 0.05 * i;
-              if (tt <= 0) continue;
-              final p = _pos(tt);
-              children.add(Positioned(
-                left: p.dx - 20,
-                top: p.dy - 20,
-                child: Opacity(
-                  opacity: 0.22 * (4 - i) / 3,
-                  child: Text(widget.emoji, style: const TextStyle(fontSize: 30)),
-                ),
-              ));
-            }
+            // Un seul emoji net (plus de traînée floue), gros dès le départ : on le réduit au lieu de l'agrandir.
             final p = _pos(t);
-            final k = Curves.easeInOutCubic.transform(t);
-            final scale = 0.8 + 0.9 * math.sin(math.pi * k);
+            final k = Curves.easeInOutSine.transform(t);
+            final scale = 0.72 + 0.28 * math.sin(math.pi * k);
             children.add(Positioned(
-              left: p.dx - 24,
-              top: p.dy - 24,
+              left: p.dx - 32,
+              top: p.dy - 32,
               child: Transform.rotate(
-                angle: math.sin(t * math.pi * 2) * 0.35,
+                angle: math.sin(t * math.pi * 2) * 0.12,
                 child: Transform.scale(
                   scale: scale,
                   child: Container(
-                    width: 48,
-                    height: 48,
+                    width: 64,
+                    height: 64,
                     alignment: Alignment.center,
                     child: Text(widget.emoji,
-                        style: const TextStyle(fontSize: 34)),
+                        style: const TextStyle(fontSize: 46)),
                   ),
                 ),
               ),

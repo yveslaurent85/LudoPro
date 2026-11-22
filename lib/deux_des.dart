@@ -1591,7 +1591,7 @@ class _OnlineHubState extends State<_OnlineHub> {
         }
         return;
       }
-      final ref = _rooms.doc();
+      final ref = _rooms.doc(newGameId());
       await ref.set({
         'hostUid': user.uid,
         'hostName': _userName(user),
