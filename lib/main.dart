@@ -825,6 +825,12 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Partie en cours à reprendre : on garde l'ancien écran (bouton « Reprendre »).
+    if (resumable) return _legacyBuild(context);
+    return _HomeShell(home: this);
+  }
+
+  Widget _legacyBuild(BuildContext context) {
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -941,6 +947,384 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------
+// Nouvelle interface (refonte) : fond clair, barre du bas à 5 accès
+// ----------------------------------------------------------------------
+
+const Color _kBg = Color(0xFFF3F6FF);
+const Color _kInk = Color(0xFF12183A);
+const Color _kMuted = Color(0xFF56608A);
+const Color _kLine = Color(0xFFD5DEF5);
+const Color _kBlue = Color(0xFF1F5BFF);
+const Color _kGold = Color(0xFFFFC21A);
+
+/// Coquille de l'accueil : Accueil · Jeux · Tournois · Wallet · Profil.
+class _HomeShell extends StatefulWidget {
+  const _HomeShell({required this.home});
+
+  final HomeScreen home;
+
+  @override
+  State<_HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<_HomeShell> {
+  int _tab = 0; // 0 Accueil, 1 Jeux, 3 Wallet
+
+  HomeScreen get _h => widget.home;
+
+  void _select(int i) {
+    if (i == 2) {
+      _h._requireLogin(context, (_) => const TournamentsScreen());
+      return;
+    }
+    if (i == 4) {
+      if (firebaseReady) _h._openMenu(context);
+      return;
+    }
+    setState(() => _tab = i);
+  }
+
+  Widget _logo() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final c in const [Color(0xFFE53935), Color(0xFF22B14C), Color(0xFFFFC21A), Color(0xFF1F5BFF)])
+          Container(
+            width: 10,
+            height: 10,
+            margin: const EdgeInsets.only(right: 3),
+            decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(3)),
+          ),
+        const SizedBox(width: 4),
+        const Text(
+          'KATIKA',
+          style: TextStyle(color: _kBlue, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+        ),
+      ],
+    );
+  }
+
+  Widget _topBar() {
+    final loggedIn = firebaseReady && FirebaseAuth.instance.currentUser != null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      child: Row(
+        children: [
+          // Appui long sur le logo : tableau de bord administrateur
+          // (le serveur refuse tout compte qui n'est pas administrateur).
+          GestureDetector(
+            onLongPress: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const AdminDashboard()),
+            ),
+            child: _logo(),
+          ),
+          const Spacer(),
+          Container(
+            decoration: BoxDecoration(color: _kBlue, borderRadius: BorderRadius.circular(20)),
+            child: const LanguageSwitcher(),
+          ),
+          const SizedBox(width: 8),
+          Material(
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: _kLine),
+            ),
+            child: IconButton(
+              tooltip: 'Notifications',
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              onPressed: loggedIn ? () => pushMenuAction(context) : () => _h._requireLogin(context, (_) => const TxHistoryScreen()),
+              icon: const Icon(Icons.notifications_none_rounded, color: _kInk),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Carte portefeuille : solde en FCFA + Recharger / Retirer.
+  Widget _balanceCard() {
+    if (!firebaseReady) return const SizedBox.shrink();
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snap) {
+        final user = snap.data ?? FirebaseAuth.instance.currentUser;
+        final name = (user?.displayName ?? '').trim();
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF2A1A7A)],
+            ),
+            boxShadow: const [BoxShadow(color: Color(0x401F5BFF), blurRadius: 24, offset: Offset(0, 10))],
+          ),
+          child: user == null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tr('Connecte-toi pour jouer en ligne, déposer et gagner.',
+                          'Sign in to play online, deposit and win.'),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      height: 46,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _kGold,
+                          foregroundColor: const Color(0xFF1A1200),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: () => _h._requireLogin(context, (_) => const DepositScreen()),
+                        child: Text(tr('Connexion', 'Sign in'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 19,
+                          backgroundColor: _kGold,
+                          child: Text(
+                            (name.isNotEmpty ? name : (user.email ?? 'K')).substring(0, 1).toUpperCase(),
+                            style: const TextStyle(color: Color(0xFF1A1200), fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            name.isNotEmpty ? name : tr('Joueur Katika', 'Katika player'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(tr('Solde disponible', 'Available balance'),
+                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    StreamBuilder<int>(
+                      stream: Wallet.watch(user.uid),
+                      builder: (context, s) => Text(
+                        Wallet.format(s.data ?? 0),
+                        style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 46,
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _kGold,
+                                foregroundColor: const Color(0xFF1A1200),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              ),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(builder: (_) => const DepositScreen()),
+                              ),
+                              icon: const Icon(Icons.add_rounded),
+                              label: Text(tr('Recharger', 'Deposit'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 46,
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white.withOpacity(0.18),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              ),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(builder: (_) => const WithdrawScreen()),
+                              ),
+                              icon: const Icon(Icons.south_rounded),
+                              label: Text(tr('Retirer', 'Withdraw'), style: const TextStyle(fontWeight: FontWeight.w900)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+        );
+      },
+    );
+  }
+
+  Widget _sectionTitle(String t) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+        child: Text(t, style: const TextStyle(color: _kInk, fontSize: 18, fontWeight: FontWeight.w900)),
+      );
+
+  Widget _games() => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _GamesGrid(onLocal: () => _h._openLocal(context), requireLogin: _h._requireLogin),
+      );
+
+  Widget _footer() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+        child: Column(
+          children: [
+            const WhatsAppGroupButton(),
+            const SizedBox(height: 14),
+            Text(
+              tr('Jouez avec modération · Réservé aux personnes majeures (18 ans et +)',
+                  'Play responsibly · Adults only (18+)'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _kMuted, fontSize: 11),
+            ),
+          ],
+        ),
+      );
+
+  Widget _homeTab() {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        const UpdateChecker(),
+        const WhatsAppInvite(),
+        _topBar(),
+        _balanceCard(),
+        if (firebaseReady) const Padding(padding: EdgeInsets.fromLTRB(16, 12, 16, 0), child: ResumeBanner()),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 14, 16, 0), child: _h._tournamentBanner(context)),
+        _sectionTitle(tr('Nos jeux', 'Our games')),
+        _games(),
+        _footer(),
+      ],
+    );
+  }
+
+  Widget _gamesTab() {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _topBar(),
+        _sectionTitle(tr('Jeux', 'Games')),
+        _games(),
+        _footer(),
+      ],
+    );
+  }
+
+  Widget _walletRow(IconData icon, String label, String sub, Widget Function(BuildContext) page) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kLine),
+      ),
+      child: ListTile(
+        minVerticalPadding: 12,
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(color: const Color(0xFFE3EAFF), borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, color: _kBlue),
+        ),
+        title: Text(label, style: const TextStyle(color: _kInk, fontWeight: FontWeight.w800)),
+        subtitle: Text(sub, style: const TextStyle(color: _kMuted, fontSize: 12)),
+        trailing: const Icon(Icons.chevron_right, color: _kMuted),
+        onTap: () => _h._requireLogin(context, page),
+      ),
+    );
+  }
+
+  Widget _walletTab() {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _topBar(),
+        _sectionTitle('Wallet'),
+        _balanceCard(),
+        const SizedBox(height: 16),
+        _walletRow(Icons.add_card, tr('Recharger', 'Deposit'), tr('Ajouter de l\'argent', 'Add money'),
+            (_) => const DepositScreen()),
+        _walletRow(Icons.payments_outlined, tr('Retirer', 'Withdraw'), tr('Vers ton Mobile Money', 'To your Mobile Money'),
+            (_) => const WithdrawScreen()),
+        _walletRow(Icons.swap_horiz, tr('Transférer', 'Transfer'), tr('Envoyer à un joueur', 'Send to a player'),
+            (_) => const TransferScreen()),
+        _walletRow(Icons.receipt_long, tr('Historique', 'History'), tr('Dépôts, retraits, gains', 'Deposits, withdrawals, wins'),
+            (_) => const TxHistoryScreen()),
+        _walletRow(Icons.card_giftcard, tr('Bonus et parrainage', 'Bonus and referral'), tr('Code promo, lien de parrainage', 'Promo code, referral link'),
+            (_) => const PromoScreen()),
+        _walletRow(Icons.bar_chart, tr('Gains des jeux', 'Game winnings'), tr('Tes statistiques', 'Your stats'),
+            (_) => const MyDetailsScreen()),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _nav() {
+    Widget item(int i, IconData icon, String label) {
+      final on = (i == 0 || i == 1 || i == 3) && _tab == i;
+      final c = on ? _kBlue : _kMuted;
+      return Expanded(
+        child: InkWell(
+          onTap: () => _select(i),
+          child: SizedBox(
+            height: 58,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: c, size: 24),
+                const SizedBox(height: 2),
+                Text(label, style: TextStyle(color: c, fontSize: 11, fontWeight: on ? FontWeight.w800 : FontWeight.w600)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: _kLine)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            item(0, Icons.home_rounded, tr('Accueil', 'Home')),
+            item(1, Icons.grid_view_rounded, tr('Jeux', 'Games')),
+            item(2, Icons.emoji_events_outlined, tr('Tournois', 'Tournaments')),
+            item(3, Icons.account_balance_wallet_outlined, 'Wallet'),
+            item(4, Icons.person_outline_rounded, tr('Profil', 'Profile')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final body = _tab == 1 ? _gamesTab() : (_tab == 3 ? _walletTab() : _homeTab());
+    return Scaffold(
+      backgroundColor: _kBg,
+      body: SafeArea(bottom: false, child: body),
+      bottomNavigationBar: _nav(),
     );
   }
 }
