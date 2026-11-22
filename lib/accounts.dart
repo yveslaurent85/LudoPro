@@ -63,7 +63,7 @@ class Wallet {
   /// que COMMISSION_PERCENT dans worker.js).
   static const int commissionPercent = 5;
 
-  /// Commission en présentiel, sur tous les jeux (Ludo, Deux dés, Songô). Doit
+  /// Commission en présentiel, sur tous les jeux (Ludo, Deux dés). Doit
   /// être la même que COMMISSION_LOCAL_PERCENT dans worker.js.
   static const int commissionLocalPercent = 5;
 
@@ -291,40 +291,6 @@ class Wallet {
 
   static Future<Map<String, dynamic>> cardsChatLeave(String gameId) =>
       _call('cardsChatLeave', <String, dynamic>{'gameId': gameId});
-
-  // ---- KATIKA PES (PES 2016) ----
-  static Future<Map<String, dynamic>> pesList() => _call('pesList', <String, dynamic>{});
-  static Future<Map<String, dynamic>> pesGet(String id) => _call('pesGet', <String, dynamic>{'id': id});
-  static Future<Map<String, dynamic>> pesCreate({required int stake, required String efId, required String rules, required String platform}) =>
-      _call('pesCreate', <String, dynamic>{'stake': stake, 'efId': efId, 'rules': rules, 'platform': platform});
-  static Future<Map<String, dynamic>> pesCancel(String id) => _call('pesCancel', <String, dynamic>{'id': id});
-  static Future<Map<String, dynamic>> pesAccept(String id, String efId) => _call('pesAccept', <String, dynamic>{'id': id, 'efId': efId});
-  static Future<Map<String, dynamic>> pesSetRoom(String id, String room) => _call('pesSetRoom', <String, dynamic>{'id': id, 'room': room});
-  static Future<Map<String, dynamic>> pesReport({
-    required String id,
-    required int scoreMe,
-    required int scoreOpp,
-    required String extra,
-    required int pkMe,
-    required int pkOpp,
-    required String team,
-    String? proof,
-  }) =>
-      _call('pesReport', <String, dynamic>{
-        'id': id,
-        'scoreMe': scoreMe,
-        'scoreOpp': scoreOpp,
-        'extra': extra,
-        'pkMe': pkMe,
-        'pkOpp': pkOpp,
-        'team': team,
-        if (proof != null) 'proof': proof,
-      });
-  static Future<Map<String, dynamic>> pesDispute(String id, String reason) => _call('pesDispute', <String, dynamic>{'id': id, 'reason': reason});
-  static Future<Map<String, dynamic>> pesAdminList() => _call('pesAdminList', <String, dynamic>{});
-  static Future<Map<String, dynamic>> pesAdminProofs(String id) => _call('pesAdminProofs', <String, dynamic>{'id': id});
-  static Future<Map<String, dynamic>> pesAdminResolve(String id, String decision, String note) =>
-      _call('pesAdminResolve', <String, dynamic>{'id': id, 'decision': decision, 'note': note});
 
   // ---- Zoning (villes, partenaires exclusifs de zone) ----
   static Future<Map<String, dynamic>> zoneMe() => _call('zoneMe', <String, dynamic>{});
@@ -720,35 +686,6 @@ class Wallet {
 
   static Future<Map<String, dynamic>> adminTournamentEntries(String tid) =>
       _call('adminTournamentEntries', <String, dynamic>{'tid': tid});
-
-  // -------------------------------------------------- Damier « Deux buts sort »
-  static Future<Map<String, dynamic>> dbList([String? rid]) =>
-      _call('dbList', <String, dynamic>{if (rid != null) 'rid': rid});
-
-  static Future<Map<String, dynamic>> dbCreate({required int stake, required int timeMin}) =>
-      _call('dbCreate', <String, dynamic>{'stake': stake, 'timeMin': timeMin});
-
-  static Future<Map<String, dynamic>> dbJoin(String rid) =>
-      _call('dbJoin', <String, dynamic>{'rid': rid});
-
-  static Future<Map<String, dynamic>> dbLeave(String rid) =>
-      _call('dbLeave', <String, dynamic>{'rid': rid});
-
-  static Future<Map<String, dynamic>> dbClose(String rid) =>
-      _call('dbClose', <String, dynamic>{'rid': rid});
-
-  // ------------------------------------------------------------ Pile ou Face
-  static Future<Map<String, dynamic>> pfList() =>
-      _call('pfList', <String, dynamic>{});
-
-  static Future<Map<String, dynamic>> pfCreate({required int stake, required String side}) =>
-      _call('pfCreate', <String, dynamic>{'stake': stake, 'side': side});
-
-  static Future<Map<String, dynamic>> pfJoin(String gameId) =>
-      _call('pfJoin', <String, dynamic>{'gameId': gameId});
-
-  static Future<Map<String, dynamic>> pfCancel(String gameId) =>
-      _call('pfCancel', <String, dynamic>{'gameId': gameId});
 
   // ------------------------------------------------------------ Cartes en ligne
   static Future<Map<String, dynamic>> cardsList(String game, {bool light = false}) =>

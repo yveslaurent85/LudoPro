@@ -9,11 +9,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'accounts.dart';
 import 'cartes.dart';
-import 'damier.dart';
 import 'deux_des.dart';
 import 'lang.dart';
 import 'online.dart';
-import 'songo.dart';
 
 /// Adresse du site (utilisée pour les liens partagés depuis l'appli Android).
 /// Sur le site web, c'est l'adresse réelle du site qui est utilisée.
@@ -23,10 +21,6 @@ String _gameName(String col) {
   switch (col) {
     case 'deuxdes':
       return tr('Deux dés', 'Two dice');
-    case 'songo':
-      return 'Songô';
-    case 'damier':
-      return tr('Damier', 'Draughts');
     case 'cards':
       return 'TIAH / BOUBAYAH';
     default:
@@ -192,7 +186,7 @@ Future<void> showShareSheet(
 // Ouverture d'un lien partagé : ?g=<jeu>.<id>&m=join|live
 // ----------------------------------------------------------------------
 
-const List<String> _cols = ['games', 'deuxdes', 'songo', 'damier', 'cards'];
+const List<String> _cols = ['games', 'deuxdes', 'cards'];
 
 class SharedLink {
   static String? _col;
@@ -420,10 +414,6 @@ class SharedLink {
     switch (col) {
       case 'deuxdes':
         return spectate ? DeuxDesSpectator(roomId: id) : deuxDesRoomPage(id);
-      case 'songo':
-        return spectate ? SongoSpectator(roomId: id) : songoRoomPage(id);
-      case 'damier':
-        return spectate ? DamierSpectator(roomId: id) : damierRoomPage(id);
       default:
         return OnlineGameRoom(gameId: id, spectate: spectate);
     }
@@ -458,7 +448,7 @@ class _SharedLinkGateState extends State<SharedLinkGate> {
 
 
 /// Bandeau d'accueil « Reprendre ma partie » : liste les parties en ligne de
-/// l'utilisateur encore en cours (Ludo, Deux dés, Damier, Songo), par exemple
+/// l'utilisateur encore en cours (Ludo, Deux dés), par exemple
 /// après une coupure de réseau ou un retour à l'accueil.
 class ResumeBanner extends StatefulWidget {
   const ResumeBanner({super.key});
@@ -468,12 +458,10 @@ class ResumeBanner extends StatefulWidget {
 }
 
 class _ResumeBannerState extends State<ResumeBanner> {
-  static const _cols = ['games', 'deuxdes', 'songo', 'damier'];
+  static const _cols = ['games', 'deuxdes'];
   static const _names = {
     'games': 'Ludo',
     'deuxdes': 'Deux dés',
-    'songo': 'Songo',
-    'damier': 'Damier',
   };
   final List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _subs = [];
   final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _live = {};

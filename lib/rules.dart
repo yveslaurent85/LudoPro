@@ -69,58 +69,6 @@ const String kDeuxDesRules =
 // Bouton « Infos » : règles de TOUS les jeux (accueil, menus, tables).
 // ----------------------------------------------------------------------
 
-String _rSongo() => tr(
-      'Plateau : 14 cases (7 par joueur), 5 graines par case.\n'
-          'On prend toutes les graines d\'une de ses cases et on les sème une à une '
-          'dans le sens des aiguilles d\'une montre. La case de départ est sautée '
-          'quand le semis fait le tour.\n'
-          'Capture : si la dernière graine tombe chez l\'adversaire et que la case '
-          'compte 2, 3 ou 4 graines, on les prend, puis on remonte en arrière '
-          'tant que les cases ont 2, 3 ou 4 graines. La première case du camp '
-          'adverse n\'est jamais prise.\n'
-          'Interdit d\'affamer : une rafle qui viderait tout le camp adverse est '
-          'annulée, et si l\'adversaire n\'a plus de graines il faut lui en envoyer.\n'
-          'Fin : 36 graines capturées, ou moins de 10 graines sur le plateau, ou '
-          'plus aucun coup possible (chacun garde les graines de son camp).',
-      'Board: 14 pits (7 per player), 5 seeds per pit.\n'
-          'Take all the seeds of one of your pits and sow them one by one '
-          'clockwise. The starting pit is skipped on a full lap.\n'
-          'Capture: if the last seed lands on the opponent\'s side and the pit holds '
-          '2, 3 or 4 seeds, you take them, then keep going backwards while pits '
-          'hold 2, 3 or 4. The first pit of the opponent\'s side is never taken.\n'
-          'No starving: a capture that would empty the opponent\'s side is cancelled, '
-          'and if the opponent has no seeds you must give him some.\n'
-          'End: 36 seeds captured, fewer than 10 seeds left, or no move possible.',
-    );
-
-String _rDamier() => tr(
-      'Plateau 10x10, 20 pions chacun, on joue sur les cases sombres. Les blancs commencent.\n'
-          'Un pion avance d\'une case en diagonale. Il prend en avant et en arrière en sautant un pion adverse.\n'
-          'La prise est obligatoire, et il faut jouer la rafle qui prend le plus de pièces.\n'
-          'Un pion qui termine son coup sur la dernière rangée devient dame. La dame glisse de plusieurs cases et prend de loin.\n'
-          'Perd celui qui ne peut plus jouer (plus de pièces ou bloqué).\n'
-          'Nulle : même position 3 fois, 25 coups de dame sans prise ni mouvement de pion, ou 300 coups.',
-      '10x10 board, 20 pieces each, played on the dark squares. White starts.\n'
-          'A man moves one square diagonally. It captures forwards and backwards by jumping an enemy piece.\n'
-          'Capturing is compulsory, and you must play the sequence that captures the most pieces.\n'
-          'A man that ends its move on the last row becomes a king. A king slides any distance and captures from afar.\n'
-          'You lose if you cannot move.\n'
-          'Draw: same position 3 times, 25 king moves without a capture or a man move, or 300 moves.',
-    );
-
-String _rPileFace() => tr(
-      '• Tu choisis ton côté (PILE ou FACE) et ta mise, puis tu lances un défi.\n'
-          '• Un autre joueur relève le défi avec la même mise : il prend l\'autre côté.\n'
-          '• La pièce est tirée au hasard par le serveur, à égalité de chances.\n'
-          '• Le gagnant reçoit les 2 mises moins la commission de Katika.\n'
-          '• Tant que personne n\'a relevé ton défi, tu peux l\'annuler : ta mise est rendue.',
-      '• Pick your side (PILE or FACE) and your stake, then post a challenge.\n'
-          '• Another player accepts with the same stake and takes the other side.\n'
-          '• The server flips the coin at random, with equal chances.\n'
-          '• The winner gets both stakes minus Katika\'s commission.\n'
-          '• While nobody has accepted, you can cancel and get your stake back.',
-    );
-
 String _rTiah() => tr(
       'TIAH (2 à 6 joueurs) : atteins 21 sans dépasser.\n'
           '• Chacun reçoit 2 cartes. 10 cartes sont posées ouvertes au milieu.\n'
@@ -233,14 +181,6 @@ String rulesTitle(String key) {
       return tr('Règles du Ludo', 'Ludo rules');
     case 'deuxdes':
       return tr('Règles de Deux dés', 'Two dice rules');
-    case 'songo':
-      return tr('Règles du Songô', 'Songo rules');
-    case 'damier':
-      return tr('Règles du Damier', 'Draughts rules');
-    case 'damiersongo':
-      return tr('Damier & Songô', 'Draughts & Songo');
-    case 'pileface':
-      return tr('Règles de Pile ou Face', 'Heads or Tails rules');
     case 'tiah':
       return tr('Règles du TIAH', 'TIAH rules');
     case 'boubayah':
@@ -263,14 +203,6 @@ String rulesBody(String key) {
       return kLudoRules;
     case 'deuxdes':
       return kDeuxDesRules;
-    case 'songo':
-      return _rSongo();
-    case 'damier':
-      return _rDamier();
-    case 'damiersongo':
-      return '${tr('DAMIER', 'DRAUGHTS')}\n${_rDamier()}\n\n${tr('SONGÔ', 'SONGO')}\n${_rSongo()}';
-    case 'pileface':
-      return _rPileFace();
     case 'tiah':
       return '${_rTiah()}\n\n${_rFamilies()}';
     case 'boubayah':
@@ -287,8 +219,8 @@ String rulesBody(String key) {
   return '';
 }
 
-/// Ouvre la fenêtre « Infos » d'un jeu (clés : ludo, deuxdes, songo, damier, damiersongo,
-/// pileface, tiah, boubayah, fapfap, anticote, tchek, cartes).
+/// Ouvre la fenêtre « Infos » d'un jeu (clés : ludo, deuxdes,
+/// tiah, boubayah, fapfap, anticote, tchek, cartes).
 void showGameInfo(BuildContext context, String key) =>
     showRulesDialog(context, rulesTitle(key), rulesBody(key));
 

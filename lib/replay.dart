@@ -5,12 +5,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart' hide Text;
 
 import 'accounts.dart';
-import 'damier.dart';
 import 'deux_des.dart';
 import 'lang.dart';
 import 'online.dart';
 import 'replay_core.dart';
-import 'songo.dart';
 
 // ======================================================================
 // Revoir une partie en ligne du début à la fin (joueur : ses parties ;
@@ -43,10 +41,6 @@ String rpKindName(String kind) {
       return 'Ludo';
     case 'deuxdes':
       return tr('Deux dés', 'Two dice');
-    case 'songo':
-      return 'Songô';
-    case 'damier':
-      return tr('Damier', 'Draughts');
     case 'tiah':
       return 'Tiah';
     case 'boubayah':
@@ -61,10 +55,6 @@ String _rpKindIcon(String kind) {
       return '🎲';
     case 'deuxdes':
       return '🎯';
-    case 'songo':
-      return '🌰';
-    case 'damier':
-      return '♟️';
   }
   return '🃏';
 }
@@ -75,81 +65,6 @@ String _rpKindIcon(String kind) {
 
 List<int> _ints(dynamic l) =>
     l is List ? l.map((e) => (e as num).toInt()).toList() : <int>[];
-
-List<Map<String, dynamic>> _damierFrames(Map<String, dynamic> d) {
-  final mv = ((d['mv'] as List?) ?? const []).map((e) => '$e').toList();
-  if (mv.isEmpty) return const [];
-  final g = DamierGame(
-    hSeat: (d['hSeat'] as num?)?.toInt() ?? -1,
-    hN: (d['hN'] as num?)?.toInt() ?? 0,
-  );
-  Map<String, dynamic> frame() => {
-        ...d,
-        ...g.toDoc(),
-        'status': g.over ? 'finished' : 'playing',
-        'clockMs': null,
-        'forfeit': -1,
-        'timeout': false,
-      };
-  final out = <Map<String, dynamic>>[frame()];
-  var complete = true;
-  for (final s in mv) {
-    final p = s.split('>').map((e) => int.tryParse(e) ?? -1).toList();
-    DMove? m;
-    for (final lm in g.legal) {
-      if (lm.from != p.first || lm.path.length != p.length - 1) continue;
-      var ok = true;
-      for (int i = 0; i < lm.path.length; i++) {
-        if (lm.path[i] != p[i + 1]) ok = false;
-      }
-      if (ok) {
-        m = lm;
-        break;
-      }
-    }
-    if (m == null) {
-      complete = false;
-      break;
-    }
-    g.play(m);
-    out.add(frame());
-  }
-  // Dernière image : le vrai document (abandon, temps écoulé, résultat...).
-  if (complete) {
-    out[out.length - 1] = {...d};
-  } else {
-    out.add({...d});
-  }
-  return out;
-}
-
-List<Map<String, dynamic>> _songoFrames(Map<String, dynamic> d) {
-  final mv = _ints(d['mv']);
-  if (mv.isEmpty) return const [];
-  final g = SongoGame();
-  Map<String, dynamic> frame() => {
-        ...d,
-        ...g.toDoc(),
-        'status': g.over ? 'finished' : 'playing',
-        'forfeit': -1,
-      };
-  final out = <Map<String, dynamic>>[frame()];
-  var complete = true;
-  for (final p in mv) {
-    if (!g.legal.contains(p)) {
-      complete = false;
-      break;
-    }
-    g.play(p);
-    out.add(frame());
-  }
-  if (complete) {
-    out[out.length - 1] = {...d};
-  } else {
-    out.add({...d});
-  }
-  return out;
-}
 
 List<Map<String, dynamic>> _deuxdesFrames(Map<String, dynamic> d) {
   final mv = ((d['mv'] as List?) ?? const []).map((e) => '$e').toList();
@@ -216,7 +131,7 @@ List<Map<String, dynamic>> _ludoFrames(Map<String, dynamic> d) {
 // Écran de revue
 // ----------------------------------------------------------------------
 
-/// Revoir une partie : [kind] = ludo | deuxdes | songo | damier | tiah | boubayah.
+/// Revoir une partie : [kind] = ludo | deuxdes | tiah | boubayah.
 class ReplayScreen extends StatefulWidget {
   const ReplayScreen({super.key, required this.kind, required this.id, this.title});
 
@@ -290,11 +205,8 @@ class _ReplayScreenState extends State<ReplayScreen> {
         case 'deuxdes':
           frames = _deuxdesFrames(d);
           break;
-        case 'songo':
-          frames = _songoFrames(d);
-          break;
         default:
-          frames = _damierFrames(d);
+          frames = const [];
       }
       if (!mounted) return;
       setState(() {
@@ -359,10 +271,8 @@ class _ReplayScreenState extends State<ReplayScreen> {
             gameId: widget.id, spectate: true, adminView: true, replay: c);
       case 'deuxdes':
         return DeuxDesSpectator(roomId: widget.id, replay: c);
-      case 'songo':
-        return SongoSpectator(roomId: widget.id, replay: c);
       default:
-        return DamierSpectator(roomId: widget.id, replay: c);
+        return const SizedBox.shrink();
     }
   }
 
@@ -492,10 +402,8 @@ class _ReplayScreenState extends State<ReplayScreen> {
         return OnlineGameRoom(gameId: widget.id, spectate: true, adminView: true);
       case 'deuxdes':
         return DeuxDesSpectator(roomId: widget.id);
-      case 'songo':
-        return SongoSpectator(roomId: widget.id);
       default:
-        return DamierSpectator(roomId: widget.id);
+        return const SizedBox.shrink();
     }
   }
 
@@ -726,6 +634,12 @@ class _MyGamesScreenState extends State<MyGamesScreen> {
   String? _err;
   String? _open; // jeu dont la liste est déroulée
 
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
   Widget _group(String kind) {
     final list = [for (final r in _rows) if (r['kind'] == kind) r];
     final open = _open == kind;
@@ -779,12 +693,6 @@ class _MyGamesScreenState extends State<MyGamesScreen> {
         if (open) const SizedBox(height: 4),
       ],
     );
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
   }
 
   Future<void> _load() async {
@@ -844,11 +752,7 @@ class _MyGamesScreenState extends State<MyGamesScreen> {
                     : _err != null
                         ? Center(
                             child: Text(_err!, style: const TextStyle(color: Colors.white)))
-                        : _rows.isEmpty
-                            ? Center(
-                                child: Text(tr('Aucune partie en ligne.', 'No online games.'),
-                                    style: const TextStyle(color: Colors.white70)))
-                            : RefreshIndicator(
+                        : RefreshIndicator(
                                 onRefresh: _load,
                                 child: ListView(
                                   padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
@@ -856,16 +760,14 @@ class _MyGamesScreenState extends State<MyGamesScreen> {
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 8),
                                       child: Text(
-                                        tr('Touche une partie pour la revoir du début à la fin.',
-                                            'Tap a game to watch it from start to finish.'),
+                                        tr('Touche un jeu pour voir ses parties, puis une partie pour la revoir du début à la fin.',
+                                            'Tap a game to list its matches, then a match to replay it.'),
                                         style: const TextStyle(color: Colors.white60, fontSize: 12),
                                       ),
                                     ),
                                     for (final k in const [
                                       'ludo',
                                       'deuxdes',
-                                      'songo',
-                                      'damier',
                                       'tiah',
                                       'boubayah',
                                     ])

@@ -10,10 +10,7 @@ import 'hostess_screen.dart';
 import 'cashiers_admin.dart';
 import 'online.dart';
 import 'player_stats.dart';
-import 'damier.dart';
-import 'songo.dart';
 import 'zone_screens.dart' show AdminZonesScreen;
-import 'pes_screens.dart' show PesAdminScreen;
 
 /// Tableau de bord administrateur : toutes les parties (Ludo, Deux dés et Songô,
 /// en ligne et en présentiel), les commissions, les jackpots.
@@ -96,7 +93,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   // Filtres
-  String kind = 'all'; // all | ludo | deuxdes | songo | damier
+  String kind = 'all'; // all | ludo | deuxdes | tiah…
   String mode = 'all'; // all | online | local
   int days = 0; // 0 = tout, 1 = aujourd'hui, 7, 30
 
@@ -245,7 +242,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  static const _cancelKinds = {'ludo', 'deuxdes', 'songo', 'damier', 'pileface', 'tiah', 'boubayah', 'fapfap', 'anticote', 'tchek'};
+  static const _cancelKinds = {'ludo', 'deuxdes', 'tiah', 'boubayah', 'fapfap', 'anticote', 'tchek'};
 
   /// Partie en ligne ouverte ou en cours : l'administrateur peut l'annuler.
   bool _cancellable(Map<String, dynamic> r) =>
@@ -418,12 +415,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return 'Ludo';
       case 'deuxdes':
         return 'Deux dés';
-      case 'songo':
-        return 'Songô';
-      case 'damier':
-        return 'Damier';
-      case 'pileface':
-        return 'Pile ou Face';
       case 'tiah':
         return 'TIAH';
       case 'boubayah':
@@ -912,9 +903,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     ['all', 'Tous les jeux'],
     ['ludo', 'Ludo'],
     ['deuxdes', 'Deux dés'],
-    ['songo', 'Songô'],
-    ['damier', 'Damier'],
-    ['pileface', 'Pile ou Face'],
     ['tiah', 'TIAH'],
     ['boubayah', 'BOUBAYAH'],
     ['fapfap', 'FAP-FAP'],
@@ -1027,14 +1015,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
       _snack("Cette partie n'a pas encore commencé.");
       return;
     }
-    if (const ['pileface', 'sports', 'courses', 'fapfap', 'anticote', 'tchek'].contains(r['kind'])) {
+    if (const ['sports', 'courses', 'fapfap', 'anticote', 'tchek'].contains(r['kind'])) {
       _snack('Pas de revue pour ce jeu : consulte les mises et les commissions ici.');
       return;
     }
     // Revue du début à la fin (coup par coup) ; les anciennes parties sans
     // enregistrement proposent seulement le plateau final.
     final k = '${r['kind']}';
-    final kind = const ['deuxdes', 'songo', 'damier', 'tiah', 'boubayah'].contains(k) ? k : 'ludo';
+    final kind = const ['deuxdes', 'tiah', 'boubayah'].contains(k) ? k : 'ludo';
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => ReplayScreen(kind: kind, id: id, title: rpKindName(kind)),
     ));
@@ -1046,8 +1034,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final names = ((r['names'] as List?) ?? const []).map((e) => '$e').toList();
     final commission = _i(r['commission']) + _i(r['betCommission']);
     final isDice = r['kind'] == 'deuxdes';
-    final isSongo = r['kind'] == 'songo';
-    final isDamier = r['kind'] == 'damier';
 
     final gid = '${r['id']}';
     return GestureDetector(
@@ -1070,11 +1056,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Row(
             children: [
               Icon(
-                isDice
-                    ? Icons.casino
-                    : (isSongo
-                        ? Icons.workspaces
-                        : (isDamier ? Icons.grid_on : Icons.grid_view)),
+                isDice ? Icons.casino : Icons.grid_view,
                 color: _gold,
                 size: 20,
               ),
@@ -1268,26 +1250,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 icon: const Text('💁', style: TextStyle(fontSize: 18)),
                 label: const Text(
                   'Hôtesses (inscriptions)',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: SizedBox(
-              height: 48,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white.withOpacity(0.16),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const PesAdminScreen()),
-                ),
-                icon: const Text('⚽', style: TextStyle(fontSize: 18)),
-                label: const Text(
-                  'PES : arbitrage des matchs',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
@@ -1534,9 +1496,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
               limit < 500 &&
               (_i(fetched['ludo']) >= limit ||
                   _i(fetched['deuxdes']) >= limit ||
-                  _i(fetched['songo']) >= limit ||
-                  _i(fetched['damier']) >= limit ||
-                  _i(fetched['pileface']) >= limit ||
                   _i(fetched['cards']) >= limit ||
                   _i(fetched['local']) >= limit))
             Padding(

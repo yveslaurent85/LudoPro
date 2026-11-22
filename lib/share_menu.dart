@@ -11,7 +11,7 @@ import 'share_game.dart';
 class ShareMenuButton extends StatelessWidget {
   const ShareMenuButton({super.key, required this.collection, required this.gameId});
 
-  /// games (Ludo), deuxdes, songo, damier ou cards.
+  /// games (Ludo), deuxdes ou cards.
   final String collection;
   final String gameId;
 

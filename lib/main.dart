@@ -21,7 +21,6 @@ import 'base_logos.dart';
 import 'deposit_screen.dart';
 import 'transfer_screen.dart';
 import 'tournaments_screen.dart';
-import 'pileface_screen.dart';
 import 'cartes.dart';
 import 'paris_screen.dart';
 import 'deux_des.dart';
@@ -39,13 +38,10 @@ import 'password_screen.dart';
 import 'player_stats.dart';
 import 'update_check.dart';
 import 'zone_screens.dart';
-import 'pes_screens.dart';
 import 'push_setup.dart';
 import 'app_notices.dart';
 import 'stake_field.dart';
 import 'firebase_web.dart';
-import 'damier.dart';
-import 'songo.dart';
 import 'rules.dart';
 import 'promo_link.dart';
 import 'whatsapp_group.dart';
@@ -1110,30 +1106,6 @@ class _GamesGrid extends StatelessWidget {
           onTap: () => requireLogin(context, (_) => const DeuxDesPage()),
         ),
         _GameTile(
-          color: const Color(0xFF37474F),
-          icon: Icons.grid_on,
-          image: 'assets/game_damier.png',
-          infoKey: 'damiersongo',
-          title: 'Damier & Songô',
-          subtitle: tr('Damier · Songô · tournoi', 'Draughts · Songo · tournament'),
-          badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => requireLogin(context, (_) => const _DamierSongoPage()),
-        ),
-        _GameTile(
-          color: const Color(0xFFF9A825),
-          icon: Icons.monetization_on,
-          infoKey: 'pileface',
-          title: tr('Pile ou Face', 'Heads or Tails'),
-          subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
-          badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => requireLogin(
-            context,
-            (_) => PileFacePage(
-              openOnline: () => requireLogin(context, (_) => const PileFaceScreen()),
-            ),
-          ),
-        ),
-        _GameTile(
           color: const Color(0xFF0E7A4B),
           icon: Icons.style,
           image: 'assets/game_cartes.png',
@@ -1152,75 +1124,7 @@ class _GamesGrid extends StatelessWidget {
           badge: tr('NOUVEAU', 'NEW'),
           onTap: () => requireLogin(context, (_) => const ParisParDerrierePage()),
         ),
-        _GameTile(
-          color: const Color(0xFF0B6E3A),
-          icon: Icons.sports_soccer,
-          title: 'KATIKA PES',
-          subtitle: tr('PES 2016 · 1 contre 1 en ligne', 'PES 2016 · 1v1 online'),
-          badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => requireLogin(context, (_) => const PesHomeScreen()),
-        ),
       ],
-    );
-  }
-}
-
-/// Damier & Songô : choix du jeu de plateau.
-class _DamierSongoPage extends StatelessWidget {
-  const _DamierSongoPage();
-
-  @override
-  Widget build(BuildContext context) {
-    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: _appBackground,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    ),
-                    const Text(
-                      'Damier & Songô',
-                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                _ModeCard(
-                  color: const Color(0xFF37474F),
-                  icon: Icons.grid_on,
-                  image: 'assets/game_damier.png',
-                  infoKey: 'damier',
-                  title: 'Damier',
-                  subtitle: tr('Présentiel, en ligne, Deux buts sort, tournoi',
-                      'Local, online, Two strikes, tournament'),
-                  onTap: () => open(const DamierPage()),
-                ),
-                const SizedBox(height: 14),
-                _ModeCard(
-                  color: const Color(0xFF8D5A2B),
-                  icon: Icons.workspaces,
-                  image: 'assets/game_songo.png',
-                  infoKey: 'songo',
-                  title: 'Songô',
-                  subtitle: tr('Jeu de graines', 'Seed game'),
-                  onTap: () => open(const SongoPage()),
-                ),
-                const Spacer(flex: 2),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
