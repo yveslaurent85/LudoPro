@@ -342,7 +342,10 @@ Widget _tile(
 // ----------------------------------------------------------------------
 
 class OnlineLobbyScreen extends StatefulWidget {
-  const OnlineLobbyScreen({super.key});
+  const OnlineLobbyScreen({super.key, this.joinId});
+
+  /// Partie à rejoindre dès l'ouverture (depuis la liste de la page du jeu).
+  final String? joinId;
 
   @override
   State<OnlineLobbyScreen> createState() => _OnlineLobbyScreenState();
@@ -379,6 +382,17 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       _games.where('status', isEqualTo: 'playing').limit(30).snapshots();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
       _games.where('uids', arrayContains: uid).snapshots();
+
+  @override
+  void initState() {
+    super.initState();
+    final j = widget.joinId;
+    if (j != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _join(j);
+      });
+    }
+  }
 
   @override
   void dispose() {

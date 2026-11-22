@@ -17,6 +17,8 @@ import 'main.dart' show firebaseReady, Sfx, JoinBell;
 import 'online_screen.dart';
 import 'rules.dart';
 import 'stake_field.dart';
+import 'game_hub.dart';
+import 'tournaments_screen.dart';
 
 // ======================================================================
 // Cartes : TIAH, BOUBAYAH, TCHEK GAMES (Tiah et Tchek Games)
@@ -1140,15 +1142,15 @@ class CartesPage extends StatelessWidget {
                     const SizedBox(height: 14),
                     _card('FAP-FAP', tr('En ligne uniquement · plis et Corat · 2 à 4 joueurs', 'Online only · tricks and Corat · 2-4 players'),
                         Icons.style, const Color(0xFFEF6C00),
-                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'fapfap')), badge: tr('NOUVEAU', 'NEW'), info: 'fapfap'),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'fapfap')), badge: tr('NOUVEAU', 'NEW'), info: 'fapfap'),
                     const SizedBox(height: 14),
                     _card('ANTI-COTE', tr('En ligne uniquement · cagnotte et Corat · 2 à 5 joueurs', 'Online only · jackpot and Corat · 2-5 players'),
                         Icons.casino, const Color(0xFF00897B),
-                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'anticote')), badge: tr('NOUVEAU', 'NEW'), info: 'anticote'),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'anticote')), badge: tr('NOUVEAU', 'NEW'), info: 'anticote'),
                     const SizedBox(height: 14),
                     _card('TCHEK GAMES', tr('En ligne uniquement · défausse-toi de tes cartes · 2 à 4 joueurs', 'Online only · shed all your cards · 2-4 players'),
                         Icons.location_on, const Color(0xFF0277BD),
-                        () => _pushLoggedIn(context, (_) => const CardsOnlineHub(game: 'tchek')), badge: tr('NOUVEAU', 'NEW'), info: 'tchek'),
+                        () => _pushLoggedIn(context, (_) => const _CardModePage(game: 'tchek')), badge: tr('NOUVEAU', 'NEW'), info: 'tchek'),
                   ],
                 ),
               ),
@@ -1220,92 +1222,52 @@ class _CardModePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tiah = game == 'tiah';
-    final title = _gameTitle(game);
-    Widget tile(IconData i, String t, String s, Color c, VoidCallback? f) => Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: GestureDetector(
-            onTap: f,
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(22),
-                gradient: LinearGradient(
-                  colors: f == null
-                      ? [Colors.white.withOpacity(0.16), Colors.white.withOpacity(0.06)]
-                      : [c, Color.lerp(c, Colors.black, 0.25)!],
-                ),
-                border: Border.all(color: f == null ? Colors.white24 : Colors.white54, width: 2),
-              ),
-              child: Row(
-                children: [
-                  Icon(i, color: Colors.white, size: 32),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(t, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
-                        Text(s, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                      ],
-                    ),
+    final localOk = game == 'tiah' || game == 'boubayah';
+    final color = game == 'tiah'
+        ? const Color(0xFFE5262B)
+        : game == 'boubayah'
+            ? const Color(0xFF7B1FA2)
+            : game == 'fapfap'
+                ? const Color(0xFFEF6C00)
+                : game == 'anticote'
+                    ? const Color(0xFF00897B)
+                    : const Color(0xFF0277BD);
+    return GameHubPage(
+      title: _gameTitle(game),
+      subtitle: localOk
+          ? tr('Présentiel ou en ligne', 'Face to face or online')
+          : tr('En ligne uniquement', 'Online only'),
+      icon: game == 'anticote' ? Icons.casino : Icons.style,
+      accent: color,
+      infoKey: game,
+      onPresentiel: localOk
+          ? () => _pushLoggedIn(
+                context,
+                (_) => game == 'tiah' ? const TiahLocalPage() : const BoubayahLocalPage(),
+              )
+          : null,
+      onOnline: () => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game)),
+      onTournois: () => _pushLoggedIn(context, (_) => const TournamentsScreen()),
+      onJoin: (g) => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game, joinId: g.id, joinStake: g.stake)),
+      source: () async* {
+        while (true) {
+          try {
+            final r = await Wallet.cardsList(game, light: true);
+            final open = r['open'];
+            yield [
+              if (open is List)
+                for (final x in open)
+                  HubGame(
+                    id: '${(x as Map)['id']}',
+                    host: '${x['hostName'] ?? ''}',
+                    stake: (x['stake'] as num?)?.toInt() ?? 0,
+                    players: '${x['count'] ?? 1}/${x['maxPlayers'] ?? 2}',
                   ),
-                ],
-              ),
-            ),
-          ),
-        );
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: _felt,
-        child: SafeArea(
-          child: Column(
-            children: [
-              Row(children: [
-                IconButton(
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                ),
-                Text(title, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
-              ]),
-              Expanded(
-                child: Center(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const _CardView(card: _Card(11, 1), w: 90),
-                        const SizedBox(height: 22),
-                        tile(
-                          Icons.groups,
-                          tr('En présentiel', 'Face to face'),
-                          tr('2 à 6 joueurs sur le même téléphone · mise ou gratuit',
-                              '2-6 players on one phone · stake or free'),
-                          const Color(0xFF22B14C),
-                          () => _pushLoggedIn(
-                            context,
-                            (_) => tiah ? const TiahLocalPage() : const BoubayahLocalPage(),
-                          ),
-                        ),
-                        tile(
-                          Icons.public,
-                          tr('En ligne', 'Online'),
-                          tr('Chacun joue depuis son téléphone · mise ou gratuit', 'Everyone plays from their own phone · stake or free'),
-                          const Color(0xFFE5262B),
-                          () => _pushLoggedIn(context, (_) => CardsOnlineHub(game: game)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ];
+          } catch (_) {}
+          await Future<void>.delayed(const Duration(seconds: 10));
+        }
+      },
     );
   }
 }
@@ -2883,9 +2845,13 @@ String? _firstOf(Iterable<String> i) => i.isEmpty ? null : i.first;
 String _gameTitle(String g) => g == 'tiah' ? 'TIAH' : (g == 'fapfap' ? 'FAP-FAP' : (g == 'anticote' ? 'ANTI-COTE' : (g == 'tchek' ? 'TCHEK GAMES' : 'BOUBAYAH')));
 
 class CardsOnlineHub extends StatefulWidget {
-  const CardsOnlineHub({super.key, required this.game});
+  const CardsOnlineHub({super.key, required this.game, this.joinId, this.joinStake = 0});
 
   final String game;
+
+  /// Partie à rejoindre dès l'ouverture (depuis la liste de la page du jeu).
+  final String? joinId;
+  final int joinStake;
 
   @override
   State<CardsOnlineHub> createState() => _CardsOnlineHubState();
@@ -2912,6 +2878,12 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
     super.initState();
     _load();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load(light: true));
+    final j = widget.joinId;
+    if (j != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _join(id: j, stake: widget.joinStake);
+      });
+    }
   }
 
   @override

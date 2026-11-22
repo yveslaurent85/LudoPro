@@ -24,6 +24,7 @@ import 'tournaments_screen.dart';
 import 'cartes.dart';
 import 'paris_screen.dart';
 import 'deux_des.dart';
+import 'game_hub.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
 import 'jackpot_live.dart';
@@ -1571,66 +1572,59 @@ class _GamesPage extends StatelessWidget {
   }
 }
 
-/// Choix du mode de Ludo : en présentiel ou en ligne.
+/// Page du Ludo : présentiel, en ligne, et parties ouvertes à rejoindre.
 class _LudoModePage extends StatelessWidget {
   const _LudoModePage({required this.onLocal});
 
   final VoidCallback onLocal;
 
+  void _push(BuildContext context, Widget page) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: _appBackground,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    ),
-                    const Text(
-                      'Ludo',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                _ModeCard(
-                  color: const Color(0xFF22B14C),
-                  icon: Icons.groups,
-                  title: 'En présentiel',
-                  subtitle: 'Chaque joueur se connecte à son compte',
-                  onTap: onLocal,
-                ),
-                const SizedBox(height: 14),
-                _ModeCard(
-                  color: const Color(0xFF1E6BFF),
-                  icon: Icons.public,
-                  title: 'En ligne',
-                  subtitle: 'Crée un compte pour jouer à distance',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (context) => const OnlineScreen(),
-                    ),
-                  ),
-                ),
-                const Spacer(flex: 2),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return GameHubPage(
+      title: 'Ludo',
+      subtitle: tr('Présentiel ou en ligne', 'Face to face or online'),
+      icon: Icons.grid_view_rounded,
+      accent: const Color(0xFF22B14C),
+      infoKey: 'ludo',
+      onPresentiel: onLocal,
+      onOnline: () => _push(context, const OnlineScreen()),
+      onTournois: () => _push(context, const TournamentsScreen()),
+      onJoin: (g) => _push(context, OnlineLobbyScreen(joinId: g.id)),
+      source: () {
+        if (!firebaseReady) return Stream.value(const <HubGame>[]);
+        final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+        return FirebaseFirestore.instance
+            .collection('games')
+            .where('status', isEqualTo: 'waiting')
+            .limit(30)
+            .snapshots()
+            .map((q) {
+          int ms(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+            final t = d.data()['createdAt'];
+            return t is Timestamp ? t.millisecondsSinceEpoch : 0;
+          }
+
+          final docs = q.docs
+              .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+              .where((d) => d.data()['private'] != true)
+              .toList()
+            ..sort((a, b) => ms(b).compareTo(ms(a)));
+          return [
+            for (final d in docs)
+              HubGame(
+                id: d.id,
+                host: '${d.data()['hostName'] ?? ''}',
+                stake: (d.data()['stake'] as num?)?.toInt() ?? 0,
+                players:
+                    '${((d.data()['players'] as List?) ?? const []).length}/${(d.data()['maxPlayers'] as num?)?.toInt() ?? 2}',
+                badges: d.data()['teamMode'] == true ? const ['2v2'] : const [],
+              ),
+          ];
+        });
+      },
     );
   }
 }
@@ -3339,8 +3333,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             // Partie serveur : le résultat est déjà dans le document ;
             // on montre le dé qui roule, puis on applique l'état.
             _rollHold = true;
-            _showRemoteRoll((d['cur'] as num?)?.toInt() ?? currentPlayer)
-                .whenComplete(() {
+            final curSeat = (d['cur'] as num?)?.toInt() ?? currentPlayer;
+            // Face réellement tirée : le dé roule directement vers elle
+            // (plus de chiffre au hasard puis un second).
+            int? real;
+            final lrl = d['lastRoll'];
+            if (d['hasRolled'] == true) {
+              real = (d['dice'] as num?)?.toInt();
+            } else if (lrl is List && curSeat >= 0 && curSeat < lrl.length) {
+              real = (lrl[curSeat] as num?)?.toInt();
+            }
+            if (real != null && (real < 1 || real > 6)) real = null;
+            _showRemoteRoll(curSeat, result: real).whenComplete(() {
               _rollHold = false;
               final last = _latestDoc;
               if (mounted && last != null) _applyRemote(last);
@@ -3410,7 +3414,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   }
 
   /// Anime le dé d'un adversaire (vu sur mon écran).
-  Future<void> _showRemoteRoll(int cur) async {
+  Future<void> _showRemoteRoll(int cur, {int? result}) async {
     if (!mounted || gameOver) return;
     final token = ++_token;
     try {
@@ -3419,7 +3423,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         currentPlayer = cur;
         isRolling = true;
         flightPhase = 1;
-        pendingDice = random.nextInt(6) + 1;
+        pendingDice = result ?? (random.nextInt(6) + 1);
         dieSpin = [
           (random.nextBool() ? 1 : -1) * (1 + random.nextInt(2)),
           (random.nextBool() ? 1 : -1) * (2 + random.nextInt(2)),

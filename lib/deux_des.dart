@@ -11,6 +11,7 @@ import 'balance_dialog.dart';
 import 'replay_core.dart';
 import 'game_chat.dart';
 import 'dice3d.dart';
+import 'game_hub.dart';
 import 'lang.dart';
 import 'share_menu.dart';
 import 'lobby_widgets.dart';
@@ -22,6 +23,7 @@ import 'painters.dart';
 import 'rejouer.dart';
 import 'side_bets.dart';
 import 'stake_field.dart';
+import 'tournaments_screen.dart';
 import 'rules.dart';
 
 // ----------------------------------------------------------------------
@@ -272,41 +274,44 @@ class DeuxDesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Shell(
+    return GameHubPage(
       title: 'Deux dés',
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _card(
-              Icons.groups,
-              'En présentiel',
-              'Chaque joueur se connecte à son compte',
-              const Color(0xFF22B14C),
-              () => _go(context, (_) => const _LocalSetup()),
-            ),
-            const SizedBox(height: 14),
-            _card(
-              Icons.public,
-              'En ligne',
-              'Chacun joue depuis son téléphone',
-              const Color(0xFF1E6BFF),
-              () {
-                if (!firebaseReady) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Le jeu en ligne est indisponible.'),
-                    ),
-                  );
-                  return;
-                }
-                _go(context, (_) => const _OnlineHub());
-              },
-            ),
-          ],
-        ),
-      ),
+      subtitle: tr('Lance deux dés, défie les autres', 'Roll two dice, challenge others'),
+      icon: Icons.casino,
+      accent: const Color(0xFFE07B00),
+      infoKey: 'deuxdes',
+      onPresentiel: () => _go(context, (_) => const _LocalSetup()),
+      onOnline: () {
+        if (!firebaseReady) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Le jeu en ligne est indisponible.')),
+          );
+          return;
+        }
+        _go(context, (_) => const _OnlineHub());
+      },
+      onTournois: () => _go(context, (_) => const TournamentsScreen()),
+      onJoin: (g) => _go(context, (_) => _OnlineHub(joinId: g.id)),
+      source: () {
+        final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+        if (!firebaseReady) return Stream.value(const <HubGame>[]);
+        return _rooms.where('status', isEqualTo: 'waiting').limit(30).snapshots().map((q) {
+          final docs = q.docs
+              .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+              .where((d) => d.data()['private'] != true)
+              .toList()
+            ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+          return [
+            for (final d in docs)
+              HubGame(
+                id: d.id,
+                host: '${d.data()['hostName'] ?? ''}',
+                stake: (d.data()['stake'] as num?)?.toInt() ?? 0,
+                players: '${_playersOf(d.data()).length}/${(d.data()['maxPlayers'] as num?)?.toInt() ?? 2}',
+              ),
+          ];
+        });
+      },
     );
   }
 }
@@ -1529,7 +1534,9 @@ class _LocalGameState extends State<_LocalGame> {
 // ----------------------------------------------------------------------
 
 class _OnlineHub extends StatefulWidget {
-  const _OnlineHub();
+  const _OnlineHub({this.joinId});
+
+  final String? joinId;
 
   @override
   State<_OnlineHub> createState() => _OnlineHubState();
@@ -1555,6 +1562,17 @@ class _OnlineHubState extends State<_OnlineHub> {
   bool showOpen = true;  // liste « Parties ouvertes » dépliée
   bool showLive = false; // liste « Parties en cours » dépliée
   bool creating = false; // vrai : options de création affichées
+
+  @override
+  void initState() {
+    super.initState();
+    final j = widget.joinId;
+    if (j != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _join(j);
+      });
+    }
+  }
 
   @override
   void dispose() {
