@@ -30,10 +30,33 @@
       animation: katika-spin 0.9s linear infinite;
     }
     @keyframes katika-spin { to { transform: rotate(360deg); } }
+    /* Bandeau partenaire 728x90, collé en bas, réduit pour tenir sur téléphone. */
+    #katika-ad {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      height: 90px; overflow: hidden; background: #061A66;
+    }
+    #katika-ad iframe {
+      position: absolute; left: 0; bottom: 0; width: 728px; height: 90px;
+      border: 0; margin: 0; padding: 0; transform-origin: 0 100%;
+    }
   </style>
 </head>
 <body>
   <div id="katika-boot"><div>Katika</div><div class="ring"></div></div>
+  <div id="katika-ad"><iframe scrolling="no" frameborder="0" width="728" height="90"
+    src="https://refbanners.com/I?tag=d_6392036m_9799c_&amp;site=6392036&amp;ad=9799"></iframe></div>
+  <script>
+    (function () {
+      function fit() {
+        var w = window.innerWidth, k = Math.min(1, w / 728);
+        var box = document.getElementById('katika-ad'), f = box.firstElementChild;
+        box.style.height = (90 * k) + 'px';
+        f.style.transform = 'scale(' + k + ')';
+        f.style.left = Math.max(0, (w - 728 * k) / 2) + 'px';
+      }
+      fit(); window.addEventListener('resize', fit);
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
