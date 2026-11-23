@@ -455,7 +455,7 @@ class _RiskBoxState extends State<_RiskBox> {
         SizedBox(
           width: double.infinity,
           child: OutlinedButton(
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF68729A))),
+            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF12183A), side: const BorderSide(color: Color(0xFF68729A))),
             onPressed: _busy ? null : _toggle,
             child: Text(_cleared ? 'Remettre sous surveillance' : 'Marquer comme vérifié'),
           ),

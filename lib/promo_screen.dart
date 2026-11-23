@@ -173,7 +173,7 @@ class _PromoScreenState extends State<PromoScreen> {
             Expanded(
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF12183A),
                   side: const BorderSide(color: Color(0xFF68729A)),
                 ),
                 onPressed: () {

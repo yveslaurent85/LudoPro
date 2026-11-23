@@ -197,7 +197,7 @@ class _CityDialogState extends State<_CityDialog> {
             DropdownButtonFormField<String>(
               value: _region,
               isExpanded: true,
-              dropdownColor: Color(0xFF12183A),
+              dropdownColor: const Color(0xFFF3F6FF),
               style: const TextStyle(color: Color(0xFF12183A)),
               decoration: InputDecoration(labelText: tr('Région', 'Region'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               items: [for (final r in kCmCities.keys) DropdownMenuItem(value: r, child: Text(r))],
@@ -209,7 +209,7 @@ class _CityDialogState extends State<_CityDialog> {
             DropdownButtonFormField<String>(
               value: _city,
               isExpanded: true,
-              dropdownColor: Color(0xFF12183A),
+              dropdownColor: const Color(0xFFF3F6FF),
               style: const TextStyle(color: Color(0xFF12183A)),
               decoration: InputDecoration(labelText: tr('Ville', 'City'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               items: [

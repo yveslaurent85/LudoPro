@@ -1240,7 +1240,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE3EAFF),
-                  foregroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF12183A),
                 ),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -1262,7 +1262,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE3EAFF),
-                  foregroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF12183A),
                 ),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(builder: (_) => const AdminZonesScreen()),
@@ -1282,7 +1282,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE3EAFF),
-                  foregroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF12183A),
                 ),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(builder: (_) => const CashiersAdminScreen()),
@@ -1302,7 +1302,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE3EAFF),
-                  foregroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF12183A),
                 ),
                 onPressed: statsBusy ? null : _backfillStats,
                 icon: const Icon(Icons.calculate),
@@ -1466,7 +1466,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFE3EAFF),
-                foregroundColor: Colors.white,
+                foregroundColor: const Color(0xFF12183A),
               ),
               onPressed: () => setState(() => showHistory = !showHistory),
               icon: Icon(showHistory ? Icons.expand_less : Icons.history),

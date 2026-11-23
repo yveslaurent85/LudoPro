@@ -78,16 +78,16 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
         margin: const EdgeInsets.only(top: 12),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
+          color: const Color(0xFFE3EAFF),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: border ?? Colors.white24),
+          border: Border.all(color: border ?? const Color(0xFFD5DEF5)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900)),
+                    color: const Color(0xFF12183A), fontSize: 15, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
             ...children,
           ],
@@ -100,10 +100,10 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-                child: Text(k, style: const TextStyle(color: Colors.white70, fontSize: 13))),
+                child: Text(k, style: const TextStyle(color: const Color(0xFF56608A), fontSize: 13))),
             Text(v,
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800)),
+                    color: const Color(0xFF12183A), fontSize: 13, fontWeight: FontWeight.w800)),
           ],
         ),
       );
@@ -119,7 +119,7 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
     if (_err != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 12),
-        child: Text(_err!, style: const TextStyle(color: Colors.white70)),
+        child: Text(_err!, style: const TextStyle(color: const Color(0xFF56608A))),
       );
     }
     final d = _d!;
@@ -139,7 +139,7 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
           [
             if (live.isEmpty)
               Text(tr('Aucune partie ouverte ou en cours.', 'No open or running game.'),
-                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  style: const TextStyle(color: const Color(0xFF56608A), fontSize: 13)),
             for (final g in live)
               GestureDetector(
                 onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
@@ -163,18 +163,18 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
                               '${rpKindName('${g['kind']}')} · ${g['status'] == 'waiting' ? tr('en attente', 'waiting') : tr('en cours', 'in progress')}'
                               '${_i(g['stake']) > 0 ? ' · ${_fcfa(_i(g['stake']))}' : ''}',
                               style: const TextStyle(
-                                  color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                                  color: const Color(0xFF12183A), fontWeight: FontWeight.w800, fontSize: 13),
                             ),
                             Text(
                               [for (final n in (g['names'] as List? ?? const [])) '$n'].join(' · '),
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              style: const TextStyle(color: const Color(0xFF56608A), fontSize: 12),
                             ),
                             Text(_dateTime(_i(g['t'])),
-                                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                                style: const TextStyle(color: const Color(0xFF68729A), fontSize: 11)),
                           ],
                         ),
                       ),
-                      const Icon(Icons.play_circle_outline, color: Colors.white70),
+                      const Icon(Icons.play_circle_outline, color: const Color(0xFF56608A)),
                     ],
                   ),
                 ),
@@ -194,7 +194,7 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
         _box(tr('Parrain', 'Sponsor'), [
           if (ref == null)
             Text(tr('Aucun parrain.', 'No sponsor.'),
-                style: const TextStyle(color: Colors.white70, fontSize: 13))
+                style: const TextStyle(color: const Color(0xFF56608A), fontSize: 13))
           else ...[
             _line(tr('Pseudo', 'Name'), '${ref['pseudo']}'.isEmpty ? '—' : '${ref['pseudo']}'),
             if ('${ref['code']}'.isNotEmpty) _line(tr('Code utilisé', 'Code used'), '${ref['code']}'),
@@ -209,10 +209,10 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
             _line(tr('Gains partenaire', 'Partner earnings'), _fcfa(_i(d['partnerEarned']))),
             _line(tr('Solde partenaire', 'Partner balance'), _fcfa(_i(d['partnerBalance']))),
           ],
-          if (kids.isNotEmpty) const Divider(color: Colors.white24, height: 18),
+          if (kids.isNotEmpty) const Divider(color: const Color(0xFFD5DEF5), height: 18),
           if (kids.isEmpty)
             Text(tr('Aucun filleul.', 'No referrals.'),
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                style: const TextStyle(color: const Color(0xFF56608A), fontSize: 13)),
           for (final k in kids)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
@@ -224,10 +224,10 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
                       children: [
                         Text('${k['pseudo']}'.isEmpty ? '—' : '${k['pseudo']}',
                             style: const TextStyle(
-                                color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                                color: const Color(0xFF12183A), fontWeight: FontWeight.w800, fontSize: 13)),
                         Text(
                           tr('inscrit le ${_date(k['createdAt'])}', 'joined ${_date(k['createdAt'])}'),
-                          style: const TextStyle(color: Colors.white54, fontSize: 11),
+                          style: const TextStyle(color: const Color(0xFF68729A), fontSize: 11),
                         ),
                       ],
                     ),
@@ -236,9 +236,9 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(tr('${_i(k['played'])} parties', '${_i(k['played'])} games'),
-                          style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          style: const TextStyle(color: const Color(0xFF12183A), fontSize: 12)),
                       Text(tr('misé ${_fcfa(_i(k['wagered']))}', 'wagered ${_fcfa(_i(k['wagered']))}'),
-                          style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                          style: const TextStyle(color: const Color(0xFF68729A), fontSize: 11)),
                     ],
                   ),
                 ],
