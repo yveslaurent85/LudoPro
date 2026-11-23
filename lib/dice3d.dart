@@ -102,9 +102,14 @@ class Die3D extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Dé légèrement réduit (≈ 88 %), centré dans sa zone.
     return SizedBox.expand(
-      child: CustomPaint(
-        painter: _Die3DPainter(value, t, spin, glow, color),
+      child: FractionallySizedBox(
+        widthFactor: 0.88,
+        heightFactor: 0.88,
+        child: CustomPaint(
+          painter: _Die3DPainter(value, t, spin, glow, color),
+        ),
       ),
     );
   }
@@ -255,7 +260,7 @@ class _Die3DPainter extends CustomPainter {
         }
         pip.close();
         final pb = pip.getBounds();
-        final base = Color.lerp(color, Colors.black, 0.1)!;
+        final base = const Color(0xFF111111); // points toujours noirs
         canvas.drawPath(
           pip,
           Paint()
