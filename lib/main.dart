@@ -1765,7 +1765,11 @@ class _LudoModePage extends StatelessWidget {
                 stake: (d.data()['stake'] as num?)?.toInt() ?? 0,
                 players:
                     '${((d.data()['players'] as List?) ?? const []).length}/${(d.data()['maxPlayers'] as num?)?.toInt() ?? 2}',
-                badges: d.data()['teamMode'] == true ? const ['2v2'] : const [],
+                badges: [
+                  if ((d.data()['pawnCount'] as num?) != null)
+                    '${(d.data()['pawnCount'] as num).toInt()} ${tr('pions', 'pawns')}',
+                  if (d.data()['teamMode'] == true) '2v2',
+                ],
               ),
           ];
         });

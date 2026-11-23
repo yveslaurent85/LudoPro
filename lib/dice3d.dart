@@ -202,7 +202,7 @@ class _Die3DPainter extends CustomPainter {
       final b = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2])
           .clamp(0.0, 1.0)
           .toDouble();
-      final face = Color.lerp(const Color(0xFFA9B3D6), const Color(0xFFFFFCF2), b)!;
+      final face = Color.lerp(const Color(0xFFC3C9DA), const Color(0xFFFFFFFF), b)!;
       final bounds = path.getBounds();
 
       // Fond de la face : dégradé doux (lumière en haut à gauche) + léger reflet.
@@ -213,9 +213,9 @@ class _Die3DPainter extends CustomPainter {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color.lerp(face, Colors.white, 0.55)!,
+              Color.lerp(face, Colors.white, 0.6)!,
               face,
-              Color.lerp(face, const Color(0xFF6F7AA3), 0.28)!,
+              Color.lerp(face, const Color(0xFF8E97B8), 0.18)!,
             ],
             stops: const [0.0, 0.55, 1.0],
           ).createShader(bounds),
@@ -225,9 +225,9 @@ class _Die3DPainter extends CustomPainter {
         path,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = max(1.4, size.width * 0.035)
+          ..strokeWidth = max(1.0, size.width * 0.022)
           ..strokeJoin = StrokeJoin.round
-          ..color = Color.lerp(color, const Color(0xFF2A3358), 0.55)!,
+          ..color = const Color(0xFFC4C9D6),
       );
       canvas.drawPath(
         path,
@@ -238,8 +238,8 @@ class _Die3DPainter extends CustomPainter {
       );
 
       // Points : billes brillantes (le 1 est plus gros, à la couleur du joueur).
-      final isOne = f[0].toInt() == 1;
-      final pipR = isOne ? 0.27 : 0.19;
+      // Style « trous » : tous les points ont la couleur du joueur, même taille.
+      const pipR = 0.2;
       for (final idx in _pips[f[0].toInt()]!) {
         final gx = ((idx % 3) - 1) * 0.55;
         final gy = ((idx ~/ 3) - 1) * 0.55;
@@ -255,15 +255,15 @@ class _Die3DPainter extends CustomPainter {
         }
         pip.close();
         final pb = pip.getBounds();
-        final base = isOne ? Color.lerp(color, const Color(0xFF7A0A12), 0.35)! : const Color(0xFF141937);
+        final base = Color.lerp(color, Colors.black, 0.1)!;
         canvas.drawPath(
           pip,
           Paint()
             ..shader = RadialGradient(
               center: const Alignment(-0.35, -0.35),
               radius: 1.0,
-              colors: [Color.lerp(base, Colors.white, 0.45)!, base, Color.lerp(base, Colors.black, 0.4)!],
-              stops: const [0.0, 0.5, 1.0],
+              colors: [base, base, Color.lerp(base, Colors.black, 0.3)!],
+              stops: const [0.0, 0.7, 1.0],
             ).createShader(pb),
         );
       }

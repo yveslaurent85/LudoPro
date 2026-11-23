@@ -216,7 +216,8 @@ class _GameHubPageState extends State<GameHubPage> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: _hubInk, fontSize: 16, fontWeight: FontWeight.w700)),
                     ),
-                    for (final b in g.badges) _pill(b, const Color(0xFF7C3AED), Colors.white),
+                    for (final b in g.badges)
+                      _pill(b, b == '2v2' ? const Color(0xFF7C3AED) : const Color(0xFF475569), Colors.white),
                   ],
                 ),
                 if (g.players.isNotEmpty)
