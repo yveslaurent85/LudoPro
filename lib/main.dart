@@ -103,7 +103,7 @@ class LudoProApp extends StatelessWidget {
       builder: (context, child) {
         if (!kIsWeb) return child ?? const SizedBox.shrink();
         final w = MediaQuery.of(context).size.width;
-        final h = 90.0 * (w >= 728 ? 1.0 : w / 728);
+        final h = 22.0 + 90.0 * (w >= 728 ? 1.0 : w / 728);
         return Padding(padding: EdgeInsets.only(bottom: h), child: child);
       },
       home: const SharedLinkGate(child: CashierGate(child: CityGate(child: HomeScreen()))),
@@ -1331,6 +1331,91 @@ class _HomeShellState extends State<_HomeShell> {
   }
 }
 
+/// Une carte ouverte (valeur + famille) pour les icônes des jeux de cartes.
+class _MiniCard extends StatelessWidget {
+  const _MiniCard(this.rank, this.suit, {this.angle = 0});
+
+  final String rank;
+  final String suit; // ♠ ♥ ♦ ♣
+  final double angle;
+
+  @override
+  Widget build(BuildContext context) {
+    final red = suit == '♥' || suit == '♦';
+    final c = red ? const Color(0xFFD32F2F) : const Color(0xFF12183A);
+    return Transform.rotate(
+      angle: angle,
+      child: Container(
+        width: 30,
+        height: 44,
+        padding: const EdgeInsets.fromLTRB(3, 2, 2, 2),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: const Color(0x33000000), width: 0.8),
+          boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(rank, style: TextStyle(color: c, fontSize: 12, fontWeight: FontWeight.w900, height: 1.05)),
+            Text(suit, style: TextStyle(color: c, fontSize: 13, height: 1)),
+            const Spacer(),
+            Align(
+              alignment: Alignment.bottomRight,
+              child: Text(suit, style: TextStyle(color: c, fontSize: 15, height: 1)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Éventail de cartes ouvertes : [groups] = groupes séparés (ex. 3 à gauche, 2 à droite).
+class _CardFan extends StatelessWidget {
+  const _CardFan(this.groups);
+
+  final List<List<List<String>>> groups; // groupe -> carte -> [valeur, famille]
+
+  Widget _group(List<List<String>> cards) {
+    final n = cards.length;
+    const step = 13.0;
+    final w = 30.0 + step * (n - 1);
+    return SizedBox(
+      width: w,
+      height: 56,
+      child: Stack(
+        children: [
+          for (int i = 0; i < n; i++)
+            Positioned(
+              left: step * i,
+              top: 6 + (i - (n - 1) / 2).abs() * 1.5,
+              child: _MiniCard(cards[i][0], cards[i][1], angle: (i - (n - 1) / 2) * 0.16),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int g = 0; g < groups.length; g++) ...[
+            if (g > 0) const SizedBox(width: 10),
+            _group(groups[g]),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+
 /// Tuile carrée d'un jeu (accueil et page « Jeux »).
 class _GameTile extends StatelessWidget {
   const _GameTile({
@@ -1342,8 +1427,11 @@ class _GameTile extends StatelessWidget {
     this.image,
     this.badge,
     this.infoKey,
+    this.leading,
   });
 
+  /// Remplace le rond d'icône (ex. éventail de cartes).
+  final Widget? leading;
   final String? infoKey;
   final String title;
   final String subtitle;
@@ -1411,7 +1499,7 @@ class _GameTile extends StatelessWidget {
               children: [
                 Expanded(
                   child: Center(
-                    child: Container(
+                    child: leading ?? Container(
                       width: 78,
                       height: 78,
                       decoration: BoxDecoration(
@@ -1503,6 +1591,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFFE5262B),
           icon: Icons.style,
           infoKey: 'tiah',
+          leading: const _CardFan([[['A', '♠'], ['10', '♥']]]),
           title: 'TIAH',
           subtitle: tr('Atteins 21 sans dépasser', 'Reach 21 without going over'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1512,6 +1601,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF7B1FA2),
           icon: Icons.filter_5,
           infoKey: 'boubayah',
+          leading: const _CardFan([[['7', '♦'], ['K', '♠'], ['5', '♣']], [['9', '♥'], ['A', '♣']]]),
           title: 'BOUBAYAH',
           subtitle: tr('Le plus gros total gagne', 'Highest total wins'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1521,6 +1611,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFFEF6C00),
           icon: Icons.style,
           infoKey: 'fapfap',
+          leading: const _CardFan([[['3', '♠'], ['7', '♥'], ['10', '♦'], ['A', '♣'], ['K', '♥']]]),
           title: 'FAP-FAP',
           subtitle: tr('Plis et Corat · en ligne', 'Tricks and Corat · online'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1539,6 +1630,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF0277BD),
           icon: Icons.location_on,
           infoKey: 'tchek',
+          leading: const _CardFan([[['A', '♠'], ['K', '♥'], ['Q', '♦'], ['J', '♣']]]),
           title: 'TCHEK GAMES',
           subtitle: tr('Défausse-toi de tes cartes · en ligne', 'Shed all your cards · online'),
           badge: tr('NOUVEAU', 'NEW'),
