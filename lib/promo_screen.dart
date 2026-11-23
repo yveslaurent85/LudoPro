@@ -88,8 +88,8 @@ class _PromoScreenState extends State<PromoScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: Colors.white.withOpacity(0.12),
-        border: Border.all(color: Colors.white24),
+        color: const Color(0xFFE3EAFF),
+        border: Border.all(color: Color(0xFFD5DEF5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,13 +101,17 @@ class _PromoScreenState extends State<PromoScreen> {
   Widget _myCode() {
     final code = info['code'] as String?;
     final reason = info['reason'] as String?;
-    final percent = _i(info['percent']) == 0 ? 20 : _i(info['percent']);
+    final pv = info['percent'];
+    final percentNum = pv is num && pv > 0 ? pv.toDouble() : 12.5;
+    final percent = percentNum == percentNum.roundToDouble() ? percentNum.toStringAsFixed(0) : percentNum.toString().replaceAll('.', ',');
+    final tiers = [for (final t in (info['tiers'] as List? ?? const [])) Map<String, dynamic>.from(t as Map)];
+    final kids = _i(info['referrals']);
 
     return _card([
       const Text(
         'Ton code promo',
         style: TextStyle(
-          color: Colors.white,
+          color: Color(0xFF12183A),
           fontSize: 16,
           fontWeight: FontWeight.w800,
         ),
@@ -128,7 +132,7 @@ class _PromoScreenState extends State<PromoScreen> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.copy, color: Colors.white),
+              icon: const Icon(Icons.copy, color: Color(0xFF12183A)),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: code));
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -143,13 +147,13 @@ class _PromoScreenState extends State<PromoScreen> {
           reason == 'taken'
               ? 'Ton pseudo est déjà utilisé comme code promo par un autre joueur.'
               : "Tu n'as pas encore de pseudo : ton code promo est ton pseudo.",
-          style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 14),
+          style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 14),
         ),
       if (code != null) ...[
         const SizedBox(height: 10),
         const Text(
           'Ton lien promo',
-          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
+          style: TextStyle(color: Color(0xFF12183A), fontSize: 14, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
         Container(
@@ -160,7 +164,7 @@ class _PromoScreenState extends State<PromoScreen> {
           ),
           child: SelectableText(
             PromoLink.linkFor(code),
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+            style: const TextStyle(color: Color(0xFF12183A), fontSize: 13),
           ),
         ),
         const SizedBox(height: 8),
@@ -170,7 +174,7 @@ class _PromoScreenState extends State<PromoScreen> {
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white54),
+                  side: const BorderSide(color: Color(0xFF68729A)),
                 ),
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: PromoLink.linkFor(code)));
@@ -203,15 +207,42 @@ class _PromoScreenState extends State<PromoScreen> {
         const SizedBox(height: 4),
         const Text(
           'Quand quelqu\'un ouvre ou installe le site avec ton lien, ton code est déjà rempli : il devient ton filleul à la création de son compte.',
-          style: TextStyle(color: Colors.white54, fontSize: 12),
+          style: TextStyle(color: Color(0xFF68729A), fontSize: 12),
         ),
       ],
       const SizedBox(height: 8),
       Text(
         'Partage ton code. Quand un joueur le saisit, tu reçois $percent % de '
         'la commission que Katika prélève sur ses parties.',
-        style: const TextStyle(color: Colors.white70, fontSize: 13),
+        style: const TextStyle(color: Color(0xFF56608A), fontSize: 13),
       ),
+      if (tiers.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        Text(
+          'Ta commission monte avec le nombre de joueurs inscrits (tu en as $kids) :',
+          style: const TextStyle(color: Color(0xFF12183A), fontSize: 13, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        for (final t in tiers)
+          Builder(builder: (_) {
+            final from = _i(t['from']);
+            final to = _i(t['to']);
+            final p = (t['percent'] as num).toDouble();
+            final ps = p == p.roundToDouble() ? p.toStringAsFixed(0) : p.toString().replaceAll('.', ',');
+            final here = kids >= from && (to == 0 || kids <= to);
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
+              child: Text(
+                '${here ? '👉 ' : '•  '}${to == 0 ? 'Plus de ${from - 1}' : 'De $from à $to'} joueurs : $ps %',
+                style: TextStyle(
+                  color: here ? const Color(0xFFFFC21A) : Color(0xFF56608A),
+                  fontSize: 12.5,
+                  fontWeight: here ? FontWeight.w900 : FontWeight.w500,
+                ),
+              ),
+            );
+          }),
+      ],
     ]);
   }
 
@@ -225,12 +256,12 @@ class _PromoScreenState extends State<PromoScreen> {
               children: [
                 const Text(
                   'Filleuls',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
                 ),
                 Text(
                   '${_i(info['referrals'])}',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF12183A),
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
                   ),
@@ -244,7 +275,7 @@ class _PromoScreenState extends State<PromoScreen> {
               children: [
                 const Text(
                   'Gains de parrainage',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
                 ),
                 FittedBox(
                   fit: BoxFit.scaleDown,
@@ -268,13 +299,13 @@ class _PromoScreenState extends State<PromoScreen> {
   /// Gains retirables : le bouton apparaît quand ils atteignent le minimum.
   Widget _withdrawCard() {
     final available = _i(info['available']);
-    final min = _i(info['minWithdraw']) == 0 ? 100 : _i(info['minWithdraw']);
+    final min = _i(info['minWithdraw']) == 0 ? 500 : _i(info['minWithdraw']);
     final can = info['canWithdraw'] == true || available >= min;
 
     return _card([
       const Text(
         'Gains à retirer',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
+        style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
       ),
       FittedBox(
         fit: BoxFit.scaleDown,
@@ -309,7 +340,7 @@ class _PromoScreenState extends State<PromoScreen> {
         Text(
           'Le bouton « Retirer les gains » apparaît à partir de '
           '${Wallet.format(min)}. Les gains sont ajoutés à ton solde.',
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
+          style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
         ),
     ]);
   }
@@ -320,13 +351,13 @@ class _PromoScreenState extends State<PromoScreen> {
       return _card([
         const Text(
           'Ton parrain',
-          style: TextStyle(color: Colors.white70, fontSize: 12),
+          style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
         ),
         const SizedBox(height: 2),
         Text(
           sponsor,
           style: const TextStyle(
-            color: Colors.white,
+            color: Color(0xFF12183A),
             fontSize: 18,
             fontWeight: FontWeight.w800,
           ),
@@ -336,13 +367,13 @@ class _PromoScreenState extends State<PromoScreen> {
     return _card([
       const Text(
         'Code de parrain',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
+        style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
       ),
       const SizedBox(height: 4),
       const Text(
         'Le code de parrain se saisit uniquement à la création du compte '
         '(facultatif). Il ne peut plus être ajouté après.',
-        style: TextStyle(color: Colors.white70, fontSize: 12),
+        style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
       ),
     ]);
   }
@@ -361,7 +392,7 @@ class _PromoScreenState extends State<PromoScreen> {
               Text(
                 error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 15),
+                style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 15),
               ),
               const SizedBox(height: 14),
               ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
@@ -395,7 +426,7 @@ class _PromoScreenState extends State<PromoScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+            colors: [Color(0xFFF3F6FF), Color(0xFFF3F6FF)],
           ),
         ),
         child: SafeArea(
@@ -407,13 +438,13 @@ class _PromoScreenState extends State<PromoScreen> {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A)),
                     ),
                     const Expanded(
                       child: Text(
                         '🎁 Code promo',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF12183A),
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
                         ),

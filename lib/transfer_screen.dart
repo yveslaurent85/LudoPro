@@ -147,9 +147,9 @@ class _TransferScreenState extends State<TransferScreen> {
 
   InputDecoration _dec(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: Colors.white54),
+        hintStyle: const TextStyle(color: Color(0xFF68729A)),
         filled: true,
-        fillColor: Colors.white.withOpacity(0.12),
+        fillColor: const Color(0xFFE3EAFF),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
@@ -166,7 +166,7 @@ class _TransferScreenState extends State<TransferScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+            colors: [Color(0xFFF3F6FF), Color(0xFFF3F6FF)],
           ),
         ),
         child: SafeArea(
@@ -178,13 +178,13 @@ class _TransferScreenState extends State<TransferScreen> {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A)),
                     ),
                     const Expanded(
                       child: Text(
                         '🔁 Transférer de l\'argent',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF12183A),
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
                         ),
@@ -201,7 +201,7 @@ class _TransferScreenState extends State<TransferScreen> {
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(18),
-                        color: Colors.white.withOpacity(0.12),
+                        color: const Color(0xFFE3EAFF),
                         border: Border.all(color: _gold),
                       ),
                       child: Column(
@@ -209,7 +209,7 @@ class _TransferScreenState extends State<TransferScreen> {
                           const Text(
                             'Mon solde',
                             style:
-                                TextStyle(color: Colors.white70, fontSize: 13),
+                                TextStyle(color: Color(0xFF56608A), fontSize: 13),
                           ),
                           StreamBuilder<int>(
                             stream: Wallet.watch(uid),
@@ -229,7 +229,7 @@ class _TransferScreenState extends State<TransferScreen> {
                     const Text(
                       'Destinataire',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF12183A),
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
                       ),
@@ -239,7 +239,7 @@ class _TransferScreenState extends State<TransferScreen> {
                       controller: toCtrl,
                       onChanged: _onTo,
                       autocorrect: false,
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: Color(0xFF12183A)),
                       decoration: _dec('Tape 2 lettres du pseudo du joueur'),
                     ),
                     if (_searching)
@@ -251,7 +251,7 @@ class _TransferScreenState extends State<TransferScreen> {
                       Container(
                         margin: const EdgeInsets.only(top: 6),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: Color(0xFF12183A),
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Column(
@@ -276,13 +276,13 @@ class _TransferScreenState extends State<TransferScreen> {
                       const Padding(
                         padding: EdgeInsets.only(top: 6),
                         child: Text('Aucun joueur trouvé avec ces lettres.',
-                            style: TextStyle(color: Colors.white70, fontSize: 12)),
+                            style: TextStyle(color: Color(0xFF56608A), fontSize: 12)),
                       ),
                     const SizedBox(height: 16),
                     const Text(
                       'Montant (FCFA)',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF12183A),
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
                       ),
@@ -291,7 +291,7 @@ class _TransferScreenState extends State<TransferScreen> {
                     TextField(
                       controller: amountCtrl,
                       keyboardType: TextInputType.number,
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: Color(0xFF12183A)),
                       decoration: _dec('Entre $_min et $_max'),
                     ),
                     const SizedBox(height: 18),
@@ -318,7 +318,7 @@ class _TransferScreenState extends State<TransferScreen> {
                         child: Text(
                           error!,
                           style: const TextStyle(
-                            color: Color(0xFFFF8A80),
+                            color: Color(0xFFD32F2F),
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -329,7 +329,7 @@ class _TransferScreenState extends State<TransferScreen> {
                         child: Text(
                           success!,
                           style: const TextStyle(
-                            color: Color(0xFFA5D6A7),
+                            color: Color(0xFF17883F),
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                           ),
@@ -340,7 +340,7 @@ class _TransferScreenState extends State<TransferScreen> {
                       'Le destinataire est retrouvé grâce à son pseudo ou à son '
                       'code promo. Vérifie bien l\'orthographe : un transfert '
                       'ne peut pas être annulé.',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                      style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
                     ),
                   ],
                 ),

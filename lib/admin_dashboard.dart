@@ -23,7 +23,7 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  static const Color _gold = Color(0xFFFFC21A);
+  static const Color _gold = Color(0xFFB07A00);
 
   bool loading = true;
   bool showHistory = false; // historique des parties replié par défaut
@@ -454,7 +454,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           Text(
             title,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           const SizedBox(height: 4),
           Wrap(spacing: 8, runSpacing: 2, children: chips),
@@ -463,13 +463,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _stat(String label, String value, {Color color = Colors.white}) {
+  Widget _stat(String label, String value, {Color color = Color(0xFF12183A)}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: Colors.white.withOpacity(0.12),
-        border: Border.all(color: Colors.white24),
+        color: const Color(0xFFE3EAFF),
+        border: Border.all(color: Color(0xFFD5DEF5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -477,7 +477,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           Text(
             label,
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 11),
           ),
           const SizedBox(height: 2),
           FittedBox(
@@ -504,7 +504,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: Colors.white.withOpacity(0.12),
+        color: const Color(0xFFE3EAFF),
         border: Border.all(color: _gold, width: 1.5),
       ),
       child: Column(
@@ -515,7 +515,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ? '💰 Ma part des commissions ($houseShare %)'
                 : '💰 Commissions de Katika',
             style: TextStyle(
-              color: Colors.white,
+              color: Color(0xFF12183A),
               fontSize: 16,
               fontWeight: FontWeight.w800,
             ),
@@ -523,7 +523,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 6),
           const Text(
             'Disponibles à retirer',
-            style: TextStyle(color: Colors.white70, fontSize: 12),
+            style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           FittedBox(
             fit: BoxFit.scaleDown,
@@ -540,7 +540,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Text(
             'Total gagné ${_money(houseEarned)} · déjà retiré '
             '${_money(houseWithdrawn)}',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           const SizedBox(height: 10),
           SizedBox(
@@ -550,8 +550,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF22B14C),
                 foregroundColor: Colors.white,
-                disabledBackgroundColor: Colors.white24,
-                disabledForegroundColor: Colors.white54,
+                disabledBackgroundColor: Color(0xFFD5DEF5),
+                disabledForegroundColor: Color(0xFF68729A),
               ),
               onPressed: houseCan && !houseBusy ? _withdrawHouse : null,
               icon: const Icon(Icons.account_balance_wallet),
@@ -566,7 +566,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 "Le bouton s'active à partir de ${_money(houseMin)}.",
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
               ),
             ),
           const SizedBox(height: 6),
@@ -574,7 +574,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'Part nette de Katika (commission moins la part des parrains et '
             'des partenaires), versée dans une caisse commune à tous les '
             'administrateurs. Le retrait vide toute la caisse.',
-            style: TextStyle(color: Colors.white54, fontSize: 11),
+            style: TextStyle(color: Color(0xFF68729A), fontSize: 11),
           ),
         ],
       ),
@@ -588,8 +588,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: Colors.white.withOpacity(0.12),
-        border: Border.all(color: Colors.white38),
+        color: const Color(0xFFE3EAFF),
+        border: Border.all(color: Color(0xFF8A93B8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -597,7 +597,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const Text(
             '🤝 Partenaires',
             style: TextStyle(
-              color: Colors.white,
+              color: Color(0xFF12183A),
               fontSize: 16,
               fontWeight: FontWeight.w800,
             ),
@@ -607,7 +607,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'Un partenaire touche $partnerPercent % de la commission de '
             'Katika (après la part du parrain) sur les parties de ses '
             'filleuls.',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           const SizedBox(height: 10),
           Row(
@@ -615,13 +615,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
               Expanded(
                 child: TextField(
                   controller: partnerCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: Color(0xFF12183A)),
                   decoration: InputDecoration(
                     isDense: true,
                     hintText: 'Code promo du partenaire',
-                    hintStyle: const TextStyle(color: Colors.white54),
+                    hintStyle: const TextStyle(color: Color(0xFF68729A)),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.12),
+                    fillColor: const Color(0xFFE3EAFF),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -645,7 +645,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (partners.isEmpty)
             const Text(
               'Aucun partenaire pour le moment.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
             ),
           for (final p in partners)
             Container(
@@ -653,7 +653,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: Colors.white.withOpacity(0.1),
+                color: const Color(0xFFE3EAFF),
               ),
               child: Row(
                 children: [
@@ -664,7 +664,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         Text(
                           '${p['code']}',
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: Color(0xFF12183A),
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -672,7 +672,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           'Gagné ${_money(_i(p['earned']))} · à retirer '
                           '${_money(_i(p['available']))}',
                           style: const TextStyle(
-                            color: Colors.white70,
+                            color: Color(0xFF56608A),
                             fontSize: 12,
                           ),
                         ),
@@ -685,7 +685,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         : () => _setPartner('${p['code']}', false),
                     child: const Text(
                       'Retirer',
-                      style: TextStyle(color: Color(0xFFFF8A80)),
+                      style: TextStyle(color: Color(0xFFD32F2F)),
                     ),
                   ),
                 ],
@@ -727,7 +727,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              color: Colors.white.withOpacity(0.12),
+              color: const Color(0xFFE3EAFF),
               border: Border.all(color: _gold, width: 1.5),
             ),
             child: Column(
@@ -736,7 +736,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const Text(
                   '🤝 Compte partenaire',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF12183A),
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                   ),
@@ -744,7 +744,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 6),
                 const Text(
                   'Gains disponibles',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
                 ),
                 FittedBox(
                   fit: BoxFit.scaleDown,
@@ -765,8 +765,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF22B14C),
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.white24,
-                      disabledForegroundColor: Colors.white54,
+                      disabledBackgroundColor: Color(0xFFD5DEF5),
+                      disabledForegroundColor: Color(0xFF68729A),
                     ),
                     onPressed: can && !pBusy ? _partnerWithdraw : null,
                     icon: const Icon(Icons.account_balance_wallet),
@@ -780,7 +780,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Text(
                   'Filleuls actifs : $qualified / $needRef',
                   style: TextStyle(
-                    color: cond ? const Color(0xFF7CFFB0) : Colors.white,
+                    color: cond ? const Color(0xFF17883F) : Color(0xFF12183A),
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -790,7 +790,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: LinearProgressIndicator(
                     value: (qualified / needRef).clamp(0.0, 1.0).toDouble(),
                     minHeight: 8,
-                    backgroundColor: Colors.white24,
+                    backgroundColor: Color(0xFFD5DEF5),
                     valueColor: AlwaysStoppedAnimation<Color>(
                       cond ? const Color(0xFF22B14C) : _gold,
                     ),
@@ -804,7 +804,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       'misé au moins ${_money(needWag)} (parties et duels), '
                       "et à partir de ${_money(min)} de gains.",
                       style:
-                          const TextStyle(color: Colors.white70, fontSize: 12),
+                          const TextStyle(color: Color(0xFF56608A), fontSize: 12),
                     ),
                   ),
               ],
@@ -830,13 +830,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'Tu touches ${_i(pStats['percent'])} % de la commission de Katika '
             '(après la part du parrain) sur les parties de tes filleuls. '
             'Ton code : ${pStats['code']}',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           _title('Derniers gains'),
           if (recent.isEmpty)
             const Text(
               'Aucun gain pour le moment.',
-              style: TextStyle(color: Colors.white70),
+              style: TextStyle(color: Color(0xFF56608A)),
             ),
           for (final e in recent)
             Container(
@@ -844,7 +844,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: Colors.white.withOpacity(0.1),
+                color: const Color(0xFFE3EAFF),
               ),
               child: Row(
                 children: [
@@ -852,7 +852,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     child: Text(
                       '${when((e as Map)['createdAt'])} · '
                       '${e['mode'] == 'local' ? 'Présentiel' : 'En ligne'}',
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: Color(0xFF12183A)),
                     ),
                   ),
                   Text(
@@ -886,14 +886,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Row(children: [
           Expanded(
             child: Text(title,
-                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                style: const TextStyle(color: Color(0xFF12183A), fontSize: 16, fontWeight: FontWeight.w800)),
           ),
           if (hint != null)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: Text(hint, style: const TextStyle(color: _gold, fontWeight: FontWeight.w800, fontSize: 13)),
             ),
-          Icon(open ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
+          Icon(open ? Icons.expand_less : Icons.expand_more, color: Color(0xFF56608A)),
         ]),
       ),
     );
@@ -929,11 +929,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(18, 16, 18, 6),
                     child: Text('Choisir un jeu',
-                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                        style: TextStyle(color: Color(0xFF12183A), fontSize: 17, fontWeight: FontWeight.w900)),
                   ),
                   for (final g in _gameChoices)
                     ListTile(
-                      title: Text(g[1], style: const TextStyle(color: Colors.white)),
+                      title: Text(g[1], style: const TextStyle(color: Color(0xFF12183A))),
                       trailing: kind == g[0] ? const Icon(Icons.check, color: _gold) : null,
                       onTap: () => Navigator.of(ctx).pop(g[0]),
                     ),
@@ -946,14 +946,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.12),
+            color: const Color(0xFFE3EAFF),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white24),
+            border: Border.all(color: Color(0xFFD5DEF5)),
           ),
           child: Row(children: [
-            const Text('Jeu : ', style: TextStyle(color: Colors.white70)),
-            Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
-            const Icon(Icons.arrow_drop_down, color: Colors.white70),
+            const Text('Jeu : ', style: TextStyle(color: Color(0xFF56608A))),
+            Expanded(child: Text(label, style: const TextStyle(color: Color(0xFF12183A), fontWeight: FontWeight.w800))),
+            const Icon(Icons.arrow_drop_down, color: Color(0xFF56608A)),
           ]),
         ),
       ),
@@ -965,7 +965,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Text(
           t,
           style: const TextStyle(
-            color: Colors.white,
+            color: Color(0xFF12183A),
             fontSize: 16,
             fontWeight: FontWeight.w800,
           ),
@@ -983,7 +983,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 'review':
         return const Color(0xFFE5262B);
       default:
-        return Colors.white54;
+        return Color(0xFF68729A);
     }
   }
 
@@ -1047,8 +1047,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: Colors.white.withOpacity(0.1),
-        border: Border.all(color: Colors.white24),
+        color: const Color(0xFFE3EAFF),
+        border: Border.all(color: Color(0xFFD5DEF5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1065,7 +1065,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 child: Text(
                   '${_kindLabel('${r['kind']}')} · ${_modeLabel('${r['mode']}')}',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF12183A),
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -1080,7 +1080,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
                 child: Text(
                   _stateLabel(state),
-                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                  style: const TextStyle(color: Color(0xFF12183A), fontSize: 11),
                 ),
               ),
             ],
@@ -1088,15 +1088,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 4),
           Text(
             names.isEmpty ? 'Joueurs inconnus' : names.join(' • '),
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           Text(
             _dateText(r),
-            style: const TextStyle(color: Colors.white54, fontSize: 11),
+            style: const TextStyle(color: Color(0xFF68729A), fontSize: 11),
           ),
           Text(
             'ID : $gid',
-            style: const TextStyle(color: Color(0xFFFFE082), fontSize: 11, fontWeight: FontWeight.w700),
+            style: const TextStyle(color: Color(0xFF9A6B00), fontSize: 11, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
           Row(
@@ -1106,7 +1106,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   stake > 0
                       ? 'Mise ${_money(stake)} · cagnotte ${_money(_i(r['pot']))}'
                       : 'Partie gratuite',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  style: const TextStyle(color: Color(0xFF12183A), fontSize: 12),
                 ),
               ),
               if (commission > 0)
@@ -1123,7 +1123,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('⚠️ ${r['reviewReason']}', style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12)),
+                Text('⚠️ ${r['reviewReason']}', style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 12)),
                 const SizedBox(height: 6),
                 Row(children: [
                   Expanded(
@@ -1149,8 +1149,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFFF8A80),
-                    side: const BorderSide(color: Color(0xFFFF8A80)),
+                    foregroundColor: const Color(0xFFD32F2F),
+                    side: const BorderSide(color: Color(0xFFD32F2F)),
                   ),
                   onPressed: cancelBusy == null ? () => _cancelGame(r) : null,
                   icon: const Icon(Icons.cancel_outlined, size: 18),
@@ -1178,7 +1178,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               SelectableText(
                 error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 15),
+                style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 15),
               ),
               const SizedBox(height: 14),
               ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
@@ -1239,7 +1239,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               height: 48,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white.withOpacity(0.16),
+                  backgroundColor: const Color(0xFFE3EAFF),
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () => Navigator.of(context).push(
@@ -1261,7 +1261,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               height: 48,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white.withOpacity(0.16),
+                  backgroundColor: const Color(0xFFE3EAFF),
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () => Navigator.of(context).push(
@@ -1281,7 +1281,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               height: 48,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white.withOpacity(0.16),
+                  backgroundColor: const Color(0xFFE3EAFF),
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () => Navigator.of(context).push(
@@ -1301,7 +1301,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               height: 48,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white.withOpacity(0.16),
+                  backgroundColor: const Color(0xFFE3EAFF),
                   foregroundColor: Colors.white,
                 ),
                 onPressed: statsBusy ? null : _backfillStats,
@@ -1319,23 +1319,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
           TextField(
             controller: idCtrl,
             onChanged: _onIdChanged,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Color(0xFF12183A)),
             decoration: InputDecoration(
               isDense: true,
               hintText: 'Colle ou saisis l\'ID (4 caractères minimum)',
-              hintStyle: const TextStyle(color: Colors.white54),
-              prefixIcon: const Icon(Icons.search, color: Colors.white70),
+              hintStyle: const TextStyle(color: Color(0xFF68729A)),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFF56608A)),
               suffixIcon: idCtrl.text.isEmpty
                   ? null
                   : IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white70),
+                      icon: const Icon(Icons.close, color: Color(0xFF56608A)),
                       onPressed: () {
                         idCtrl.clear();
                         _onIdChanged('');
                       },
                     ),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.12),
+              fillColor: const Color(0xFFE3EAFF),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             ),
           ),
@@ -1343,7 +1343,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (idCtrl.text.trim().length >= 4 && !idBusy && idDone == idCtrl.text.trim()) ...[
             const SizedBox(height: 8),
             if (idFound.isEmpty)
-              const Text('Aucune partie avec cet ID.', style: TextStyle(color: Colors.white70))
+              const Text('Aucune partie avec cet ID.', style: TextStyle(color: Color(0xFF56608A)))
             else
               for (final r in idFound) _gameTile(r),
           ],
@@ -1407,14 +1407,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (folds.contains('resume')) Text(
             'Terminées : $done · En cours : $playing · En attente : $waiting · '
             'Remboursées : $refunds',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
           _foldHead('cat', 'Commissions par catégorie', hint: _money(total)),
           if (folds.contains('cat')) ...[
             if (groups.isEmpty)
               const Text(
                 'Aucune partie pour ces filtres.',
-                style: TextStyle(color: Colors.white70),
+                style: TextStyle(color: Color(0xFF56608A)),
               ),
             for (final e in groups.entries) ...[
               GestureDetector(
@@ -1432,14 +1432,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       Expanded(
                         child: Text(
                           '${e.key} (${e.value[0]} parties)',
-                          style: const TextStyle(color: Colors.white),
+                          style: const TextStyle(color: Color(0xFF12183A)),
                         ),
                       ),
                       Text(
                         _money(e.value[1]),
                         style: const TextStyle(color: _gold, fontWeight: FontWeight.w900),
                       ),
-                      Icon(catSel == e.key ? Icons.expand_less : Icons.expand_more, color: Colors.white54),
+                      Icon(catSel == e.key ? Icons.expand_less : Icons.expand_more, color: Color(0xFF68729A)),
                     ],
                   ),
                 ),
@@ -1457,7 +1457,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (!rows.any(_cancellable))
             const Text(
               'Aucune partie ouverte ou en cours.',
-              style: TextStyle(color: Colors.white70),
+              style: TextStyle(color: Color(0xFF56608A)),
             ),
           for (final r in rows.where(_cancellable)) _gameTile(r),
           const SizedBox(height: 14),
@@ -1465,7 +1465,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             height: 50,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.16),
+                backgroundColor: const Color(0xFFE3EAFF),
                 foregroundColor: Colors.white,
               ),
               onPressed: () => setState(() => showHistory = !showHistory),
@@ -1482,14 +1482,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
             const SizedBox(height: 8),
             const Text(
               'Touche une partie en ligne pour la revoir du début à la fin.',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
+              style: TextStyle(color: Color(0xFF68729A), fontSize: 12),
             ),
             const SizedBox(height: 6),
             for (final r in shown) _gameTile(r),
             if (shown.isEmpty)
               const Text(
                 'Aucune partie pour ces filtres.',
-                style: TextStyle(color: Colors.white70),
+                style: TextStyle(color: Color(0xFF56608A)),
               ),
           ],
           if (showHistory &&
@@ -1503,7 +1503,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white54),
+                  side: const BorderSide(color: Color(0xFF68729A)),
                 ),
                 onPressed: () {
                   limit = (limit + 150).clamp(150, 500).toInt();
@@ -1527,7 +1527,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+            colors: [Color(0xFFF3F6FF), Color(0xFFF3F6FF)],
           ),
         ),
         child: SafeArea(
@@ -1539,13 +1539,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A)),
                     ),
                     Expanded(
                       child: Text(
                         partnerView ? '👑 Espace partenaire' : '👑 Tableau de bord',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF12183A),
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
                         ),
@@ -1553,7 +1553,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                     IconButton(
                       onPressed: loading ? null : _load,
-                      icon: const Icon(Icons.refresh, color: Colors.white),
+                      icon: const Icon(Icons.refresh, color: Color(0xFF12183A)),
                     ),
                   ],
                 ),

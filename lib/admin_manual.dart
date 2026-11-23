@@ -142,8 +142,8 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: Colors.white.withOpacity(0.12),
-        border: Border.all(color: Colors.white24),
+        color: const Color(0xFFE3EAFF),
+        border: Border.all(color: Color(0xFFD5DEF5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -154,7 +154,7 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
                 child: Text(
                   '${r['name']}'.isEmpty ? tr('Joueur', 'Player') : '${r['name']}',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF12183A),
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -172,15 +172,23 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
           const SizedBox(height: 4),
           Text(
             '${r['operator'] == 'mtn' ? '🟡 MTN' : '🟠 Orange'}  📱 ${r['phone']}   ·   ${_date(r['createdAt'])}',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
+          if ('${r['risk'] ?? ''}'.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '⚠️ Compte suspect : ${r['risk']}',
+                style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
           if (isDep)
             Row(
               children: [
                 Expanded(
                   child: Text(
                     tr('Transaction : ${r['txRef']}', 'Transaction: ${r['txRef']}'),
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    style: const TextStyle(color: Color(0xFF12183A), fontSize: 13),
                   ),
                 ),
                 IconButton(
@@ -191,7 +199,7 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
                       SnackBar(content: Text(tr('Copié', 'Copied'))),
                     );
                   },
-                  icon: const Icon(Icons.copy, color: Colors.white70, size: 18),
+                  icon: const Icon(Icons.copy, color: Color(0xFF56608A), size: 18),
                 ),
               ],
             ),
@@ -214,8 +222,8 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
               Expanded(
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFFF8A80),
-                    side: const BorderSide(color: Color(0xFFFF8A80)),
+                    foregroundColor: const Color(0xFFD32F2F),
+                    side: const BorderSide(color: Color(0xFFD32F2F)),
                   ),
                   onPressed: busy ? null : () => _decide(r, false),
                   child: Text(tr('Refuser', 'Reject')),
@@ -277,7 +285,7 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
         child: Text(
           s,
           style: const TextStyle(
-            color: Colors.white,
+            color: Color(0xFF12183A),
             fontSize: 16,
             fontWeight: FontWeight.w900,
           ),
@@ -297,12 +305,12 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
               '${isDep ? '⬇️' : '⬆️'} ${r['name']} · ${_fmt(r['amount'])} FCFA',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: const TextStyle(color: Color(0xFF12183A), fontSize: 13),
             ),
           ),
           Text(
             '${good ? '✅' : '❌'} ${_date(r['closedAt'])}',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
           ),
         ],
       ),
@@ -319,7 +327,7 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+            colors: [Color(0xFFF3F6FF), Color(0xFFF3F6FF)],
           ),
         ),
         child: SafeArea(
@@ -331,13 +339,13 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A)),
                     ),
                     Expanded(
                       child: Text(
                         tr('Recharges et retraits', 'Top-ups and withdrawals'),
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF12183A),
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
                         ),
@@ -345,7 +353,7 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
                     ),
                     IconButton(
                       onPressed: loading ? null : _load,
-                      icon: const Icon(Icons.refresh, color: Colors.white),
+                      icon: const Icon(Icons.refresh, color: Color(0xFF12183A)),
                     ),
                   ],
                 ),
@@ -359,32 +367,32 @@ class _AdminManualScreenState extends State<AdminManualScreen> {
                           if (error != null)
                             Text(error!,
                                 style: const TextStyle(
-                                    color: Color(0xFFFF8A80),
+                                    color: Color(0xFFD32F2F),
                                     fontWeight: FontWeight.w700)),
                           _title(tr('⬇️ Recharges à confirmer (${deposits.length})',
                               '⬇️ Top-ups to confirm (${deposits.length})')),
                           if (deposits.isEmpty)
                             Text(tr('Aucune recharge en attente.',
                                 'No pending top-ups.'),
-                                style: const TextStyle(color: Colors.white70)),
+                                style: const TextStyle(color: Color(0xFF56608A))),
                           for (final r in deposits) _request(r),
                           _title(tr('⬆️ Retraits à payer (${withdrawals.length})',
                               '⬆️ Withdrawals to pay (${withdrawals.length})')),
                           if (withdrawals.isEmpty)
                             Text(tr('Aucun retrait en attente.',
                                 'No pending withdrawals.'),
-                                style: const TextStyle(color: Colors.white70)),
+                                style: const TextStyle(color: Color(0xFF56608A))),
                           for (final r in withdrawals) _request(r),
                           _title(tr('Derniers traités', 'Recently handled')),
                           if (recent.isEmpty)
                             Text(tr('Rien pour le moment.', 'Nothing yet.'),
-                                style: const TextStyle(color: Colors.white70)),
+                                style: const TextStyle(color: Color(0xFF56608A))),
                           for (final r in recent) _recentRow(r),
                           const SizedBox(height: 24),
                           OutlinedButton(
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFFF8A80),
-                              side: const BorderSide(color: Color(0xFFFF8A80)),
+                              foregroundColor: const Color(0xFFD32F2F),
+                              side: const BorderSide(color: Color(0xFFD32F2F)),
                             ),
                             onPressed: _resetAll,
                             child: Text(tr('Remettre tous les soldes à zéro',

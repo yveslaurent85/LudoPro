@@ -144,13 +144,13 @@ class PlayerStatsView extends StatelessWidget {
 
   static const Color _gold = Color(0xFFFFC21A);
 
-  Widget _tile(String label, String value, {Color color = Colors.white}) {
+  Widget _tile(String label, String value, {Color color = Color(0xFF12183A)}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: Colors.white.withOpacity(0.12),
-        border: Border.all(color: Colors.white24),
+        color: const Color(0xFFE3EAFF),
+        border: Border.all(color: Color(0xFFD5DEF5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -158,7 +158,7 @@ class PlayerStatsView extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
+            style: const TextStyle(color: Color(0xFF56608A), fontSize: 11),
           ),
           const SizedBox(height: 2),
           FittedBox(
@@ -191,7 +191,7 @@ class PlayerStatsView extends StatelessWidget {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            color: Colors.white.withOpacity(0.12),
+            color: const Color(0xFFE3EAFF),
             border: Border.all(color: _gold, width: 1.5),
           ),
           child: Column(
@@ -200,7 +200,7 @@ class PlayerStatsView extends StatelessWidget {
               Text(
                 s.name,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: Color(0xFF12183A),
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                 ),
@@ -208,7 +208,7 @@ class PlayerStatsView extends StatelessWidget {
               const SizedBox(height: 6),
               const Text(
                 'Solde',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(color: Color(0xFF56608A), fontSize: 12),
               ),
               FittedBox(
                 fit: BoxFit.scaleDown,
@@ -225,7 +225,7 @@ class PlayerStatsView extends StatelessWidget {
               Text(
                 tr('Inscrit le ${statDate(s.createdAt)}',
                     'Joined on ${statDate(s.createdAt)}'),
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
               ),
             ],
           ),
@@ -242,14 +242,14 @@ class PlayerStatsView extends StatelessWidget {
             _tile('Parties jouées', '${s.played}'),
             _tile('Pourcentage de victoires', rate, color: _gold),
             _tile('Parties gagnées', '${s.won}',
-                color: const Color(0xFF7CFFB0)),
+                color: const Color(0xFF17883F)),
             _tile('Parties perdues', '${s.lost}',
-                color: const Color(0xFFFF8A80)),
+                color: const Color(0xFFD32F2F)),
             _tile('Total montant joué', Wallet.format(s.staked)),
             _tile('Total montant gagné', Wallet.format(s.wonAmt),
-                color: const Color(0xFF7CFFB0)),
+                color: const Color(0xFF17883F)),
             _tile('Total montant perdu', Wallet.format(s.lostAmt),
-                color: const Color(0xFFFF8A80)),
+                color: const Color(0xFFD32F2F)),
           ],
         ),
         const SizedBox(height: 10),
@@ -257,7 +257,7 @@ class PlayerStatsView extends StatelessWidget {
           'Compteurs mis à jour à la fin de chaque partie terminée avec un '
           'gagnant (en ligne et en présentiel). Total joué = mises engagées ; '
           'total gagné = gains reçus ; total perdu = mises des parties perdues.',
-          style: TextStyle(color: Colors.white54, fontSize: 11),
+          style: TextStyle(color: Color(0xFF68729A), fontSize: 11),
         ),
       ],
     );
@@ -268,7 +268,7 @@ BoxDecoration _bg() => const BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+        colors: [Color(0xFFF3F6FF), Color(0xFFF3F6FF)],
       ),
     );
 
@@ -279,13 +279,13 @@ Widget _header(BuildContext context, String title, {Widget? trailing}) {
       children: [
         IconButton(
           onPressed: () => Navigator.of(context).maybePop(),
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A)),
         ),
         Expanded(
           child: Text(
             title,
             style: const TextStyle(
-              color: Colors.white,
+              color: Color(0xFF12183A),
               fontSize: 22,
               fontWeight: FontWeight.w800,
             ),
@@ -318,7 +318,7 @@ class MyDetailsScreen extends StatelessWidget {
                     ? const Center(
                         child: Text(
                           'Connecte-toi pour voir tes détails.',
-                          style: TextStyle(color: Colors.white),
+                          style: TextStyle(color: Color(0xFF12183A)),
                         ),
                       )
                     : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -426,7 +426,7 @@ class _RiskBoxState extends State<_RiskBox> {
   @override
   Widget build(BuildContext context) {
     final bad = !_cleared && widget.risk.isNotEmpty;
-    final color = bad ? const Color(0xFFFF6B6B) : const Color(0xFF4CAF50);
+    final color = bad ? const Color(0xFFD32F2F) : const Color(0xFF4CAF50);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
@@ -438,24 +438,24 @@ class _RiskBoxState extends State<_RiskBox> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
           bad ? '⚠️ Compte suspect' : '✅ Compte vérifié',
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15),
+          style: const TextStyle(color: Color(0xFF12183A), fontWeight: FontWeight.w900, fontSize: 15),
         ),
         if (bad)
           for (final r in widget.risk)
-            Text('• $r', style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
+            Text('• $r', style: const TextStyle(color: Color(0xFF56608A), fontSize: 12.5)),
         if (bad)
           const Padding(
             padding: EdgeInsets.only(top: 4),
             child: Text(
               'Ses retraits automatiques (International) sont bloqués : il doit passer par le retrait Local, que tu valides à la main.',
-              style: TextStyle(color: Colors.white54, fontSize: 11.5),
+              style: TextStyle(color: Color(0xFF68729A), fontSize: 11.5),
             ),
           ),
         const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton(
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54)),
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF68729A))),
             onPressed: _busy ? null : _toggle,
             child: Text(_cleared ? 'Remettre sous surveillance' : 'Marquer comme vérifié'),
           ),
@@ -568,8 +568,8 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          color: Colors.white.withOpacity(0.1),
-          border: Border.all(color: Colors.white24),
+          color: const Color(0xFFE3EAFF),
+          border: Border.all(color: Color(0xFFD5DEF5)),
         ),
         child: Row(
           children: [
@@ -588,7 +588,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Color(0xFF12183A),
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -597,7 +597,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                         '${p.played} partie${p.played > 1 ? 's' : ''}',
                         'Joined on ${statDate(p.createdAt)} · '
                         '${p.played} game${p.played > 1 ? 's' : ''}'),
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
                   ),
                 ],
               ),
@@ -609,7 +609,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                 fontWeight: FontWeight.w900,
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.white54),
+            const Icon(Icons.chevron_right, color: Color(0xFF68729A)),
           ],
         ),
       ),
@@ -632,7 +632,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                 '👥 Joueurs inscrits',
                 trailing: IconButton(
                   onPressed: loading ? null : _load,
-                  icon: const Icon(Icons.refresh, color: Colors.white),
+                  icon: const Icon(Icons.refresh, color: Color(0xFF12183A)),
                 ),
               ),
               Expanded(
@@ -649,7 +649,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                     error!,
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
-                                      color: Color(0xFFFF8A80),
+                                      color: Color(0xFFD32F2F),
                                       fontSize: 15,
                                     ),
                                   ),
@@ -672,16 +672,16 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                 TextField(
                                   controller: searchCtrl,
                                   onChanged: (_) => setState(() {}),
-                                  style: const TextStyle(color: Colors.white),
+                                  style: const TextStyle(color: Color(0xFF12183A)),
                                   decoration: InputDecoration(
                                     isDense: true,
                                     hintText: tr('Rechercher un pseudo', 'Search a nickname'),
                                     hintStyle:
-                                        const TextStyle(color: Colors.white54),
+                                        const TextStyle(color: Color(0xFF68729A)),
                                     prefixIcon: const Icon(Icons.search,
-                                        color: Colors.white54),
+                                        color: Color(0xFF68729A)),
                                     filled: true,
-                                    fillColor: Colors.white.withOpacity(0.12),
+                                    fillColor: const Color(0xFFE3EAFF),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
                                       borderSide: BorderSide.none,
@@ -706,7 +706,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                       '${shown.length} player'
                                       '${shown.length > 1 ? 's' : ''}'),
                                   style: const TextStyle(
-                                    color: Colors.white70,
+                                    color: Color(0xFF56608A),
                                     fontSize: 12,
                                   ),
                                 ),
@@ -717,7 +717,7 @@ class _AdminPlayersScreenState extends State<AdminPlayersScreen> {
                                     padding: EdgeInsets.only(top: 12),
                                     child: Text(
                                       'Aucun joueur trouvé.',
-                                      style: TextStyle(color: Colors.white70),
+                                      style: TextStyle(color: Color(0xFF56608A)),
                                     ),
                                   ),
                               ],

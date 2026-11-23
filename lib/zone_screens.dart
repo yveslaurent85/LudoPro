@@ -41,7 +41,7 @@ BoxDecoration get _bg => const BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [Color(0xFF1F5BFF), Color(0xFF0B2FA6), Color(0xFF061A66)],
+        colors: [Color(0xFFF3F6FF), Color(0xFFF3F6FF)],
       ),
     );
 
@@ -178,10 +178,10 @@ class _CityDialogState extends State<_CityDialog> {
     return PopScope(
       canPop: !widget.mandatory,
       child: AlertDialog(
-        backgroundColor: const Color(0xFF0B2FA6),
+        backgroundColor: const Color(0xFFF3F6FF),
         title: Text(
           widget.mandatory ? tr('Où habites-tu ?', 'Where do you live?') : tr('Changer de ville', 'Change city'),
-          style: const TextStyle(color: Color(0xFFFFE082), fontWeight: FontWeight.w900),
+          style: const TextStyle(color: Color(0xFF9A6B00), fontWeight: FontWeight.w900),
         ),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -191,15 +191,15 @@ class _CityDialogState extends State<_CityDialog> {
                       'Enter your region and city. This is required and cannot be changed freely later.')
                   : tr('Ta demande sera examinée par l\'administration. Tant qu\'elle n\'est pas acceptée, ta ville ne change pas.',
                       'The administration will review your request. Your city does not change until it is accepted.'),
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
+              style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               value: _region,
               isExpanded: true,
-              dropdownColor: const Color(0xFF0B2FA6),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(labelText: tr('Région', 'Region'), labelStyle: const TextStyle(color: Colors.white70)),
+              dropdownColor: Color(0xFF12183A),
+              style: const TextStyle(color: Color(0xFF12183A)),
+              decoration: InputDecoration(labelText: tr('Région', 'Region'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               items: [for (final r in kCmCities.keys) DropdownMenuItem(value: r, child: Text(r))],
               onChanged: (v) => setState(() {
                 _region = v;
@@ -209,9 +209,9 @@ class _CityDialogState extends State<_CityDialog> {
             DropdownButtonFormField<String>(
               value: _city,
               isExpanded: true,
-              dropdownColor: const Color(0xFF0B2FA6),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(labelText: tr('Ville', 'City'), labelStyle: const TextStyle(color: Colors.white70)),
+              dropdownColor: Color(0xFF12183A),
+              style: const TextStyle(color: Color(0xFF12183A)),
+              decoration: InputDecoration(labelText: tr('Ville', 'City'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               items: [
                 for (final c in cities) DropdownMenuItem(value: c, child: Text(c)),
                 if (_region != null) DropdownMenuItem(value: _other, child: Text(tr('Autre ville…', 'Other city…'))),
@@ -221,25 +221,25 @@ class _CityDialogState extends State<_CityDialog> {
             if (_city == _other)
               TextField(
                 controller: _otherCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(labelText: tr('Nom de ta ville', 'Your city name'), labelStyle: const TextStyle(color: Colors.white70)),
+                style: const TextStyle(color: Color(0xFF12183A)),
+                decoration: InputDecoration(labelText: tr('Nom de ta ville', 'Your city name'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               ),
             if (widget.mandatory)
               TextField(
                 controller: _quarterCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(labelText: tr('Quartier (facultatif)', 'District (optional)'), labelStyle: const TextStyle(color: Colors.white70)),
+                style: const TextStyle(color: Color(0xFF12183A)),
+                decoration: InputDecoration(labelText: tr('Quartier (facultatif)', 'District (optional)'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               )
             else
               TextField(
                 controller: _reasonCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(labelText: tr('Raison (facultatif)', 'Reason (optional)'), labelStyle: const TextStyle(color: Colors.white70)),
+                style: const TextStyle(color: Color(0xFF12183A)),
+                decoration: InputDecoration(labelText: tr('Raison (facultatif)', 'Reason (optional)'), labelStyle: const TextStyle(color: Color(0xFF56608A))),
               ),
             if (_err != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_err!, style: const TextStyle(color: Color(0xFFFF8A80), fontWeight: FontWeight.w700)),
+                child: Text(_err!, style: const TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.w700)),
               ),
           ]),
         ),
@@ -295,15 +295,15 @@ class _MyCityScreenState extends State<MyCityScreen> {
         child: SafeArea(
           child: Column(children: [
             Row(children: [
-              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back, color: Colors.white)),
+              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A))),
               Text(tr('Ma ville', 'My city'),
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
+                  style: const TextStyle(color: Color(0xFF12183A), fontSize: 22, fontWeight: FontWeight.w800)),
             ]),
             Expanded(
               child: m == null
                   ? Center(
                       child: _err != null
-                          ? Text(_err!, style: const TextStyle(color: Colors.white))
+                          ? Text(_err!, style: const TextStyle(color: Color(0xFF12183A)))
                           : const CircularProgressIndicator(color: _gold))
                   : ListView(padding: const EdgeInsets.all(16), children: [
                       Container(
@@ -311,17 +311,17 @@ class _MyCityScreenState extends State<MyCityScreen> {
                         decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(18)),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text(m['hasCity'] == true ? '📍 ${m['city']}' : tr('Ville non renseignée', 'City not set'),
-                              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+                              style: const TextStyle(color: Color(0xFF12183A), fontSize: 20, fontWeight: FontWeight.w900)),
                           if (m['hasCity'] == true)
                             Text('${m['region']}${'${m['quarter']}'.isEmpty ? '' : ' · ${m['quarter']}'}',
-                                style: const TextStyle(color: Colors.white70)),
+                                style: const TextStyle(color: Color(0xFF56608A))),
                           const SizedBox(height: 6),
                           Text(
                             m['attached'] == true
                                 ? tr('Tu es suivi par le partenaire officiel de ta ville.', 'You are managed by your city\'s official partner.')
                                 : tr('Ta ville n\'a pas encore de partenaire : tu es géré directement par Katika.',
                                     'Your city has no partner yet: you are managed directly by Katika.'),
-                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            style: const TextStyle(color: Color(0xFF68729A), fontSize: 12),
                           ),
                         ]),
                       ),
@@ -556,7 +556,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
 
   Widget _title(String t) => Padding(
         padding: const EdgeInsets.only(top: 16, bottom: 8),
-        child: Text(t, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+        child: Text(t, style: const TextStyle(color: Color(0xFF12183A), fontSize: 16, fontWeight: FontWeight.w800)),
       );
 
   Widget _zoneTile(Map<String, dynamic> z) {
@@ -568,31 +568,31 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: const Color(0xFFE3EAFF),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: suspended ? const Color(0xFFE5262B) : Colors.white24),
+        border: Border.all(color: suspended ? const Color(0xFFE5262B) : Color(0xFFD5DEF5)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(
-            child: Text('${z['name']} · ${z['region']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+            child: Text('${z['name']} · ${z['region']}', style: const TextStyle(color: Color(0xFF12183A), fontWeight: FontWeight.w900)),
           ),
           if (suspended)
-            const Text('SUSPENDUE', style: TextStyle(color: Color(0xFFFF8A80), fontSize: 11, fontWeight: FontWeight.w900)),
+            const Text('SUSPENDUE', style: TextStyle(color: Color(0xFFD32F2F), fontSize: 11, fontWeight: FontWeight.w900)),
         ]),
         Text(
           hasP ? 'Partenaire : ${z['partnerName']} · ${z['rate']} %' : 'Aucun partenaire : gestion centrale',
-          style: TextStyle(color: hasP ? _gold : Colors.white60, fontSize: 13),
+          style: TextStyle(color: hasP ? _gold : Color(0xFF5E6890), fontSize: 13),
         ),
-        Text('$n joueur(s) · $a rattaché(s) au partenaire', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        Text('$n joueur(s) · $a rattaché(s) au partenaire', style: const TextStyle(color: Color(0xFF68729A), fontSize: 12)),
         const SizedBox(height: 6),
         Theme(
          data: Theme.of(context).copyWith(
            textButtonTheme: TextButtonThemeData(
              style: TextButton.styleFrom(
                foregroundColor: Colors.white,
-               backgroundColor: Colors.white12,
-               disabledForegroundColor: Colors.white38,
+               backgroundColor: Color(0xFFD5DEF5),
+               disabledForegroundColor: Color(0xFF8A93B8),
                textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
              ),
            ),
@@ -638,12 +638,12 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
         child: SafeArea(
           child: Column(children: [
             Row(children: [
-              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back, color: Colors.white)),
+              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A))),
               const Expanded(
                 child: Text('🗺️ Administration du zoning',
-                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                    style: TextStyle(color: Color(0xFF12183A), fontSize: 20, fontWeight: FontWeight.w800)),
               ),
-              IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh, color: Colors.white)),
+              IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh, color: Color(0xFF12183A))),
             ]),
             Expanded(
               child: d == null
@@ -651,7 +651,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
                       child: _err != null
                           ? Padding(
                               padding: const EdgeInsets.all(20),
-                              child: SelectableText(_err!, style: const TextStyle(color: Color(0xFFFF8A80))))
+                              child: SelectableText(_err!, style: const TextStyle(color: Color(0xFFD32F2F))))
                           : const CircularProgressIndicator(color: _gold))
                   : RefreshIndicator(
                       onRefresh: _load,
@@ -711,7 +711,7 @@ class _AdminZonesScreenState extends State<AdminZonesScreen> {
                         ],
                         _title('Villes (${zones.length})'),
                         if (zones.isEmpty)
-                          const Text('Aucune ville. Ajoute-en une, puis affecte-lui un partenaire.', style: TextStyle(color: Colors.white70)),
+                          const Text('Aucune ville. Ajoute-en une, puis affecte-lui un partenaire.', style: TextStyle(color: Color(0xFF56608A))),
                         for (final z in zones) _zoneTile(z),
                       ]),
                     ),
@@ -802,11 +802,11 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
     if (mounted) setState(() => _busy = false);
   }
 
-  Widget _stat(String k, String v, {Color color = Colors.white}) => Container(
+  Widget _stat(String k, String v, {Color color = Color(0xFF12183A)}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(color: const Color(0xFFE3EAFF), borderRadius: BorderRadius.circular(14)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text(k, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          Text(k, style: const TextStyle(color: Color(0xFF56608A), fontSize: 11)),
           const SizedBox(height: 2),
           Text(v, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w900)),
         ]),
@@ -839,12 +839,12 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
         child: SafeArea(
           child: Column(children: [
             Row(children: [
-              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back, color: Colors.white)),
+              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back, color: Color(0xFF12183A))),
               const Expanded(
                 child: Text('🤝 Mon espace partenaire',
-                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                    style: TextStyle(color: Color(0xFF12183A), fontSize: 20, fontWeight: FontWeight.w800)),
               ),
-              IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh, color: Colors.white)),
+              IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh, color: Color(0xFF12183A))),
             ]),
             Expanded(
               child: d == null
@@ -852,13 +852,13 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
                       child: _err != null
                           ? Padding(
                               padding: const EdgeInsets.all(20),
-                              child: SelectableText(_err!, style: const TextStyle(color: Color(0xFFFF8A80))))
+                              child: SelectableText(_err!, style: const TextStyle(color: Color(0xFFD32F2F))))
                           : const CircularProgressIndicator(color: _gold))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 30), children: [
                         if (zones.isEmpty)
-                          const Text('Aucune zone ne t\'est affectée pour le moment.', style: TextStyle(color: Colors.white70))
+                          const Text('Aucune zone ne t\'est affectée pour le moment.', style: TextStyle(color: Color(0xFF56608A)))
                         else
                           Text(
                             'Zone(s) : ${zones.map((z) => '${z['name']} (${z['rate']} %${z['status'] == 'suspended' ? ', suspendue' : ''})').join(' · ')}',
@@ -887,14 +887,14 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
                             _stat('Joueurs inactifs', '${players.length - activeIds.length}'),
                             _stat('Activité éligible (période)', _fcfa(periodBase)),
                             _stat('Commission (période)', _fcfa(periodAmount), color: _gold),
-                            _stat('Commission disponible', _fcfa(avail), color: const Color(0xFF7CFFB0)),
+                            _stat('Commission disponible', _fcfa(avail), color: const Color(0xFF17883F)),
                             _stat('Déjà payée', _fcfa((d['paid'] as num?)?.toInt() ?? 0)),
                           ],
                         ),
                         const SizedBox(height: 10),
                         if (((d['held'] as num?)?.toInt() ?? 0) > 0)
                           Text('En attente de validation : ${_fcfa((d['held'] as num).toInt())}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                              style: const TextStyle(color: Color(0xFF56608A), fontSize: 12)),
                         const SizedBox(height: 6),
                         FilledButton.icon(
                           onPressed: _busy || avail < min || players.length < minPlayers ? null : _payout,
@@ -907,20 +907,20 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
                         ),
                         const Padding(
                           padding: EdgeInsets.only(top: 14, bottom: 6),
-                          child: Text('Mes joueurs', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                          child: Text('Mes joueurs', style: TextStyle(color: Color(0xFF12183A), fontSize: 16, fontWeight: FontWeight.w800)),
                         ),
-                        if (players.isEmpty) const Text('Aucun joueur rattaché.', style: TextStyle(color: Colors.white70)),
+                        if (players.isEmpty) const Text('Aucun joueur rattaché.', style: TextStyle(color: Color(0xFF56608A))),
                         for (final p in players)
                           Container(
                             margin: const EdgeInsets.only(bottom: 6),
                             padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                            decoration: BoxDecoration(color: const Color(0xFFE3EAFF), borderRadius: BorderRadius.circular(12)),
                             child: Row(children: [
                               Expanded(
                                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text('${p['name']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                                  Text('${p['name']}', style: const TextStyle(color: Color(0xFF12183A), fontWeight: FontWeight.w800)),
                                   Text('${p['city']}${'${p['quarter']}'.isEmpty ? '' : ' · ${p['quarter']}'} · misé ${_fcfa((p['wagered'] as num?)?.toInt() ?? 0)}',
-                                      style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                                      style: const TextStyle(color: Color(0xFF68729A), fontSize: 11)),
                                 ]),
                               ),
                               Text(_fcfa(perPlayer['${p['id']}'] ?? 0), style: const TextStyle(color: _gold, fontWeight: FontWeight.w900)),
@@ -928,21 +928,21 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
                           ),
                         const Padding(
                           padding: EdgeInsets.only(top: 14, bottom: 6),
-                          child: Text('Dernières commissions', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                          child: Text('Dernières commissions', style: TextStyle(color: Color(0xFF12183A), fontSize: 16, fontWeight: FontWeight.w800)),
                         ),
-                        if (inPeriod.isEmpty) const Text('Aucune commission sur cette période.', style: TextStyle(color: Colors.white70)),
+                        if (inPeriod.isEmpty) const Text('Aucune commission sur cette période.', style: TextStyle(color: Color(0xFF56608A))),
                         for (final c in inPeriod.take(60))
                           Padding(
                             padding: const EdgeInsets.only(bottom: 4),
                             child: Text(
                               '${'${c['createdAt']}'.length >= 16 ? '${c['createdAt']}'.substring(0, 16).replaceFirst('T', ' ') : ''} · ${c['playerName']} · ${c['game']} · ${c['rate']} % de ${_fcfa((c['base'] as num?)?.toInt() ?? 0)} = ${_fcfa((c['amount'] as num?)?.toInt() ?? 0)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              style: const TextStyle(color: Color(0xFF56608A), fontSize: 12),
                             ),
                           ),
                         const SizedBox(height: 10),
                         const Text(
                           'Tu ne vois que les joueurs de ta ville. Tu ne peux ni modifier les soldes, ni les résultats des jeux, ni les taux.',
-                          style: TextStyle(color: Colors.white38, fontSize: 11),
+                          style: TextStyle(color: Color(0xFF8A93B8), fontSize: 11),
                         ),
                       ]),
                     ),
