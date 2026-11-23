@@ -17,6 +17,7 @@ import 'help_screen.dart';
 
 import 'accounts.dart';
 import 'admin_dashboard.dart';
+import 'admin_home.dart';
 import 'base_logos.dart';
 import 'deposit_screen.dart';
 import 'transfer_screen.dart';
@@ -873,7 +874,7 @@ class HomeScreen extends StatelessWidget {
                 GestureDetector(
                   onLongPress: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => const AdminDashboard(),
+                      builder: (_) => const AdminGate(),
                     ),
                   ),
                   child: const Text('👑', style: TextStyle(fontSize: 36)),
@@ -1020,7 +1021,7 @@ class _HomeShellState extends State<_HomeShell> {
           // (le serveur refuse tout compte qui n'est pas administrateur).
           GestureDetector(
             onLongPress: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const AdminDashboard()),
+              MaterialPageRoute<void>(builder: (_) => const AdminGate()),
             ),
             child: _logo(),
           ),
@@ -1499,14 +1500,49 @@ class _GamesGrid extends StatelessWidget {
           onTap: () => requireLogin(context, (_) => const DeuxDesPage()),
         ),
         _GameTile(
-          color: const Color(0xFF0E7A4B),
+          color: const Color(0xFFE5262B),
           icon: Icons.style,
-          image: 'assets/game_cartes.png',
-          infoKey: 'cartes',
-          title: tr('Cartes', 'Cards'),
-          subtitle: 'TIAH · BOUBAYAH · FAP-FAP · ANTI-COTE · TCHEK',
+          infoKey: 'tiah',
+          title: 'TIAH',
+          subtitle: tr('Atteins 21 sans dépasser', 'Reach 21 without going over'),
           badge: tr('NOUVEAU', 'NEW'),
-          onTap: () => requireLogin(context, (_) => const CartesPage()),
+          onTap: () => requireLogin(context, (_) => const CardGamePage(game: 'tiah')),
+        ),
+        _GameTile(
+          color: const Color(0xFF7B1FA2),
+          icon: Icons.filter_5,
+          infoKey: 'boubayah',
+          title: 'BOUBAYAH',
+          subtitle: tr('Le plus gros total gagne', 'Highest total wins'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const CardGamePage(game: 'boubayah')),
+        ),
+        _GameTile(
+          color: const Color(0xFFEF6C00),
+          icon: Icons.style,
+          infoKey: 'fapfap',
+          title: 'FAP-FAP',
+          subtitle: tr('Plis et Corat · en ligne', 'Tricks and Corat · online'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const CardGamePage(game: 'fapfap')),
+        ),
+        _GameTile(
+          color: const Color(0xFF00897B),
+          icon: Icons.casino,
+          infoKey: 'anticote',
+          title: 'ANTI-COTE',
+          subtitle: tr('Cagnotte et Corat · en ligne', 'Jackpot and Corat · online'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const CardGamePage(game: 'anticote')),
+        ),
+        _GameTile(
+          color: const Color(0xFF0277BD),
+          icon: Icons.location_on,
+          infoKey: 'tchek',
+          title: 'TCHEK GAMES',
+          subtitle: tr('Défausse-toi de tes cartes · en ligne', 'Shed all your cards · online'),
+          badge: tr('NOUVEAU', 'NEW'),
+          onTap: () => requireLogin(context, (_) => const CardGamePage(game: 'tchek')),
         ),
         _GameTile(
           color: const Color(0xFF14295C),

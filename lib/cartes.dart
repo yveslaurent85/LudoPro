@@ -1215,6 +1215,17 @@ class _TchekPage extends StatelessWidget {
 }
 
 /// Choix du mode d'un jeu de cartes.
+/// Entrée publique d'un jeu de cartes (tiah, boubayah, fapfap, anticote, tchek),
+/// utilisée par les tuiles de l'accueil.
+class CardGamePage extends StatelessWidget {
+  const CardGamePage({super.key, required this.game});
+
+  final String game;
+
+  @override
+  Widget build(BuildContext context) => _CardModePage(game: game);
+}
+
 class _CardModePage extends StatelessWidget {
   const _CardModePage({required this.game});
 
