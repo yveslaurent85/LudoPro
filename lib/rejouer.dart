@@ -34,8 +34,8 @@ String _userName(User u) {
   return u.email ?? 'Joueur';
 }
 
-List<int> _startPawns(int count, bool startOut) =>
-    List<int>.generate(count, (i) => startOut ? 43 + (i % 2) : -1);
+List<int> _startPawns(int count, bool startOut, [bool startDoor = false]) =>
+    List<int>.generate(count, (i) => startOut ? 43 + (i % 2) : (startDoor ? 0 : -1));
 
 Future<void> _checkBalance(String uid, int stake) async {
   if (stake <= 0) return;
@@ -93,8 +93,10 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) throw RematchException('Connexion requise.');
   final stake = (old['stake'] as num?)?.toInt() ?? 0;
-  final pawns = (old['pawnCount'] as num?)?.toInt() ?? 4;
   final startOut = old['startOut'] == true;
+  // Position 54 : toujours 2 pions chacun (comme à la création).
+  final pawns = startOut ? 2 : ((old['pawnCount'] as num?)?.toInt() ?? 4);
+  final startDoor = old['startDoor'] == true;
   final team = old['teamMode'] == true && count == 4;
   // Joueur à 2 places (Ludo par équipes) : il garde ses 2 places s'il relance.
   final dbl = team && old['dbl'] == true && old['hostUid'] == user.uid;
@@ -112,7 +114,8 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
       'doorSafe': old['doorSafe'] != false,
       'starSafe': old['starSafe'] != false,
       'startOut': startOut,
-      'startDoor': old['startDoor'] == true,
+      'startDoor': startDoor,
+      'capturePay': (old['capturePay'] as num?)?.toInt() ?? 0,
       'autoSecs': (old['autoSecs'] as num?)?.toInt() ?? 10,
       'private': true,
       'teamMode': team,
@@ -130,10 +133,10 @@ Future<String> createLudoRematchRoom(Map<String, dynamic> old, int count) async 
       ],
       'uids': [user.uid, if (dbl) user.uid],
       'createdAt': FieldValue.serverTimestamp(),
-      'p0': _startPawns(pawns, startOut),
-      'p1': _startPawns(pawns, startOut),
-      'p2': _startPawns(pawns, startOut),
-      'p3': _startPawns(pawns, startOut),
+      'p0': _startPawns(pawns, startOut, startDoor),
+      'p1': _startPawns(pawns, startOut, startDoor),
+      'p2': _startPawns(pawns, startOut, startDoor),
+      'p3': _startPawns(pawns, startOut, startDoor),
       'cur': 0,
       'hasRolled': false,
       'dice': 1,
@@ -337,6 +340,7 @@ class _RematchPanelState extends State<RematchPanel> {
 
   static String _clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
   bool _joinStarted = false;
+  bool _autoTried = false;
   String? _error;
 
   DocumentReference<Map<String, dynamic>> get _ref => FirebaseFirestore.instance
@@ -444,6 +448,20 @@ class _RematchPanelState extends State<RematchPanel> {
     final next = _next;
     final low = stake > 0 && _bal != null && _bal! < stake;
     final timeUp = _left <= 0;
+
+    // Dès que tout l'effectif de départ a accepté, la partie se relance
+    // toute seule (mêmes réglages que la partie finie).
+    if (next == null &&
+        iAmLauncher &&
+        !_busy &&
+        !_autoTried &&
+        accepted >= 2 &&
+        accepted == players.length) {
+      _autoTried = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _launch();
+      });
+    }
 
     Widget action;
     if (me == null && timeUp) {
