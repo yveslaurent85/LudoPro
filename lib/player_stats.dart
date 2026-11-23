@@ -144,7 +144,7 @@ class PlayerStatsView extends StatelessWidget {
 
   static const Color _gold = Color(0xFFFFC21A);
 
-  Widget _tile(String label, String value, {Color color = Color(0xFF12183A)}) {
+  Widget _tile(String label, String value, {Color color = const Color(0xFF12183A)}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(

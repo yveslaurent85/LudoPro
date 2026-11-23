@@ -463,7 +463,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _stat(String label, String value, {Color color = Color(0xFF12183A)}) {
+  Widget _stat(String label, String value, {Color color = const Color(0xFF12183A)}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(

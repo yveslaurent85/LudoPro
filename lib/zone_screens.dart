@@ -802,7 +802,7 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
     if (mounted) setState(() => _busy = false);
   }
 
-  Widget _stat(String k, String v, {Color color = Color(0xFF12183A)}) => Container(
+  Widget _stat(String k, String v, {Color color = const Color(0xFF12183A)}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(color: const Color(0xFFE3EAFF), borderRadius: BorderRadius.circular(14)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
