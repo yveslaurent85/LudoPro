@@ -1374,9 +1374,10 @@ class _MiniCard extends StatelessWidget {
 
 /// Éventail de cartes ouvertes : [groups] = groupes séparés (ex. 3 à gauche, 2 à droite).
 class _CardFan extends StatelessWidget {
-  const _CardFan(this.groups);
+  const _CardFan(this.groups, {this.caption});
 
   final List<List<List<String>>> groups; // groupe -> carte -> [valeur, famille]
+  final String? caption; // mention sous les cartes
 
   Widget _group(List<List<String>> cards) {
     final n = cards.length;
@@ -1402,13 +1403,28 @@ class _CardFan extends StatelessWidget {
   Widget build(BuildContext context) {
     return FittedBox(
       fit: BoxFit.scaleDown,
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (int g = 0; g < groups.length; g++) ...[
-            if (g > 0) const SizedBox(width: 10),
-            _group(groups[g]),
-          ],
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (int g = 0; g < groups.length; g++) ...[
+                if (g > 0) const SizedBox(width: 10),
+                _group(groups[g]),
+              ],
+            ],
+          ),
+          if (caption != null)
+            Text(
+              caption!,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.2,
+              ),
+            ),
         ],
       ),
     );
@@ -1601,7 +1617,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF7B1FA2),
           icon: Icons.filter_5,
           infoKey: 'boubayah',
-          leading: const _CardFan([[['7', '♦'], ['K', '♠'], ['5', '♣']], [['9', '♥'], ['A', '♣']]]),
+          leading: const _CardFan([[['4', '♠'], ['6', '♥'], ['9', '♦']], [['3', '♥'], ['3', '♠']]], caption: 'FOMEKOU'),
           title: 'BOUBAYAH',
           subtitle: tr('Le plus gros total gagne', 'Highest total wins'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1611,7 +1627,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFFEF6C00),
           icon: Icons.style,
           infoKey: 'fapfap',
-          leading: const _CardFan([[['3', '♠'], ['7', '♥'], ['10', '♦'], ['A', '♣'], ['K', '♥']]]),
+          leading: const _CardFan([[['3', '♠'], ['5', '♥'], ['7', '♣'], ['8', '♦'], ['10', '♥']]]),
           title: 'FAP-FAP',
           subtitle: tr('Plis et Corat · en ligne', 'Tricks and Corat · online'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -1621,6 +1637,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF00897B),
           icon: Icons.casino,
           infoKey: 'anticote',
+          leading: const _CardFan([[['4', '♦'], ['7', '♠'], ['10', '♥']]]),
           title: 'ANTI-COTE',
           subtitle: tr('Cagnotte et Corat · en ligne', 'Jackpot and Corat · online'),
           badge: tr('NOUVEAU', 'NEW'),
