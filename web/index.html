@@ -33,8 +33,15 @@
     /* Bandeau partenaire 728x90, collé en bas, réduit pour tenir sur téléphone. */
     #katika-ad {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-      height: 90px; overflow: hidden; background: #061A66;
+      height: 112px; overflow: hidden; background: #061A66;
     }
+    #katika-ad .lbl {
+      position: absolute; top: 0; left: 0; right: 0; height: 22px;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      font: 800 11px/1 Roboto, Arial, sans-serif; letter-spacing: .6px;
+      color: #fff; text-transform: uppercase;
+    }
+    #katika-ad .lbl b { color: #FFC21A; }
     #katika-ad iframe {
       position: absolute; left: 0; bottom: 0; width: 728px; height: 90px;
       border: 0; margin: 0; padding: 0; transform-origin: 0 100%;
@@ -43,14 +50,14 @@
 </head>
 <body>
   <div id="katika-boot"><div>Katika</div><div class="ring"></div></div>
-  <div id="katika-ad"><iframe scrolling="no" frameborder="0" width="728" height="90"
+  <div id="katika-ad"><div class="lbl"><b>KATIKA</b> Partenaire officiel <b>1XBET</b></div><iframe scrolling="no" frameborder="0" width="728" height="90"
     src="https://refbanners.com/I?tag=d_6392036m_9799c_&amp;site=6392036&amp;ad=9799"></iframe></div>
   <script>
     (function () {
       function fit() {
         var w = window.innerWidth, k = Math.min(1, w / 728);
         var box = document.getElementById('katika-ad'), f = box.firstElementChild;
-        box.style.height = (90 * k) + 'px';
+        box.style.height = (22 + 90 * k) + 'px';
         f.style.transform = 'scale(' + k + ')';
         f.style.left = Math.max(0, (w - 728 * k) / 2) + 'px';
       }
