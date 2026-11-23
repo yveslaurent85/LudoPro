@@ -8405,10 +8405,13 @@ function ludoBalancedFace(d, c, rnd) {
   return face;
 }
 
+/** Chance (sur 1000) qu'un lancer force une face qui capture quand une capture est possible. */
+const LUDO_CAPTURE_BOOST = 70; // était 100 (10 %) : captures un peu moins fréquentes
+
 function ludoRandomFace(d, c, rnd) {
   const capFaces = [];
   for (let f = 1; f <= 6; f++) if (ludoFaceCaptures(d, c, f)) capFaces.push(f);
-  if (capFaces.length > 0 && Math.floor(rnd() * 1000) < 100) {
+  if (capFaces.length > 0 && Math.floor(rnd() * 1000) < LUDO_CAPTURE_BOOST) {
     return capFaces[Math.floor(rnd() * capFaces.length)];
   }
   return ludoBalancedFace(d, c, rnd);
