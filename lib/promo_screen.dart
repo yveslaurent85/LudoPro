@@ -235,7 +235,7 @@ class _PromoScreenState extends State<PromoScreen> {
               child: Text(
                 '${here ? '👉 ' : '•  '}${to == 0 ? 'Plus de ${from - 1}' : 'De $from à $to'} joueurs : $ps %',
                 style: TextStyle(
-                  color: here ? const Color(0xFFFFC21A) : Color(0xFF56608A),
+                  color: here ? const Color(0xFFB07A00) : const Color(0xFF56608A),
                   fontSize: 12.5,
                   fontWeight: here ? FontWeight.w900 : FontWeight.w500,
                 ),
@@ -243,7 +243,97 @@ class _PromoScreenState extends State<PromoScreen> {
             );
           }),
       ],
+      const SizedBox(height: 10),
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF12183A),
+            side: const BorderSide(color: Color(0xFF68729A)),
+          ),
+          onPressed: _showCalcMode,
+          icon: const Icon(Icons.calculate_outlined),
+          label: const Text('Mode de calcul'),
+        ),
+      ),
     ]);
+  }
+
+  /// Exemple chiffré : comment la commission de parrainage est calculée.
+  void _showCalcMode() {
+    const ink = Color(0xFF12183A);
+    const soft = Color(0xFF56608A);
+    Widget row(String a, String b, String c, String d, {bool head = false}) {
+      final st = TextStyle(
+        color: head ? soft : ink,
+        fontSize: 12,
+        fontWeight: head ? FontWeight.w700 : FontWeight.w800,
+      );
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(children: [
+          Expanded(flex: 3, child: Text(a, style: st)),
+          Expanded(flex: 2, child: Text(b, style: st)),
+          Expanded(flex: 4, child: Text(c, style: st)),
+          Expanded(flex: 2, child: Text(d, textAlign: TextAlign.right, style: st)),
+        ]),
+      );
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFF3F6FF),
+        title: const Text('Mode de calcul',
+            style: TextStyle(color: ink, fontWeight: FontWeight.w900, fontSize: 18)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Exemple : 4 joueurs misent 1 000 FCFA chacun, chacun a un parrain différent.',
+                style: TextStyle(color: ink, fontSize: 13, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '• Cagnotte : 4 × 1 000 = 4 000 FCFA\n'
+                '• Commission de Katika : 5 % = 200 FCFA\n'
+                '• Gagnant : 3 800 FCFA\n'
+                '• Part de commission de chaque joueur : 200 ÷ 4 = 50 FCFA',
+                style: TextStyle(color: soft, fontSize: 12.5, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Chaque parrain touche son pourcentage sur la part de SON filleul :',
+                style: TextStyle(color: ink, fontSize: 12.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              row('Joueur', 'Taux', 'Calcul', 'Gain', head: true),
+              const Divider(height: 6, color: Color(0xFFD5DEF5)),
+              row('A → parrain A', '12,5 %', '50 × 12,5 % = 6,25', '6'),
+              row('B → parrain B', '20 %', '50 × 20 % = 10', '10'),
+              row('C → parrain C', '25 %', '50 × 25 % = 12,5', '12'),
+              row('D → parrain D', '35 %', '50 × 35 % = 17,5', '17'),
+              const Divider(height: 10, color: Color(0xFFD5DEF5)),
+              row('Total parrains', '', '', '45'),
+              row('Reste pour Katika', '', '200 − 45', '155'),
+              const SizedBox(height: 8),
+              const Text(
+                'Les montants sont arrondis à l\'entier inférieur (en FCFA). '
+                'Ton taux dépend du nombre de joueurs inscrits avec ton code '
+                '(voir les paliers ci-dessus). Un joueur sans parrain ne génère '
+                'aucune commission de parrainage.',
+                style: TextStyle(color: soft, fontSize: 11.5),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
+        ],
+      ),
+    );
   }
 
   Widget _stats() {
