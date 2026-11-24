@@ -4598,12 +4598,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   // Positions des pions (en unités de cases)
   // ---------------------------------------------------------------------
 
-  /// Pions à la base : aux 4 coins, pour laisser la place au logo central.
+  /// Pions à la base : sur les 4 ronds du carré blanc de la base.
   List<double> homeCenter(int p, int i) {
     final rowStart = p < 2 ? 0 : 9;
     final colStart = (p == 0 || p == 3) ? 0 : 9;
-    final r = i < 2 ? 1.5 : 4.5;
-    final c = i.isEven ? 1.1 : 4.9;
+    final r = i < 2 ? 2.0 : 4.0;
+    final c = i.isEven ? 2.0 : 4.0;
     return _rotPt(rowStart + r, colStart + c);
   }
 

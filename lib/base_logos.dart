@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 // ----------------------------------------------------------------------
-// Logos Katika dans les 4 bases du plateau (Rouge, Vert, Jaune, Bleu).
-// Les images sont dans le dossier assets/ (voir pubspec.yaml).
+// Textes dans les 4 bases du plateau (nom + progression, FORFAIT).
+// Plus de logo Katika sur le plateau.
 // ----------------------------------------------------------------------
 
 /// Un logo par couleur, dans l'ordre des joueurs : Rouge, Vert, Jaune, Bleu.
@@ -18,9 +18,6 @@ const List<String> kBaseLogos = [
 /// [labels] : texte à écrire en haut de chaque base (ex. « landry (35%) »),
 /// dans l'ordre Rouge, Vert, Jaune, Bleu ; null = pas de texte (joueur absent).
 List<Widget> buildBaseLogos(double c, {List<String?>? labels, int rot = 0}) {
-  const double size = 3.4; // taille du logo, en cases (la base fait 6 cases)
-  const double offset = (6 - size) / 2; // centré dans la base
-
   return [
     if (labels != null)
       for (int p = 0; p < 4; p++)
@@ -62,37 +59,5 @@ List<Widget> buildBaseLogos(double c, {List<String?>? labels, int rot = 0}) {
               ),
             ),
           ),
-    for (int p = 0; p < 4; p++)
-      Positioned(
-        left: ((((p + rot) % 4 == 0 || (p + rot) % 4 == 3) ? 0 : 9) + offset) * c,
-        top: (((p + rot) % 4 < 2 ? 0 : 9) + offset) * c,
-        width: size * c,
-        height: size * c,
-        child: IgnorePointer(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(c * 0.4),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: c * 0.35,
-                  offset: Offset(0, c * 0.12),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(c * 0.4),
-              child: Image.asset(
-                kBaseLogos[p],
-                fit: BoxFit.cover,
-                cacheWidth: 400,
-                filterQuality: FilterQuality.medium,
-                errorBuilder: (context, error, stack) =>
-                    const SizedBox.shrink(),
-              ),
-            ),
-          ),
-        ),
-      ),
   ];
 }
