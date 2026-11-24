@@ -218,51 +218,36 @@ class BoardPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final c = size.width / 15;
+    const ink = Color(0xFF231F20); // contours noirs du plateau classique
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(1.0, c * 0.045)
+      ..color = ink;
 
     canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
 
-    // Les 4 bases colorées
+    // Les 4 bases : grand carré de couleur, carré blanc au milieu, 4 ronds.
     for (int p = 0; p < 4; p++) {
       final rowStart = p < 2 ? 0 : 9;
       final colStart = (p == 0 || p == 3) ? 0 : 9;
       final rect = Rect.fromLTWH(colStart * c, rowStart * c, 6 * c, 6 * c);
+      canvas.drawRect(rect, Paint()..color = colors[p]);
+      canvas.drawRect(rect, line);
 
-      final outer = RRect.fromRectAndRadius(rect, Radius.circular(c * 0.6));
-      canvas.drawRRect(
-        outer,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              shade(colors[p], 0.12),
-              colors[p],
-              shade(colors[p], -0.12),
-            ],
-          ).createShader(rect),
-      );
+      final inner = rect.deflate(c * 1.0);
+      canvas.drawRect(inner, Paint()..color = Colors.white);
+      canvas.drawRect(inner, line);
 
-      final inner = RRect.fromRectAndRadius(
-        rect.deflate(c * 0.6),
-        Radius.circular(c * 0.45),
-      );
-      canvas.drawRRect(
-        inner.shift(Offset(0, c * 0.08)),
-        Paint()..color = Colors.black.withOpacity(0.2),
-      );
-      canvas.drawRRect(inner, Paint()..color = lights[p]);
+      for (final dy in const [2.0, 4.0]) {
+        for (final dx in const [2.0, 4.0]) {
+          final ctr = Offset((colStart + dx) * c, (rowStart + dy) * c);
+          canvas.drawCircle(ctr, c * 0.52, Paint()..color = colors[p]);
+          canvas.drawCircle(ctr, c * 0.52, line);
+        }
+      }
     }
 
-    final cellStroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = const Color(0xFFB8C2DD);
-    final laneStroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = Colors.white.withOpacity(0.55);
-
-    // Circuit commun
+    // Circuit commun : cases blanches à contour noir, case de départ colorée.
     for (int idx = 0; idx < track.length; idx++) {
       final cell = track[idx];
       final rect = Rect.fromLTWH(cell[1] * c, cell[0] * c, c, c);
@@ -273,7 +258,7 @@ class BoardPainter extends CustomPainter {
       }
 
       canvas.drawRect(rect, Paint()..color = fill ?? Colors.white);
-      canvas.drawRect(rect, cellStroke);
+      canvas.drawRect(rect, line);
 
       if (fill != null) {
         if (showDoorStars) {
@@ -294,7 +279,7 @@ class BoardPainter extends CustomPainter {
       for (final cell in lanes[p]) {
         final rect = Rect.fromLTWH(cell[1] * c, cell[0] * c, c, c);
         canvas.drawRect(rect, Paint()..color = colors[p]);
-        canvas.drawRect(rect, laneStroke);
+        canvas.drawRect(rect, line);
       }
     }
 
@@ -311,6 +296,7 @@ class BoardPainter extends CustomPainter {
         ..lineTo(cx, cy)
         ..close();
       canvas.drawPath(path, Paint()..color = color);
+      canvas.drawPath(path, line);
     }
 
     triangle(colors[0], Offset(l, l), Offset(l, r)); // gauche
@@ -318,12 +304,8 @@ class BoardPainter extends CustomPainter {
     triangle(colors[2], Offset(r, l), Offset(r, r)); // droite
     triangle(colors[3], Offset(l, r), Offset(r, r)); // bas
 
-    final lines = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = Colors.white70;
-    canvas.drawLine(Offset(l, l), Offset(r, r), lines);
-    canvas.drawLine(Offset(r, l), Offset(l, r), lines);
+    // Cadre extérieur
+    canvas.drawRect(Offset.zero & size, line);
   }
 
   @override
