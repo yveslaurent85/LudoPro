@@ -62,6 +62,10 @@
         f.style.left = Math.max(0, (w - 728 * k) / 2) + 'px';
       }
       fit(); window.addEventListener('resize', fit);
+      // Appelé par l'appli : le bandeau n'est visible que sur la page d'accueil.
+      window.katikaAd = function (mode) {
+        document.getElementById('katika-ad').style.display = mode === '0' ? 'none' : 'block';
+      };
     })();
   </script>
   <script src="flutter_bootstrap.js" async></script>
