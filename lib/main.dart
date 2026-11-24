@@ -3535,6 +3535,8 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       {int? pawn, int? seat}) async {
     final o = widget.online;
     if (o == null) return null;
+    // Je joue moi-même : mon compteur « joué par le bot » repart à zéro.
+    if ((seat ?? currentPlayer) == _myColor) _resetMyAuto();
     try {
       return await Wallet.ludoAct(
         o.gameId,
@@ -3547,6 +3549,18 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _resync();
       return null;
     }
+  }
+
+  /// Remet à zéro mon compteur de coups joués par le bot (visible de tous).
+  void _resetMyAuto() {
+    final o = widget.online;
+    if (o == null || o.spectator || !firebaseReady) return;
+    if ((autoCounts[o.uid] ?? 0) == 0) return;
+    if (mounted) setState(() => autoCounts[o.uid] = 0);
+    FirebaseFirestore.instance
+        .collection('games')
+        .doc(o.gameId)
+        .update({'auto.${o.uid}': 0}).catchError((_) {});
   }
 
   /// Relit la partie sur le serveur et remet l'écran d'accord avec elle.
@@ -3845,7 +3859,14 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       _applyForfeit(cur, reason: 'est déclaré forfait (connexion perdue)');
       return;
     }
-    if (!hasRolled) autoCounts[targetUid] = count + 1; // un lancer = un coup
+    if (!hasRolled) {
+      autoCounts[targetUid] = count + 1; // un lancer = un coup
+      if (mounted) setState(() {});
+      FirebaseFirestore.instance
+          .collection('games')
+          .doc(o.gameId)
+          .update({'auto.$targetUid': count + 1}).catchError((_) {});
+    }
 
     _proxy = true;
     try {
@@ -3905,7 +3926,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         await FirebaseFirestore.instance
             .collection('games')
             .doc(o.gameId)
-            .update({'msg': message, 'auto': autoCounts});
+            .update({'msg': message, 'auto.${o.uid}': 0});
       } catch (_) {}
       if (gameOver) _settle();
       return;
@@ -3921,7 +3942,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
         'over': gameOver,
         'forfeited': forfeited.toList(),
         'finishOrder': finishOrder.toList(),
-        'auto': autoCounts,
+        'auto.${o.uid}': 0,
         'winner': winnerOverride ?? -1,
         'writer': o.uid,
         'rev': FieldValue.increment(1),
@@ -5350,11 +5371,38 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       );
     }
 
+    // Décompte des coups joués à sa place par le bot (pilotage auto), visible
+    // devant chaque joueur en ligne : 🤖 n/15 (rouge quand le forfait approche).
+    Widget? buildBotCount() {
+      if (widget.online == null || gameOver) return null;
+      final n = autoCounts[_uidOfColor(index)] ?? 0;
+      final hot = n >= maxAutoPlays - 3;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: n == 0
+              ? Colors.black.withOpacity(0.25)
+              : (hot ? const Color(0xFFE53935) : const Color(0xFFEF6C00)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white54, width: 1),
+        ),
+        child: Text(
+          '🤖 $n/$maxAutoPlays',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+    }
+
     // Le badge du joueur actif pulse et brille.
     return AnimatedBuilder(
       animation: _pulse,
       builder: (context, _) {
         final timer = buildTimer();
+        final bot = buildBotCount();
         return Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
         decoration: BoxDecoration(
@@ -5380,6 +5428,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
             mainAxisSize: MainAxisSize.min,
             children: avatarOnRight
                 ? [
+                    if (bot != null) ...[bot, const SizedBox(width: 6)],
                     if (timer != null) ...[timer, const SizedBox(width: 6)],
                     if (emojiBtn != null) ...[emojiBtn, const SizedBox(width: 6)],
                     info,
@@ -5392,6 +5441,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                     info,
                     if (emojiBtn != null) ...[const SizedBox(width: 6), emojiBtn],
                     if (timer != null) ...[const SizedBox(width: 6), timer],
+                    if (bot != null) ...[const SizedBox(width: 6), bot],
                   ],
           ),
         ),
