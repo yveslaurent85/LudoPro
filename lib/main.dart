@@ -18,7 +18,6 @@ import 'help_screen.dart';
 import 'accounts.dart';
 import 'admin_dashboard.dart';
 import 'admin_home.dart';
-import 'ad_bridge.dart';
 import 'base_logos.dart';
 import 'deposit_screen.dart';
 import 'transfer_screen.dart';
@@ -85,52 +84,6 @@ Color shade(Color color, double amount) {
   return hsl.withLightness(lightness).toColor();
 }
 
-/// Le bandeau 1xBet n'est visible que sur la page d'accueil (aucune autre
-/// page par-dessus). `kAdOnHome` suit la pile des pages.
-final ValueNotifier<bool> kAdOnHome = ValueNotifier<bool>(true);
-
-class _AdObserver extends NavigatorObserver {
-  final List<Route<dynamic>> _pages = [];
-
-  void _update() {
-    final show = _pages.length <= 1;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (kAdOnHome.value != show) kAdOnHome.value = show;
-      setAdVisible(show);
-    });
-  }
-
-  @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PageRoute) _pages.add(route);
-    _update();
-  }
-
-  @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    _pages.remove(route);
-    _update();
-  }
-
-  @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    _pages.remove(route);
-    _update();
-  }
-
-  @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    final i = oldRoute == null ? -1 : _pages.indexOf(oldRoute);
-    if (i >= 0) _pages.removeAt(i);
-    if (newRoute is PageRoute) {
-      _pages.insert(i >= 0 ? i : _pages.length, newRoute);
-    }
-    _update();
-  }
-}
-
-final _AdObserver _adObserver = _AdObserver();
-
 class LudoProApp extends StatelessWidget {
   const LudoProApp({super.key});
 
@@ -145,19 +98,6 @@ class LudoProApp extends StatelessWidget {
         fontFamily: 'Roboto',
         scaffoldBackgroundColor: const Color(0xFF061A66),
       ),
-      // Bandeau 1xBet (728x90) collé en bas : il est posé par web/index.html ;
-      // l'appli laisse la même hauteur libre pour ne rien cacher.
-      navigatorObservers: [_adObserver],
-      builder: (context, child) {
-        if (!kIsWeb) return child ?? const SizedBox.shrink();
-        final w = MediaQuery.of(context).size.width;
-        final h = 22.0 + 90.0 * (w >= 728 ? 1.0 : w / 728);
-        return ValueListenableBuilder<bool>(
-          valueListenable: kAdOnHome,
-          builder: (context, onHome, _) =>
-              Padding(padding: EdgeInsets.only(bottom: onHome ? h : 0), child: child),
-        );
-      },
       home: const SharedLinkGate(child: CashierGate(child: CityGate(child: HomeScreen()))),
     );
   }
