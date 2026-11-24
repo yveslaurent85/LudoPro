@@ -4602,6 +4602,12 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   List<double> homeCenter(int p, int i) {
     final rowStart = p < 2 ? 0 : 9;
     final colStart = (p == 0 || p == 3) ? 0 : 9;
+    final n = players[p].pawns.length;
+    // 1 ou 2 pions : une seule rangée de ronds au milieu de la base.
+    if (n <= 2) {
+      final cc = n == 1 ? 3.0 : (i == 0 ? 2.0 : 4.0);
+      return _rotPt(rowStart + 3.0, colStart + cc);
+    }
     final r = i < 2 ? 2.0 : 4.0;
     final c = i.isEven ? 2.0 : 4.0;
     return _rotPt(rowStart + r, colStart + c);
@@ -4950,6 +4956,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
                         starts: players.map((p) => p.start).toList(),
                         safeStars: widget.starSafe ? safeStars : const <int>{},
                         showDoorStars: widget.doorSafe,
+                        pawnCounts: [for (final pl in players) pl.pawns.length],
                       ),
                     ),
                     ),
@@ -5034,34 +5041,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               child: const Icon(Icons.menu, color: Colors.white),
             ),
           ),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('👑', style: TextStyle(fontSize: 15)),
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(text: 'Kati', style: logoStyle(Colors.white)),
-                      TextSpan(
-                        text: 'ka',
-                        style: logoStyle(const Color(0xFFFFC21A)),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  'Dés et Ludo by CKY',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 9,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const Spacer(), // plus de titre « Katika by CKY » dans la partie
           IconButton(
             tooltip: tr('Règles', 'Rules'),
             padding: const EdgeInsets.all(6),
