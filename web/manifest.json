@@ -1,0 +1,44 @@
+{
+    "id": "/jouer/",
+    "name": "Katika - Ludo et Dés",
+    "short_name": "Katika",
+    "description": "Katika : jouer au Ludo, aux Dés et aux jeux de cartes en ligne.",
+    "lang": "fr",
+    "start_url": "/jouer/",
+    "scope": "/jouer/",
+    "display": "standalone",
+    "display_override": ["standalone", "minimal-ui"],
+    "background_color": "#061A66",
+    "theme_color": "#061A66",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "launch_handler": {
+        "client_mode": ["navigate-existing", "auto"]
+    },
+    "handle_links": "preferred",
+    "capture_links": "existing-client-navigate",
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
