@@ -8321,8 +8321,19 @@ function ludoIsMate(d, a, b) {
 function ludoMateOf(d, c) {
   return d.teamMode === true && Array.isArray(d.partners) ? intOr(d.partners[c], -1) : -1;
 }
+/** Deux pions (ou plus) de la même équipe sur la même case : protégés de la capture
+ *  (même joueur, ou binôme en 2 contre 2), que la case soit étoilée ou non. */
 function ludoIsBlock(d, c, pos) {
-  return ludoPawns(d, c).filter((x) => x === pos).length >= 2;
+  if (pos < 0 || pos >= 51) return ludoPawns(d, c).filter((x) => x === pos).length >= 2;
+  const abs = (LUDO_START[c] + pos) % 52;
+  let n = 0;
+  for (const q of ludoColors(d)) {
+    if (q !== c && !ludoIsMate(d, c, q)) continue;
+    for (const x of ludoPawns(d, q)) {
+      if (x >= 0 && x < 51 && (LUDO_START[q] + x) % 52 === abs) n++;
+    }
+  }
+  return n >= 2;
 }
 function ludoFinishTarget(d) {
   return Math.max(1, intOr(d.finishTarget, 1));
@@ -8884,6 +8895,37 @@ async function adminDeleteAccount({ uid, data, env }) {
   return { ok: true, authDeleted };
 }
 
+/** Historique de connexion : à chaque ouverture de session (ensureWallet) on
+ *  garde l'adresse IP, le pays/ville (Cloudflare) et l'appareil. Une même IP vue
+ *  dans les 30 dernières minutes ne crée pas de nouvelle ligne (on rafraîchit
+ *  l'heure). 60 entrées maximum par joueur. */
+const LOGIN_KEEP = 60;
+async function logLogin(env, uid, request) {
+  const h = request.headers;
+  const ip = (h.get('cf-connecting-ip') || (h.get('x-forwarded-for') || '').split(',')[0] || '').trim().slice(0, 64);
+  if (!ip) return;
+  const cf = request.cf || {};
+  const now = Date.now();
+  const entry = {
+    t: now,
+    ip,
+    country: String(cf.country || '').slice(0, 8),
+    city: String(cf.city || '').slice(0, 60),
+    ua: String(h.get('user-agent') || '').slice(0, 160),
+  };
+  await runTx(env, async (tx) => {
+    const cur = await tx.get(`loginLog/${uid}`);
+    const list = Array.isArray(cur && cur.list) ? cur.list.slice() : [];
+    const last = list[0];
+    if (last && last.ip === ip && now - intOr(last.t, 0) < 30 * 60 * 1000) {
+      list[0] = Object.assign({}, last, { t: now });
+    } else {
+      list.unshift(entry);
+    }
+    tx.write(`loginLog/${uid}`, { set: { list: list.slice(0, LOGIN_KEEP) } });
+  });
+}
+
 async function adminPlayerInfo({ uid, data, env }) {
   requireAdmin(uid, env);
   const target = typeof data.uid === 'string' ? data.uid : '';
@@ -8945,9 +8987,24 @@ async function adminPlayerInfo({ uid, data, env }) {
     if (withPhone) phone = withPhone.phone;
   } catch (_) {}
 
+  let logins = [];
+  try {
+    const ll = await readDoc(env, `loginLog/${target}`);
+    if (ll && Array.isArray(ll.list)) {
+      logins = ll.list.map((x) => ({
+        t: intOr(x.t, 0),
+        ip: String(x.ip || ''),
+        country: String(x.country || ''),
+        city: String(x.city || ''),
+        ua: String(x.ua || ''),
+      }));
+    }
+  } catch (_) {}
+
   return {
     uid: target,
     pseudo: nameOf(u),
+    logins,
     promoCode: typeof u.promoCode === 'string' ? u.promoCode : '',
     referrer,
     referrals,
@@ -9179,6 +9236,10 @@ export default {
 
       const guard = await guardRequest(env, uid, name, data);
       const result = await handler({ uid, data, env });
+      if (name === 'ensureWallet') {
+        const p = logLogin(env, uid, request).catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+      }
       if (guard && guard.risk && guard.risk.length && MONEY_OUT.has(name)) {
         const p = notifyAdmin(env, `🕵️ Retrait demandé par un compte SUSPECT (${fcfaText(data.amount)}) : ${guard.risk.join(' ; ')}`).catch(() => {});
         if (ctx && ctx.waitUntil) ctx.waitUntil(p);
