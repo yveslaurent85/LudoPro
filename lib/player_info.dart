@@ -245,6 +245,44 @@ class _PlayerInfoBoxState extends State<PlayerInfoBox> {
               ),
             ),
         ]),
+        // --- Historique de connexion ------------------------------------
+        _box(
+            tr('Historique de connexion (${((d['logins'] as List?) ?? const []).length})',
+                'Login history (${((d['logins'] as List?) ?? const []).length})'),
+            [
+              if (((d['logins'] as List?) ?? const []).isEmpty)
+                Text(tr("Aucune connexion enregistrée pour l'instant.", 'No login recorded yet.'),
+                    style: const TextStyle(color: Color(0xFF56608A), fontSize: 13))
+              else
+                for (final x in ((d['logins'] as List).take(30)))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Expanded(
+                            child: SelectableText('${(x as Map)['ip']}',
+                                style: const TextStyle(
+                                    color: Color(0xFF12183A), fontWeight: FontWeight.w800, fontSize: 13)),
+                          ),
+                          Text(_dateTime(_i(x['t'])),
+                              style: const TextStyle(color: Color(0xFF56608A), fontSize: 12)),
+                        ]),
+                        Text(
+                          [
+                            if ('${x['city']}'.isNotEmpty) '${x['city']}',
+                            if ('${x['country']}'.isNotEmpty) '${x['country']}',
+                            if ('${x['ua']}'.isNotEmpty) '${x['ua']}',
+                          ].join(' · '),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Color(0xFF68729A), fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+            ]),
         // --- Gestion du compte (admin) -----------------------------------
         if (d['isAdminAccount'] != true)
           _box(tr('Gestion du compte', 'Account management'), [
