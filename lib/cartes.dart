@@ -1472,10 +1472,10 @@ Future<void> _showLocalBets(
               const SizedBox(height: 6),
               Text(
                 type == 'duel'
-                    ? tr(boubayah ? 'Le plus gros score gagne (FOMEKOU bat tout). Égalité : mises rendues.' : 'Le meilleur total (21 max) gagne. Égalité : mises rendues.',
-                        boubayah ? 'Highest score wins (FOMEKOU beats all). Tie: stakes refunded.' : 'Best total (21 max) wins. Tie: stakes refunded.')
-                    : tr('Le total BOUBAYAH du parieur est comparé à 13. FOMEKOU compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
-                        "The bettor's BOUBAYAH total is compared with 13. FOMEKOU counts as 6 (so under 13). Exactly 13: stakes refunded."),
+                    ? tr(boubayah ? 'Le plus gros score gagne (MILLION bat tout). Égalité : mises rendues.' : 'Le meilleur total (21 max) gagne. Égalité : mises rendues.',
+                        boubayah ? 'Highest score wins (MILLION beats all). Tie: stakes refunded.' : 'Best total (21 max) wins. Tie: stakes refunded.')
+                    : tr('Le total BOUBAYAH du parieur est comparé à 13. MILLION compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
+                        "The bettor's BOUBAYAH total is compared with 13. MILLION counts as 6 (so under 13). Exactly 13: stakes refunded."),
                 style: const TextStyle(color: Colors.white60, fontSize: 12),
               ),
               const SizedBox(height: 8),
@@ -2550,7 +2550,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
       _history.insert(
           0,
           '${tr('Manche', 'Round')} ${_round + 1} : ${w.map((s) => _t!.names[s]).join(', ')}'
-          '${_fomekou ? ' (FOMEKOU)' : ' (${_total(w.first)})'}');
+          '${_fomekou ? ' (MILLION)' : ' (${_total(w.first)})'}');
     });
     try {
       final jp = await _t!.settle(w, scores: _scores(), fscores: _fscores());
@@ -2644,7 +2644,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
         if (open && _isFomekou(seat))
           const Padding(
             padding: EdgeInsets.only(top: 6),
-            child: Text('FOMEKOU !',
+            child: Text('MILLION !',
                 style: TextStyle(color: _gold, fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 18)),
           ),
         if (mine)
@@ -2765,7 +2765,7 @@ class _BoubayahLocalPageState extends State<BoubayahLocalPage> {
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), color: const Color(0xFF1B8A3A)),
                 child: Column(children: [
                   if (_fomekou)
-                    const Text('FOMEKOU !',
+                    const Text('MILLION !',
                         style: TextStyle(color: _gold, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 4)),
                   Text(
                     refund
@@ -3406,7 +3406,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         }
       }
     }
-    // « TIAH ! » / « FOMEKOU ! » : son dès qu'une main spéciale apparaît
+    // « TIAH ! » / « MILLION ! » : son dès qu'une main spéciale apparaît
     final pl = v['players'] as List? ?? [];
     for (final p in pl) {
       final m = Map<String, dynamic>.from(p as Map);
@@ -3775,7 +3775,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
                     const Text('TOUCX !',
                         style: TextStyle(color: _gold, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 4)),
                   if (v['fomekou'] == true)
-                    const Text('FOMEKOU !',
+                    const Text('MILLION !',
                         style: TextStyle(color: _gold, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 4)),
                   Text(
                     refund
@@ -3895,7 +3895,7 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
         if (special)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(tiah ? (toucx ? 'TOUCX !' : 'TIAH !') : 'FOMEKOU !',
+            child: Text(tiah ? (toucx ? 'TOUCX !' : 'TIAH !') : 'MILLION !',
                 style: const TextStyle(color: _gold, fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 18)),
           ),
         if (tiah && total != null && total > 21 && !toucx)
@@ -4071,10 +4071,10 @@ class _CardsOnlineRoomState extends State<CardsOnlineRoom> {
               const SizedBox(height: 6),
               Text(
                 type == 'duel'
-                    ? tr(tiah ? 'Le meilleur total (21 max) gagne. Égalité : mises rendues.' : 'Le plus gros score gagne (FOMEKOU bat tout). Égalité : mises rendues.',
-                        tiah ? 'Best total (21 max) wins. Tie: stakes refunded.' : 'Highest score wins (FOMEKOU beats all). Tie: stakes refunded.')
-                    : tr('Ton total BOUBAYAH est comparé à 13. FOMEKOU compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
-                        'Your BOUBAYAH total is compared with 13. FOMEKOU counts as 6 (so under 13). Exactly 13: stakes refunded.'),
+                    ? tr(tiah ? 'Le meilleur total (21 max) gagne. Égalité : mises rendues.' : 'Le plus gros score gagne (MILLION bat tout). Égalité : mises rendues.',
+                        tiah ? 'Best total (21 max) wins. Tie: stakes refunded.' : 'Highest score wins (MILLION beats all). Tie: stakes refunded.')
+                    : tr('Ton total BOUBAYAH est comparé à 13. MILLION compte 6 (donc « moins de 13 »). 13 pile : mises rendues.',
+                        'Your BOUBAYAH total is compared with 13. MILLION counts as 6 (so under 13). Exactly 13: stakes refunded.'),
                 style: const TextStyle(color: Colors.white60, fontSize: 12),
               ),
               if (type == 'duel') ...[

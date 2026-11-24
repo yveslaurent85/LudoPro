@@ -1617,7 +1617,7 @@ class _GamesGrid extends StatelessWidget {
           color: const Color(0xFF7B1FA2),
           icon: Icons.filter_5,
           infoKey: 'boubayah',
-          leading: const _CardFan([[['4', '♠'], ['6', '♥'], ['9', '♦']], [['3', '♥'], ['3', '♠']]], caption: 'FOMEKOU'),
+          leading: const _CardFan([[['4', '♠'], ['6', '♥'], ['9', '♦']], [['3', '♥'], ['3', '♠']]], caption: 'MILLION'),
           title: 'BOUBAYAH',
           subtitle: tr('Le plus gros total gagne', 'Highest total wins'),
           badge: tr('NOUVEAU', 'NEW'),
@@ -2921,10 +2921,23 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   bool _isMate(int a, int b) =>
       widget.partners != null && widget.partners![a] == b;
 
-  /// Deux pions (ou plus) du même joueur sur la même case forment un bloc :
-  /// ils sont protégés de la capture, comme les pions d'une même équipe.
-  bool _isBlock(int p, int pos) =>
-      players[p].pawns.where((x) => x == pos).length >= 2;
+  /// Deux pions (ou plus) du même joueur ou de son binôme sur la même case
+  /// forment un bloc : ils sont protégés de la capture.
+  bool _isBlock(int p, int pos) {
+    if (pos < 0 || pos >= 51) {
+      return players[p].pawns.where((x) => x == pos).length >= 2;
+    }
+    // Pions du même joueur ou de son binôme sur la même case : protégés.
+    final abs = (players[p].start + pos) % 52;
+    int n = 0;
+    for (int q = 0; q < players.length; q++) {
+      if (q != p && !_isMate(p, q)) continue;
+      for (final x in players[q].pawns) {
+        if (x >= 0 && x < 51 && (players[q].start + x) % 52 == abs) n++;
+      }
+    }
+    return n >= 2;
+  }
 
   /// « Anna & Paul » en mode équipe, sinon juste le nom.
   String teamLabel(int c) {

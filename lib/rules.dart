@@ -90,14 +90,14 @@ String _rTiah() => tr(
 String _rBoubayah() => tr(
       'BOUBAYAH (2 à 6 joueurs) : le plus gros total gagne.\n'
           '• Chacun reçoit 3 cartes simples puis 2 cartes BOUBAYAH, cachées jusqu\'à l\'ouverture.\n'
-          '• Seul le total des 2 cartes BOUBAYAH compte. FOMEKOU (deux 3) bat tout ; il sort un peu plus souvent que le hasard pur (environ 6 % par joueur et par manche).\n'
+          '• Seul le total des 2 cartes BOUBAYAH compte. MILLION (deux 3) bat tout ; il sort un peu plus souvent que le hasard pur (environ 6 % par joueur et par manche).\n'
           '• Les joueurs ouvrent leurs cartes à tour de rôle (10 secondes chacun).\n'
           '• Égalité : le gain est partagé.\n'
           '• Mise : le gagnant prend la cagnotte moins la commission de Katika. '
           'Paris possibles : duel et Défi Fétiche 13.',
       'BOUBAYAH (2-6 players): the highest total wins.\n'
           '• Everyone gets 3 plain cards then 2 BOUBAYAH cards, hidden until opened.\n'
-          '• Only the total of the 2 BOUBAYAH cards counts. FOMEKOU (two 3s) beats everything; it comes up a bit more often than pure chance (about 6% per player each round).\n'
+          '• Only the total of the 2 BOUBAYAH cards counts. MILLION (two 3s) beats everything; it comes up a bit more often than pure chance (about 6% per player each round).\n'
           '• Players open their cards in turn (10 seconds each).\n'
           '• Tie: the prize is shared.\n'
           '• Stakes: the winner takes the pot minus Katika\'s commission. Bets: duel and Fetish 13 challenge.',

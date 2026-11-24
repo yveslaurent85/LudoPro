@@ -578,7 +578,7 @@ class _CardsReplayBody extends StatelessWidget {
                                     p['toucx'] == true
                                         ? 'TOUCX'
                                         : p['fomekou'] == true
-                                            ? 'FOMEKOU'
+                                            ? 'MILLION'
                                             : '${p['total']}',
                                     style: const TextStyle(
                                         color: _rpGold, fontSize: 18, fontWeight: FontWeight.w900),
