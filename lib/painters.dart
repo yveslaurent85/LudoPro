@@ -187,6 +187,7 @@ class BoardPainter extends CustomPainter {
   final List<int> starts;
   final Set<int> safeStars;
   final bool showDoorStars;
+  final List<int> pawnCounts; // pions par joueur (un rond par pion)
 
   BoardPainter({
     required this.colors,
@@ -196,6 +197,7 @@ class BoardPainter extends CustomPainter {
     required this.starts,
     required this.safeStars,
     required this.showDoorStars,
+    this.pawnCounts = const [4, 4, 4, 4],
   });
 
   void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
@@ -238,12 +240,16 @@ class BoardPainter extends CustomPainter {
       canvas.drawRect(inner, Paint()..color = Colors.white);
       canvas.drawRect(inner, line);
 
-      for (final dy in const [2.0, 4.0]) {
-        for (final dx in const [2.0, 4.0]) {
-          final ctr = Offset((colStart + dx) * c, (rowStart + dy) * c);
-          canvas.drawCircle(ctr, c * 0.52, Paint()..color = colors[p]);
-          canvas.drawCircle(ctr, c * 0.52, line);
-        }
+      final n = p < pawnCounts.length ? pawnCounts[p] : 4;
+      final spots = n <= 1
+          ? const [Offset(3.0, 3.0)]
+          : (n == 2
+              ? const [Offset(2.0, 3.0), Offset(4.0, 3.0)]
+              : const [Offset(2.0, 2.0), Offset(4.0, 2.0), Offset(2.0, 4.0), Offset(4.0, 4.0)]);
+      for (final sp in spots) {
+        final ctr = Offset((colStart + sp.dx) * c, (rowStart + sp.dy) * c);
+        canvas.drawCircle(ctr, c * 0.52, Paint()..color = colors[p]);
+        canvas.drawCircle(ctr, c * 0.52, line);
       }
     }
 
