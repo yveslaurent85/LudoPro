@@ -5550,7 +5550,7 @@ const cardsTotal = (hand) => (hand || []).reduce((a, c) => a + cardVal(c), 0);
 /** TOUCX : deux as en main (22) ; bat tout, même 21, et ne peut jamais être égalé. */
 const cardsIsToucx = (hand) => (hand || []).length === 2 && (hand || []).every((c) => cardVal(c) === 11);
 const cardsBoubaTotal = (d, uid) => ((d.bouba && d.bouba[uid]) || []).reduce((a, c) => a + cardVal(c), 0);
-const FOMEKOU_BOOST_PERCENT = 6; // chance par joueur de recevoir FOMEKOU à la distribution (≈1 % sans ce réglage)
+const MILLION_BOOST_PERCENT = 6; // chance par joueur de recevoir MILLION à la distribution (≈1 % sans ce réglage)
 const cardsIsFomekou = (d, uid) => {
   const b = (d.bouba && d.bouba[uid]) || [];
   return b.length === 2 && cardVal(b[0]) === 3 && cardVal(b[1]) === 3;
@@ -6464,8 +6464,8 @@ function cardsView(id, g, uid) {
 // cards/{roomId}/bets/{betId}, cards/{roomId}/betMeta/index { ids }
 // Possible tant que les joueurs concernés n'ont pas ouvert leurs cartes (avant la manche
 // ou pendant). Mise débitée à la proposition / l'acceptation, réglée par cardsBetsSync.
-//  • Duel : le plus gros score gagne (TIAH : total ≤ 21, plus de 21 = perdu ; BOUBAYAH : FOMEKOU bat tout).
-//  • Fétiche : le total BOUBAYAH du parieur est comparé à 13 ; FOMEKOU compte 6 (donc « moins de 13 »).
+//  • Duel : le plus gros score gagne (TIAH : total ≤ 21, plus de 21 = perdu ; BOUBAYAH : MILLION bat tout).
+//  • Fétiche : le total BOUBAYAH du parieur est comparé à 13 ; MILLION compte 6 (donc « moins de 13 »).
 //  Égalité (ou 13 pile) : mises rendues.
 
 const FETICHE = 13;
@@ -7185,10 +7185,10 @@ async function cardsStart({ uid, data, env }) {
       const bouba = Object.fromEntries(uids.map((u) => [u, []]));
       const from = clockwise(di + 1, uids.length); // distribution et révélation après le distributeur
       for (let r = 0; r < 3; r++) for (const u of from) plain[u].push(deck.pop());
-      // FOMEKOU plus fréquent : chaque joueur, à égalité, a FOMEKOU_BOOST_PERCENT % de chances de recevoir
+      // MILLION plus fréquent : chaque joueur, à égalité, a MILLION_BOOST_PERCENT % de chances de recevoir
       // directement deux 3 (s'il en reste deux dans le paquet) ; sinon distribution normale.
       for (const u of from) {
-        if (crypto.getRandomValues(new Uint32Array(1))[0] % 100 < FOMEKOU_BOOST_PERCENT) {
+        if (crypto.getRandomValues(new Uint32Array(1))[0] % 100 < MILLION_BOOST_PERCENT) {
           const idx = [];
           for (let i = 0; i < deck.length && idx.length < 2; i++) if (cardVal(deck[i]) === 3) idx.push(i);
           if (idx.length === 2) {
