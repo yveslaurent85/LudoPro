@@ -498,6 +498,13 @@ function stakeTotal(d, uid) {
   return stakeFor(d, uid) * seatsOf(d, uid);
 }
 
+/** Joueurs réellement débités : en salle d'attente « différée », personne n'a
+ *  encore été débité (la mise n'est prélevée qu'au lancement par le créateur). */
+function chargedPaid(d) {
+  const paid = Array.isArray(d && d.paid) ? d.paid : [];
+  return d && d.deferred === true && d.charged !== true ? [] : paid;
+}
+
 function refund(tx, uids, stake, d) {
   for (const uid of uids) {
     const s = d ? stakeTotal(d, uid) : stake;
@@ -980,13 +987,19 @@ async function payStake({ uid, data, env }) {
     const teamsReady = !team || (partners.length === 4 && partners.every((p) => p !== -1));
     const ready = players.length >= max && paid.length + 1 >= max && teamsReady;
 
-    if (stake > 0) tx.write(`users/${uid}`, { incr: { balance: -stake } });
-    tx.write(g.path, {
-      union: { paid: [uid] },
-      incr: { pot: stake },
-      // La partie ne démarre plus toute seule : le créateur la lance (startGame).
-      set: {},
-    });
+    // Mise différée : le solde reste intact jusqu'au lancement (startGame).
+    const defer = d.deferred === true || (paid.length === 0 && d.charged !== true);
+    if (defer) {
+      tx.write(g.path, { union: { paid: [uid] }, set: { deferred: true } });
+    } else {
+      if (stake > 0) tx.write(`users/${uid}`, { incr: { balance: -stake } });
+      tx.write(g.path, {
+        union: { paid: [uid] },
+        incr: { pot: stake },
+        // La partie ne démarre plus toute seule : le créateur la lance (startGame).
+        set: {},
+      });
+    }
     // Nouvelle partie publique créée par son créateur : on préviendra les joueurs.
     if (d.hostUid === uid && d.private !== true && players.length === 1 && paid.length === 0) {
       return {
@@ -1252,6 +1265,35 @@ async function startGame({ uid, data, env }) {
       );
     }
     const set = { status: 'playing', maxPlayers: players.length };
+    // Mises prélevées maintenant (salle « différée ») : chacun doit avoir le solde.
+    const inc = {};
+    if (d.deferred === true && d.charged !== true) {
+      const capNeed = g.col === 'games' ? capFeeOf(d) : 0;
+      const ids = [...new Set(players.map((p) => p.uid))];
+      const docs = await Promise.all(ids.map((u) => tx.get(`users/${u}`)));
+      const short = [];
+      let pot = 0;
+      ids.forEach((u, i) => {
+        const st = stakeTotal(d, u);
+        if ((st > 0 || capNeed > 0) && balanceOf(docs[i]) < st + capNeed) {
+          const pl = players.find((p) => p.uid === u);
+          short.push((pl && pl.name) || 'Un joueur');
+        }
+        pot += st;
+      });
+      if (short.length > 0) {
+        throw new HttpError(
+          'failed-precondition',
+          `${short.join(', ')} n'a pas assez de solde pour la mise. Le joueur doit recharger ou quitter la salle.`,
+        );
+      }
+      ids.forEach((u) => {
+        const st = stakeTotal(d, u);
+        if (st > 0) tx.write(`users/${u}`, { incr: { balance: -st } });
+      });
+      set.charged = true;
+      inc.pot = pot;
+    }
     // Revanche : le gagnant de la partie précédente commence.
     if (g.col === 'games' && typeof d.starterUid === 'string') {
       const si = players.findIndex((p) => p.uid === d.starterUid);
@@ -1266,7 +1308,14 @@ async function startGame({ uid, data, env }) {
       }
     }
     if ((g.col === 'games' || g.col === 'deuxdes') && String(env.SERVER_AUTH || '') === '1') set.srv = true;
-    tx.write(g.path, { set, serverTime: ['startedAt'] });
+    // Ludo lancé à moins de joueurs que de places : les autres peuvent encore
+    // entrer tant que personne n'a joué de 6 (voir ludoJoinRunning).
+    const cap = intOr(d.maxPlayers, 2);
+    if (g.col === 'games' && set.srv === true && set.teamMode !== true && d.teamMode !== true && players.length < cap) {
+      set.lateOpen = true;
+      set.lateCap = cap;
+    }
+    tx.write(g.path, Object.keys(inc).length ? { set, incr: inc, serverTime: ['startedAt'] } : { set, serverTime: ['startedAt'] });
     return { started: true, players: players.length };
   });
 }
@@ -1283,12 +1332,13 @@ async function leaveGame({ uid, data, env }) {
 
     const players = playersOf(d);
     const paid = Array.isArray(d.paid) ? d.paid : [];
+    const debited = chargedPaid(d);
     const stake = Math.max(0, intOr(d.stake, 0));
     const isHost = d.hostUid === uid;
     if (!isHost && !players.some((p) => p.uid === uid)) return;
 
     if (isHost) {
-      refund(tx, paid, stake, d);
+      refund(tx, debited, stake, d);
       tx.delete(g.path);
       return;
     }
@@ -1298,10 +1348,12 @@ async function leaveGame({ uid, data, env }) {
       remove: { uids: [uid] },
     };
     if (paid.includes(uid)) {
-      const mine = stakeTotal(d, uid);
-      refund(tx, [uid], mine);
       o.remove.paid = [uid];
-      o.incr = { pot: -mine };
+      if (debited.includes(uid)) {
+        const mine = stakeTotal(d, uid);
+        refund(tx, [uid], mine);
+        o.incr = { pot: -mine };
+      }
     }
     // Les places changent quand quelqu'un part : on refait les binômes.
     if (d.teamMode === true) {
@@ -3314,7 +3366,7 @@ async function adminCashiers({ uid, env }) {
 /** Jeux interdits aux caissières (elles ne gardent que les courses). */
 const CASHIER_BLOCKED = new Set([
   'cardsBetPropose', 'cardsBetAccept', 'cardsRematch',
-  'startGame', 'payStake', 'startLocalGame',
+  'startGame', 'payStake', 'startLocalGame', 'ludoJoinRunning',
   'cardsCreate', 'cardsJoin', 'tournamentRegister', 'tournamentTeamCreate', 'tournamentTeamJoin',
   'sportBetCreate', 'sportBetAccept', 'sideBetPropose', 'sideBetAccept', 'localBetCreate', 'transfer',
 ]);
@@ -3821,7 +3873,7 @@ async function adminReviveGames({ uid, env }) {
         const who =
           col === 'localGames'
             ? (Array.isArray(d.uids) ? d.uids : [])
-            : (Array.isArray(d.paid) ? d.paid : []);
+            : chargedPaid(d);
         refund(tx, who, stake, d);
         tx.write(path, {
           set: {
@@ -7974,7 +8026,7 @@ async function sweepWaitingGames(env) {
           if (!g || g.status !== 'waiting' || g.settled === true || g.over === true) return false;
           if (playersOf(g).length > 1) return false;
           const stake = Math.max(0, intOr(g.stake, 0));
-          refund(tx, Array.isArray(g.paid) ? g.paid : [], stake, g);
+          refund(tx, chargedPaid(g), stake, g);
           tx.write(path, {
             set: {
               ...(col === 'cards' && cardsChatOf(g).entries.length ? cardsChatRefundAll(tx, g) : {}),
@@ -8141,7 +8193,7 @@ async function adminResolveGame({ uid, data, env }) {
       return { first: String((playersOf(d)[0] || {}).uid || '') };
     }
     const stake = Math.max(0, intOr(d.stake, 0));
-    refund(tx, Array.isArray(d.paid) ? d.paid : [], stake, d);
+    refund(tx, chargedPaid(d), stake, d);
     tx.write(g.path, {
       set: { review: false, settled: true, refunded: true, over: true, status: 'finished', commission: 0, referralPaid: 0, partnerPaid: 0, jackpot: 0 },
     });
@@ -8166,7 +8218,7 @@ async function adminCancelGame({ uid, data, env }) {
       throw new HttpError('failed-precondition', 'Cette partie est déjà terminée.');
     }
     const stake = Math.max(0, intOr(d.stake, 0));
-    const paid = Array.isArray(d.paid) ? d.paid : [];
+    const paid = chargedPaid(d);
     refund(tx, paid, stake, d);
     tx.write(g.path, {
       set: {
@@ -8556,6 +8608,70 @@ function ludoApplyForfeit(d, who) {
 }
 
 /** Action d'un joueur sur une partie Ludo « serveur » (srv === true). */
+/** Entrer dans un Ludo déjà lancé à moins de joueurs que de places, tant que
+ *  personne n'a joué de 6 (aucun pion n'a bougé). Le joueur paie sa mise tout
+ *  de suite ; les couleurs sont redistribuées selon le nouvel effectif. */
+async function ludoJoinRunning({ uid, data, env }) {
+  const gameId = idOf(data);
+  return runTx(env, async (tx) => {
+    const path = `games/${gameId}`;
+    const [d, me] = await Promise.all([tx.get(path), tx.get(`users/${uid}`)]);
+    if (!d) throw new HttpError('not-found', "Cette partie n'existe plus.");
+    if (d.status !== 'playing' || d.over === true || d.srv !== true || d.lateOpen !== true) {
+      throw new HttpError('failed-precondition', 'Cette partie ne peut plus être rejointe.');
+    }
+    const players = playersOf(d);
+    if (players.some((p) => p.uid === uid)) return { ok: true, already: true };
+    const cap = intOr(d.lateCap, 0);
+    const n = players.length;
+    if (n < 2 || n >= cap || n >= 4) throw new HttpError('failed-precondition', 'La partie est complète.');
+    const oldColors = colorsFor(n);
+    const newColors = colorsFor(n + 1);
+    // Personne n'a bougé un pion.
+    const pc = Math.max(1, intOr(d.pawnCount, 4));
+    const initial = (i) => (d.startOut === true ? 43 + (i % 2) : d.startDoor === true ? 0 : -1);
+    for (const c of oldColors) {
+      const p = ludoPawns(d, c);
+      for (let i = 0; i < pc; i++) {
+        if (intOr(p[i], -9) !== initial(i)) throw new HttpError('failed-precondition', 'Un pion a déjà bougé : trop tard.');
+      }
+    }
+    const perSeat = Math.max(0, intOr(d.stake, 0));
+    const capNeed = capFeeOf(d);
+    if ((perSeat > 0 || capNeed > 0) && balanceOf(me) < perSeat + capNeed) {
+      throw new HttpError('failed-precondition', 'Solde insuffisant.');
+    }
+    if (perSeat > 0) tx.write(`users/${uid}`, { incr: { balance: -perSeat } });
+    const name = (typeof data.name === 'string' && data.name.trim() ? data.name.trim().slice(0, 24) : '') || (me && (me.pseudo || me.name)) || 'Joueur';
+    // Tour et mémoires de dés : on garde le même joueur, sa couleur change.
+    const oldCur = intOr(d.cur, 0);
+    const ti = Math.max(0, oldColors.indexOf(oldCur));
+    const lr = [1, 1, 1, 1];
+    const ft = [0, 0, 0, 0];
+    const oldLr = Array.isArray(d.lastRoll) ? d.lastRoll : [];
+    const oldFt = Array.isArray(d.ft) ? d.ft : [];
+    oldColors.forEach((c, i) => {
+      lr[newColors[i]] = intOr(oldLr[c], 1);
+      ft[newColors[i]] = intOr(oldFt[c], 0);
+    });
+    const set = {
+      players: [...players, { uid, name }],
+      maxPlayers: n + 1,
+      cur: newColors[ti],
+      lastRoll: lr,
+      ft,
+      msg: `${name} a rejoint la partie.`,
+    };
+    if (n + 1 >= cap) set.lateOpen = false;
+    tx.write(path, {
+      set,
+      union: { uids: [uid], paid: [uid] },
+      incr: { pot: perSeat, rev: 1 },
+    });
+    return { ok: true, players: n + 1 };
+  });
+}
+
 async function ludoAct({ uid, data, env }) {
   const gameId = idOf(data);
   const act = String(data.act || '');
@@ -8607,6 +8723,7 @@ async function ludoAct({ uid, data, env }) {
         d.hasRolled = true;
         d.lastRoll = lr;
         d.ft = ft;
+        if (dv === 6 && d.lateOpen === true) set.lateOpen = false;
         set.roll = { by: uid, n: Date.now() };
         info.dice = dv;
       } else if (act === 'pass') {
@@ -9077,6 +9194,7 @@ const HANDLERS = {
   applyPromo,
   referralInfo,
   payStake,
+  ludoJoinRunning,
   startGame,
   captureFee,
   adminPlayers,
