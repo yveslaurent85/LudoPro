@@ -28,11 +28,15 @@ class StakeField extends StatefulWidget {
     required this.players,
     required this.onChanged,
     this.local = false,
+    this.min = 0,
   });
 
   final int stake;
   final int players;
   final bool local;
+
+  /// Mise minimale propre au jeu (0 = minimum général de l'appli).
+  final int min;
   final ValueChanged<int> onChanged;
 
   @override
@@ -43,6 +47,8 @@ class _StakeFieldState extends State<StakeField> {
   static const Color _gold = Color(0xFFFFE082);
   late final TextEditingController _ctrl;
   late int _last;
+
+  int get _min => widget.min > 0 ? widget.min : Wallet.minStake;
 
   @override
   void initState() {
@@ -74,7 +80,7 @@ class _StakeFieldState extends State<StakeField> {
 
   void _typed(String t) {
     final v = int.tryParse(t) ?? 0;
-    final out = v == 0 ? 0 : ((v < Wallet.minStake || v > kMaxStake) ? -1 : v);
+    final out = v == 0 ? 0 : ((v < _min || v > kMaxStake) ? -1 : v);
     _last = out;
     widget.onChanged(out);
   }
@@ -96,7 +102,10 @@ class _StakeFieldState extends State<StakeField> {
           spacing: 8,
           runSpacing: 4,
           children: [
-            for (final v in Wallet.stakes)
+            for (final v in [
+              ...Wallet.stakes,
+              if (_min < Wallet.minStake) ...[_min],
+            ]..sort())
               ChoiceChip(
                 label: Text(Wallet.stakeLabel(v)),
                 selected: stake == v,
@@ -138,9 +147,9 @@ class _StakeFieldState extends State<StakeField> {
         const SizedBox(height: 6),
         Text(
           tr(
-            'Minimum : ${_fmtSpaces(Wallet.minStake)} FCFA  ·  '
+            'Minimum : ${_fmtSpaces(_min)} FCFA  ·  '
                 'Maximum : ${_fmtSpaces(kMaxStake)} FCFA',
-            'Minimum: ${_fmtSpaces(Wallet.minStake)} FCFA  ·  '
+            'Minimum: ${_fmtSpaces(_min)} FCFA  ·  '
                 'Maximum: ${_fmtSpaces(kMaxStake)} FCFA',
           ),
           style: TextStyle(

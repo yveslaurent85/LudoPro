@@ -383,7 +383,7 @@ class _DiceTable extends StatefulWidget {
   /// Emojis envoyés aux joueurs : ils s'affichent devant le joueur.
   final EmojiReactions? reactions;
 
-  /// Le joueur n'a pas joué dans les 30 s : cet appareil joue à sa place
+  /// Le joueur n'a pas joué dans les 25 s : cet appareil joue à sa place
   /// (appelé seulement quand [canAct] est vrai).
   final VoidCallback? onTimeout;
 
@@ -438,8 +438,8 @@ class _DiceTableState extends State<_DiceTable>
   /// Sons : roulement des dés, « toc » à l'arrêt, fanfare de fin.
   final Sfx _sfx = Sfx();
 
-  // --- Décompte de 30 s par joueur ------------------------------------
-  static const int _limit = 30;
+  // --- Décompte de 25 s par joueur ------------------------------------
+  static const int _limit = 25;
   Timer? _timer;
   int _left = _limit;
   int _turnKey = -1;
@@ -1393,7 +1393,7 @@ class _LocalGameState extends State<_LocalGame> {
     });
   }
 
-  /// 30 s écoulées : le système joue à la place du joueur (lancer, puis
+  /// 25 s écoulées : le système joue à la place du joueur (lancer, puis
   /// joueur suivant).
   Future<void> _autoPlay() async {
     if (over) return;
@@ -2188,7 +2188,7 @@ class _OnlineRoomState extends State<_OnlineRoom> {
     } catch (_) {}
   }
 
-  /// 30 s écoulées : lance les dés (si besoin) puis passe au joueur suivant,
+  /// 25 s écoulées : lance les dés (si besoin) puis passe au joueur suivant,
   /// à la place du joueur [seat] (n'importe quel appareil peut le faire).
   Future<void> _autoTurn(int seat, bool rolled) async {
     if (widget.replay != null) return;

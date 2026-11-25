@@ -3135,7 +3135,7 @@ class _CardsOnlineHubState extends State<CardsOnlineHub> {
               const SizedBox(height: 6),
               Text(tr('Mise de chaque joueur (0 = gratuit)', "Each player's stake (0 = free)"),
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              StakeField(stake: _stake, players: _max, onChanged: (v) => setState(() => _stake = v)),
+              StakeField(stake: _stake, players: _max, min: (widget.game == 'fapfap' || widget.game == 'anticote') ? 50 : 0, onChanged: (v) => setState(() => _stake = v)),
               if (widget.game == 'fapfap' || widget.game == 'anticote' || widget.game == 'tchek')
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
@@ -5995,6 +5995,9 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
   String? _geoWarn; // problème de localisation à afficher
   int _geoTick = 0;
   bool _hidden = false; // appli en arrière-plan / onglet masqué : la main est cachée
+  // Victoire par combinaison : le résultat reste affiché 3 s avant l'écran de fin.
+  Timer? _holdT;
+  String? _holdDone;
 
   /// Anti-triche : sur Android, la capture d'écran et l'enregistrement sont bloqués
   /// tant que la salle est ouverte. (Sur le web, le navigateur ne le permet pas.)
@@ -6099,6 +6102,7 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
 
   @override
   void dispose() {
+    _holdT?.cancel();
     _rev.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _protect(false);
@@ -6425,6 +6429,17 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
     if (winners.isEmpty || winners.length == players.length) return body;
     if (!_revealed(v)) return body;
+    // Gain par combinaison (21 ou moins, carré, 3 sept…) : on laisse le résultat
+    // (mains dévoilées + règle) à l'écran pendant 3 secondes.
+    const holdRules = {'four7', 'sum16', 'four', 'three7', 'le21'};
+    final holdId = '${v['id']}';
+    if (holdRules.contains('${v['fapRule']}') && _holdDone != holdId) {
+      _holdT ??= Timer(const Duration(seconds: 3), () {
+        _holdT = null;
+        if (mounted) setState(() => _holdDone = holdId);
+      });
+      return body;
+    }
     final stake = (v['stake'] as num?)?.toInt() ?? 0;
     final prize = (v['prize'] as num?)?.toInt() ?? 0;
     final won = winners.contains(_me);
