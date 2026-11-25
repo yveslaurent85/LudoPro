@@ -4287,6 +4287,145 @@ Widget _fapPlayed(List<_Card> cards, {double w = 50}) => Wrap(
       children: [for (final c in cards) _CardView(card: c, w: w)],
     );
 
+/// Ordre des sièges : moi en bas, puis dans le sens des aiguilles d'une montre.
+List<int> _feltOrder(List players, String me) {
+  final n = players.length;
+  var start = players.indexWhere((p) => '${(p as Map)['uid']}' == me);
+  if (start < 0) start = 0;
+  return [for (var k = 0; k < n; k++) (start + k) % n];
+}
+
+/// Cartes posées devant un joueur, légèrement chevauchées.
+Widget _fanPlayed(List<_Card> cards, {double w = 30}) {
+  if (cards.isEmpty) return SizedBox(height: w * 1.42);
+  final step = w * 0.5;
+  return SizedBox(
+    width: w + step * (cards.length - 1),
+    height: w * 1.42,
+    child: Stack(children: [
+      for (var i = 0; i < cards.length; i++)
+        Positioned(left: i * step, child: _CardView(card: cards[i], w: w)),
+    ]),
+  );
+}
+
+/// Un siège autour de la table : pastille (avatar + nom) et cartes jouées devant le joueur.
+Widget _feltSeat({
+  required String name,
+  required Color color,
+  required bool mine,
+  required bool isTurn,
+  required bool win,
+  List<Widget> badges = const [],
+  List<_Card> played = const [],
+  List<_Card> hand = const [],
+  _Card? early,
+  bool dim = false,
+}) {
+  final cw = mine ? 36.0 : 28.0;
+  final pill = Container(
+    padding: const EdgeInsets.fromLTRB(3, 3, 10, 3),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(22),
+      gradient: LinearGradient(colors: [color, Color.lerp(color, Colors.black, 0.45)!]),
+      border: Border.all(color: win ? _gold : (isTurn ? Colors.white : Colors.white24), width: isTurn || win ? 2.5 : 1.5),
+      boxShadow: isTurn ? const [BoxShadow(color: Colors.white54, blurRadius: 10)] : null,
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      const CircleAvatar(
+          radius: 12, backgroundColor: Colors.white, child: Icon(Icons.person, size: 18, color: Color(0xFF333333))),
+      const SizedBox(width: 6),
+      Flexible(
+        child: Text(mine ? '$name (${tr('toi', 'you')})' : name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+      ),
+      ...badges,
+    ]),
+  );
+  final cards = Column(mainAxisSize: MainAxisSize.min, children: [
+    _fanPlayed(played, w: cw),
+    if (early != null)
+      Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(tr('d\'avance ', 'ahead '), style: const TextStyle(color: _goldSoft, fontSize: 10, fontWeight: FontWeight.w800)),
+          _CardView(card: early, w: 22),
+        ]),
+      ),
+    if (hand.isNotEmpty)
+      Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: _fanPlayed(hand, w: 22),
+      ),
+  ]);
+  return Opacity(
+    opacity: dim ? 0.45 : 1,
+    child: Column(mainAxisSize: MainAxisSize.min, children: mine ? [cards, const SizedBox(height: 4), pill] : [pill, const SizedBox(height: 4), cards]),
+  );
+}
+
+/// Table de jeu en tapis vert : moi en bas, les autres autour (gauche, haut, droite).
+class _FeltTable extends StatelessWidget {
+  const _FeltTable({required this.seats, this.center});
+
+  final List<Widget> seats; // seats[0] = moi
+  final Widget? center;
+
+  @override
+  Widget build(BuildContext context) {
+    if (seats.isEmpty) return const SizedBox.shrink();
+    final others = seats.sublist(1);
+    Widget? left, right;
+    var top = <Widget>[];
+    if (others.length == 1) {
+      top = [others[0]];
+    } else if (others.length == 2) {
+      left = others[0];
+      right = others[1];
+    } else if (others.length == 3) {
+      left = others[0];
+      top = [others[1]];
+      right = others[2];
+    } else if (others.length >= 4) {
+      left = others.first;
+      right = others.last;
+      top = others.sublist(1, others.length - 1);
+    }
+    final mid = center ?? const SizedBox(width: 8);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(40),
+        gradient: const RadialGradient(colors: [Color(0xFF22A346), Color(0xFF0B5E22)], radius: 0.9),
+        border: Border.all(color: const Color(0xFFD4AF37), width: 4),
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 10, offset: Offset(0, 4))],
+      ),
+      child: Column(children: [
+        if (top.isNotEmpty)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final t in top) Expanded(child: Center(child: t)),
+          ]),
+        if (left != null || right != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(child: Center(child: left ?? const SizedBox.shrink())),
+              mid,
+              Expanded(child: Center(child: right ?? const SizedBox.shrink())),
+            ]),
+          )
+        else
+          Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: Center(child: mid)),
+        seats.first,
+      ]),
+    );
+  }
+}
+
+
 // ----------------------------------------------------------------------
 // FAP-FAP : en ligne
 // ----------------------------------------------------------------------
@@ -4987,7 +5126,10 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
                     ]),
                 ]),
               ),
-            for (var i = 0; i < n; i++) _seat(v, players[i], i, turn, winners, over),
+            _FeltTable(
+              center: const _CardView(card: null, up: false, w: 34),
+              seats: [for (final i in _feltOrder(players, _me)) _seat(v, players[i], i, turn, winners, over)],
+            ),
           ],
         ),
       ),
@@ -5069,53 +5211,26 @@ class _AntiCoteOnlineRoomState extends State<AntiCoteOnlineRoom> with WidgetsBin
     final mine = uid == _me;
     final isTurn = !over && uid == turn;
     final win = over && winners.contains(uid);
-    final table = _cardsOf(p['table']);
-    final revealed = _cardsOf(p['cards']);
     final left = (p['count'] as num?)?.toInt() ?? 0;
     final total = (p['total'] as num?)?.toInt();
     final out = p['out'] == true;
-    final contrib = (p['contrib'] as num?)?.toInt() ?? 0;
-    final stake = (v['stake'] as num?)?.toInt() ?? 0;
-    return Opacity(
-      opacity: out ? 0.45 : 1,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: win ? _gold : (isTurn ? Colors.white : Colors.transparent), width: 2),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            CircleAvatar(radius: 11, backgroundColor: _seatColors[idx % 6]),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text('${p['name']}${mine ? ' (${tr('toi', 'you')})' : ''}${out ? ' · ${tr('abandon', 'out')}' : ''}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-            ),
-            if (isTurn) const Text('⏳', style: TextStyle(fontSize: 16)),
-            if (win) const Text('🏆', style: TextStyle(fontSize: 18)),
-            if (total != null)
-              Text('$total${total < 18 ? ' · Korate' : ''}',
-                  style: TextStyle(color: total < 18 ? _goldSoft : Colors.white, fontWeight: FontWeight.w900)),
-            if (!over && total == null) Text('🂠 $left', style: const TextStyle(color: Colors.white60, fontSize: 12)),
-          ]),
-          if (stake > 0 && contrib > 0)
-            Text(tr('Mise dans la cagnotte : ${_fcfa(contrib)}', 'In the jackpot: ${_fcfa(contrib)}'),
-                style: const TextStyle(color: Colors.white54, fontSize: 11)),
-          if (table.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(tr('Carte jouée', 'Card played'), style: const TextStyle(color: Colors.white54, fontSize: 11)),
-            _fapPlayed(table),
-          ],
-          if (revealed.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(tr('Cartes ouvertes', 'Opened cards'), style: const TextStyle(color: Colors.white54, fontSize: 11)),
-            _fapPlayed(revealed),
-          ],
-        ]),
-      ),
+    return _feltSeat(
+      name: '${p['name']}${out ? ' · ${tr('abandon', 'out')}' : ''}',
+      color: _seatColors[idx % 6],
+      mine: mine,
+      isTurn: isTurn,
+      win: win,
+      dim: out,
+      badges: [
+        if (isTurn) const Text(' ⏳', style: TextStyle(fontSize: 14)),
+        if (win) const Text(' 🏆', style: TextStyle(fontSize: 16)),
+        if (total != null)
+          Text('  $total${total < 18 ? ' · Korate' : ''}',
+              style: TextStyle(color: total < 18 ? _goldSoft : Colors.white, fontWeight: FontWeight.w900, fontSize: 12)),
+        if (!over && total == null) Text('  🂠$left', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+      ],
+      played: _cardsOf(p['table']),
+      hand: _cardsOf(p['cards']),
     );
   }
 }
@@ -6611,7 +6726,10 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                     ]),
                 ]),
               ),
-            for (var i = 0; i < n; i++) _seat(v, players[i], i, turn, winners, over),
+            _FeltTable(
+              center: const _CardView(card: null, up: false, w: 34),
+              seats: [for (final i in _feltOrder(players, _me)) _seat(v, players[i], i, turn, winners, over)],
+            ),
           ],
         ),
       ),
@@ -6723,54 +6841,31 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final mine = uid == _me;
     final isTurn = !over && uid == turn;
     final win = over && winners.contains(uid);
-    final table = _cardsOf(p['table']);
-    final revealed = _cardsOf(p['cards']);
     final left = (p['count'] as num?)?.toInt() ?? 0;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: win ? _gold : (isTurn ? Colors.white : Colors.transparent), width: 2),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          CircleAvatar(radius: 11, backgroundColor: _seatColors[idx % 6]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text('${p['name']}${mine ? ' (${tr('toi', 'you')})' : ''}',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+    final passed = ((v['passedUids'] as List?) ?? const []).contains(uid);
+    final early = v['early'] is Map && '${(v['early'] as Map)['uid']}' == uid;
+    return _feltSeat(
+      name: '${p['name']}',
+      color: _seatColors[idx % 6],
+      mine: mine,
+      isTurn: isTurn,
+      win: win,
+      badges: [
+        if (passed)
+          Container(
+            margin: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(color: const Color(0xFFEF6C00), borderRadius: BorderRadius.circular(8)),
+            child: Text(tr('PASSE', 'PASS'),
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
           ),
-          if (((v['passedUids'] as List?) ?? const []).contains(uid))
-            Container(
-              margin: const EdgeInsets.only(right: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(color: const Color(0xFFEF6C00), borderRadius: BorderRadius.circular(10)),
-              child: Text(tr('⏭ EN PASSE', '⏭ PASSED'),
-                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
-            ),
-          if (isTurn) const Text('⏳', style: TextStyle(fontSize: 16)),
-          if (win) const Text('🏆', style: TextStyle(fontSize: 18)),
-          if (!over) Text('🂠 $left', style: const TextStyle(color: Colors.white60, fontSize: 12)),
-        ]),
-        if (table.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          _fapPlayed(table),
-        ],
-        if (v['early'] is Map && '${(v['early'] as Map)['uid']}' == uid) ...[
-          const SizedBox(height: 6),
-          Row(children: [
-            Text(tr('Joué d\'avance : ', 'Played ahead: '), style: const TextStyle(color: _goldSoft, fontSize: 11, fontWeight: FontWeight.w800)),
-            _CardView(card: _decode(((v['early'] as Map)['card'] as num).toInt()), w: 40),
-          ]),
-        ],
-        if (over && revealed.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Text(tr('Main', 'Hand'), style: const TextStyle(color: Colors.white54, fontSize: 11)),
-          _fapPlayed(revealed),
-        ],
-      ]),
+        if (isTurn) const Text(' ⏳', style: TextStyle(fontSize: 14)),
+        if (win) const Text(' 🏆', style: TextStyle(fontSize: 16)),
+        if (!over) Text('  🂠$left', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+      ],
+      played: _cardsOf(p['table']),
+      early: early ? _decode(((v['early'] as Map)['card'] as num).toInt()) : null,
+      hand: over ? _cardsOf(p['cards']) : const [],
     );
   }
 }

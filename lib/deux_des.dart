@@ -2270,8 +2270,8 @@ class _OnlineRoomState extends State<_OnlineRoom> {
                 },
                 child: Text(
                   stake > 0
-                      ? tr('Payer ma mise (${Wallet.format(stake)})',
-                          'Pay my stake (${Wallet.format(stake)})')
+                      ? tr('Valider ma mise (${Wallet.format(stake)}) · débitée au lancement',
+                          'Confirm my stake (${Wallet.format(stake)}) · charged at start')
                       : 'Valider ma participation',
                 ),
               ),

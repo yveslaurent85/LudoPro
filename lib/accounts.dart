@@ -193,6 +193,11 @@ class Wallet {
     await _call('payStake', <String, dynamic>{'gameId': gameId});
   }
 
+  /// Ludo déjà lancé à moins de joueurs que de places : entrer avant le premier six.
+  static Future<void> joinRunning(String gameId, String name) async {
+    await _call('ludoJoinRunning', <String, dynamic>{'gameId': gameId, 'name': name});
+  }
+
   /// Le créateur lance la partie (dès 2 joueurs, salle pleine ou non).
   static Future<void> startGame(String gameId) async {
     await _call('startGame', <String, dynamic>{'gameId': gameId});

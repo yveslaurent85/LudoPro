@@ -381,6 +381,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
 
   late final Stream<QuerySnapshot<Map<String, dynamic>>> openStream =
       _games.where('status', isEqualTo: 'waiting').limit(30).snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> lateStream =
+      _games.where('lateOpen', isEqualTo: true).limit(30).snapshots();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> liveStream =
       _games.where('status', isEqualTo: 'playing').limit(30).snapshots();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> mineStream =
@@ -580,7 +582,8 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
       if (result != null) {
         setState(() => error = result);
       } else {
-        // La salle s'ouvre tout de suite ; la mise est prélevée en parallèle.
+        // La salle s'ouvre tout de suite ; la participation est validée en parallèle
+        // (le solde n'est débité qu'au lancement de la partie).
         final nav = Navigator.of(context);
         final payF = Wallet.payStake(id);
         _openRoom(id);
@@ -764,6 +767,79 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
         );
       },
     );
+  }
+
+  /// Parties lancées à moins de joueurs que de places : on peut encore entrer
+  /// tant que personne n'a joué de 6.
+  Widget _lateSection() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: lateStream,
+      builder: (context, snap) {
+        final docs = (snap.data?.docs ?? [])
+            .where((d) => !((d.data()['uids'] as List?) ?? []).contains(uid))
+            .where((d) => d.data()['private'] != true)
+            .where((d) => d.data()['status'] == 'playing' && d.data()['over'] != true)
+            .toList()
+          ..sort((a, b) => _createdMs(b).compareTo(_createdMs(a)));
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return Column(
+          children: [
+            for (final doc in docs)
+              Builder(
+                builder: (context) {
+                  final d = doc.data();
+                  final n = _playersOf(d).length;
+                  final cap = (d['lateCap'] as num?)?.toInt() ?? n;
+                  return _tile(
+                    tr("Partie de ${d['hostName']} · lancée",
+                        "${d['hostName']}'s game · started"),
+                    tr('$n/$cap joueurs • entre avant le 1er six${_stakeText(d)}',
+                        '$n/$cap players • join before the first six${_stakeText(d)}'),
+                    'Rejoindre',
+                    busy ? null : () => _joinRunning(doc.id),
+                  );
+                },
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _joinRunning(String id) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || busy) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final balanceF = _myBalance();
+      final pre = await _games.doc(id).get();
+      final stakeNeed = (pre.data()?['stake'] as num?)?.toInt() ?? 0;
+      final captNeed = (pre.data()?['capturePay'] as num?)?.toInt() ?? 0;
+      final need = stakeNeed + captNeed;
+      if (pre.exists && need > 0 && await balanceF < need) {
+        if (mounted) {
+          await showInsufficientBalance(
+            context,
+            balance: await balanceF,
+            stake: stakeNeed,
+            fee: captNeed,
+            feeLabel: tr('Prix d\'une capture :', 'One capture:'),
+            game: 'Ludo',
+            lines: const [],
+          );
+        }
+        return;
+      }
+      await Wallet.joinRunning(id, _displayName(user));
+      if (mounted) _openRoom(id);
+    } catch (e) {
+      if (mounted) setState(() => error = Wallet.errorText(e));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   /// Parties publiques en cours : on peut les regarder.
@@ -1061,6 +1137,7 @@ class _OnlineLobbyScreenState extends State<OnlineLobbyScreen> {
               _mineSection(),
               lobbySectionTitle('🎲 Parties ouvertes'),
               _openSection(),
+              _lateSection(),
               lobbySectionTitle('👀 Parties en cours'),
               _liveSection(),
               ] else ...[
@@ -1552,8 +1629,8 @@ class OnlineGameRoom extends StatelessWidget {
                         },
                         child: Text(
                           stake > 0
-                              ? tr('Payer ma mise (${Wallet.format(myStake)})',
-                                  'Pay my stake (${Wallet.format(myStake)})')
+                              ? tr('Valider ma mise (${Wallet.format(myStake)}) · débitée au lancement',
+                                  'Confirm my stake (${Wallet.format(myStake)}) · charged at start')
                               : 'Valider ma participation',
                         ),
                       ),
@@ -1704,7 +1781,7 @@ class OnlineGameRoom extends StatelessWidget {
         }
 
         return LudoGame(
-          key: ValueKey('game_$gameId'),
+          key: ValueKey('game_${gameId}_${(d['maxPlayers'] as num).toInt()}'),
           numPlayers: (d['maxPlayers'] as num).toInt(),
           pawnCount: (d['pawnCount'] as num).toInt(),
           doorSafe: d['doorSafe'] != false,
