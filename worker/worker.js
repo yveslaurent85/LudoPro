@@ -5538,10 +5538,17 @@ function cardsGameOf(v) {
   return v;
 }
 
-function cardsStakeOf(data) {
+/** FAP-FAP et ANTI-COTE démarrent à 50 FCFA ; les autres jeux de cartes à MIN_STAKE. */
+const CARDS_MIN_STAKE_LOW = 50;
+function cardsMinStake(game) {
+  return game === 'fapfap' || game === 'anticote' ? CARDS_MIN_STAKE_LOW : MIN_STAKE;
+}
+
+function cardsStakeOf(data, game) {
   const stake = intOr(data.stake, 0);
-  if (stake !== 0 && (stake < MIN_STAKE || stake > MAX_STAKE)) {
-    throw new HttpError('invalid-argument', `Mise : 0 (gratuit) ou entre ${MIN_STAKE} et ${MAX_STAKE} FCFA.`);
+  const min = cardsMinStake(game);
+  if (stake !== 0 && (stake < min || stake > MAX_STAKE)) {
+    throw new HttpError('invalid-argument', `Mise : 0 (gratuit) ou entre ${min} et ${MAX_STAKE} FCFA.`);
   }
   return stake;
 }
@@ -5684,6 +5691,14 @@ function fapAfter(d, patch) {
   const nxt = fapNextIdx(d, patch.trick, passed.map((p) => p.uid));
   if (nxt >= 0) {
     patch.turnIdx = nxt;
+    // Dernière carte (une seule carte en main) : elle part toute seule dès que le joueur
+    // précédent a joué (aucun choix possible). Sauf carte déjà jouée d'avance.
+    const nu = seq[nxt];
+    const nh = (patch.hands && patch.hands[nu]) || [];
+    if (nh.length === 1 && !(d.early && d.early.uid === nu)) {
+      const p2 = fapPlay({ ...d, ...patch }, nu, nh[0]);
+      return { ...patch, ...p2 };
+    }
     return patch;
   }
   const hands = patch.hands;
@@ -6952,7 +6967,7 @@ async function pushHostName(env, uid) {
 
 async function cardsCreate({ uid, data, env }) {
   const game = cardsGameOf(data.game);
-  const stake = cardsStakeOf(data);
+  const stake = cardsStakeOf(data, game);
   const maxPlayers = Math.min(game === 'fapfap' || game === 'tchek' ? 4 : game === 'anticote' ? 5 : 6, Math.max(2, intOr(data.maxPlayers, 4)));
   const esc = stake * (isEsc2(game) ? 2 : 1); // 2 x M bloqués
   const open = await queryDocs(env, 'cards', eqFilter('hostUid', uid), 100);
