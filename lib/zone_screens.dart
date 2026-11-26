@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide Text;
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'accounts.dart';
+import 'admin_manual.dart';
 import 'lang.dart';
 
 /// ZONING : ville du joueur, administration des zones, espace partenaire.
@@ -905,6 +906,13 @@ class _PartnerZoneScreenState extends State<PartnerZoneScreen> {
                                   ? 'Paiement possible à partir de ${_fcfa(min)}'
                                   : 'Demander le paiement de ${_fcfa(avail)}'),
                         ),
+                        const SizedBox(height: 8),
+                        if (zones.any((z) => '${z['name']}'.toLowerCase().contains('bafoussam')))
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminManualScreen())),
+                            icon: const Icon(Icons.verified_outlined),
+                            label: const Text('💰 Valider les recharges (tous les joueurs)', style: TextStyle(fontWeight: FontWeight.w800)),
+                          ),
                         const Padding(
                           padding: EdgeInsets.only(top: 14, bottom: 6),
                           child: Text('Mes joueurs', style: TextStyle(color: Color(0xFF12183A), fontSize: 16, fontWeight: FontWeight.w800)),
