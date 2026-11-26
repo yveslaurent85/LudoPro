@@ -3328,9 +3328,36 @@ async function requireStaff(uid, env) {
   throw new HttpError('permission-denied', 'Accès réservé aux administrateurs et caissières.');
 }
 
-/** Mon rôle : { admin, cashier }. */
+/** Seul le partenaire de la zone de Bafoussam valide les recharges de tous les joueurs. */
+const RECHARGE_ZONE_KEY = 'bafoussam';
+const ZONE_RECHARGE_DAILY_MAX = 10000; // plafond de validation par 24 h pour ce partenaire (FCFA)
+function zoneIsRechargeValidator(z) {
+  const k = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return k(z.id).includes(RECHARGE_ZONE_KEY) || k(z.name).includes(RECHARGE_ZONE_KEY);
+}
+
+/** Zones actives (Bafoussam) dont ce compte est le partenaire (ids). */
+async function partnerZoneIds(env, uid) {
+  const zs = await queryDocs(env, 'zones', eqFilter('partnerUid', uid), 10).catch(() => []);
+  return zs.filter((z) => z.status !== 'suspended' && zoneIsRechargeValidator(z)).map((z) => String(z.id));
+}
+
+/** Administrateur, caissière ou partenaire de Bafoussam (recharges uniquement, de tous les joueurs). */
+async function requireStaffOrZone(uid, env) {
+  if (adminIds(env).includes(uid)) return { role: 'admin', zoneIds: [] };
+  if (await isCashier(env, uid)) return { role: 'cashier', zoneIds: [] };
+  const zoneIds = await partnerZoneIds(env, uid);
+  if (zoneIds.length) return { role: 'zone', zoneIds };
+  throw new HttpError('permission-denied', 'Accès réservé aux administrateurs, caissières et au partenaire de Bafoussam.');
+}
+
+/** Mon rôle : { admin, cashier, zone }. */
 async function myRole({ uid, env }) {
-  return { admin: adminIds(env).includes(uid), cashier: await isCashier(env, uid) };
+  return {
+    admin: adminIds(env).includes(uid),
+    cashier: await isCashier(env, uid),
+    zone: (await partnerZoneIds(env, uid)).length > 0,
+  };
 }
 
 /** Administrateur : active ou retire le rôle de caissière (par code promo du compte). */
@@ -4187,6 +4214,16 @@ async function manualDepositRequest({ uid, data, env }) {
   // ntfy attendu (même chemin que l'alerte « recharge validée », qui fonctionne) ; autres canaux en arrière-plan.
   await ntfyTx(env, uid, 'inbox_tray', depText);
   later(env, notifyAdmin(env, depText, { skipNtfy: true }));
+  later(env, (async () => {
+    try {
+      const zs = await queryDocs(env, 'zones', undefined, 200);
+      for (const z of zs) {
+        if (z.partnerUid && z.status !== 'suspended' && zoneIsRechargeValidator(z) && z.partnerUid !== uid) {
+          await pushToUser(env, z.partnerUid, '💰 Recharge à confirmer', `${amount} FCFA · ${phone} · ${operator === 'mtn' ? 'MTN' : 'Orange'}`);
+        }
+      }
+    } catch (_) {}
+  })());
   return { id };
 }
 
@@ -4237,7 +4274,7 @@ async function manualMine({ uid, env }) {
 
 /** Administrateur : demandes en attente + dernières demandes traitées. */
 async function adminManualList({ uid, env }) {
-  await requireStaff(uid, env);
+  const { role } = await requireStaffOrZone(uid, env);
   await accessToken(env);
   const row = (kind) => (d) => ({
     ...manualPublic(d),
@@ -4253,6 +4290,14 @@ async function adminManualList({ uid, env }) {
     queryDocs(env, 'manualWithdrawals', eqFilter('status', 'paid'), 30),
     queryDocs(env, 'manualWithdrawals', eqFilter('status', 'rejected'), 30),
   ]);
+  if (role === 'zone') {
+    // Partenaire de Bafoussam : toutes les recharges, aucun retrait.
+    return {
+      deposits: dp.map(row('deposit')).sort(byDateDesc('createdAt')),
+      withdrawals: [],
+      recent: [...d1, ...d2].map(row('deposit')).sort(byDateDesc('closedAt')).slice(0, 40),
+    };
+  }
   const recent = [...d1.map(row('deposit')), ...d2.map(row('deposit')), ...w1.map(row('withdrawal')), ...w2.map(row('withdrawal'))]
     .sort(byDateDesc('closedAt'))
     .slice(0, 40);
@@ -4299,7 +4344,7 @@ async function adminResetBalances({ uid, data, env }) {
 }
 
 async function adminManualDecideCore({ uid, data, env }) {
-  const role = await requireStaff(uid, env);
+  const { role } = await requireStaffOrZone(uid, env);
   const id = idStr(data.id);
   const kind = data.kind === 'withdrawal' ? 'withdrawal' : data.kind === 'deposit' ? 'deposit' : '';
   const approve = data.action === 'approve';
@@ -4307,10 +4352,13 @@ async function adminManualDecideCore({ uid, data, env }) {
     throw new HttpError('invalid-argument', 'Demande invalide.');
   }
   const path = kind === 'deposit' ? `manualDeposits/${id}` : `manualWithdrawals/${id}`;
-  if (role === 'cashier' && approve) {
+  if (role === 'zone' && kind !== 'deposit') {
+    throw new HttpError('permission-denied', 'Un partenaire de zone ne valide que les recharges.');
+  }
+  if (role !== 'admin' && approve) {
     // Plafond journalier de validation par caissière.
     const pre = await readDoc(env, path);
-    const cap = intOr(env.CASHIER_DAILY_MAX, 1000000);
+    const cap = role === 'zone' ? intOr(env.ZONE_DAILY_MAX, ZONE_RECHARGE_DAILY_MAX) : intOr(env.CASHIER_DAILY_MAX, 1000000);
     const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
     const mine = await queryDocs(env, 'cashierLog', eqFilter('uid', uid), 300).catch(() => []);
     const used = mine
@@ -4330,8 +4378,9 @@ async function adminManualDecideCore({ uid, data, env }) {
     if (!d) throw new HttpError('not-found', 'Demande introuvable.');
     if (d.status !== 'pending') throw new HttpError('failed-precondition', 'Cette demande est déjà traitée.');
     if (role !== 'admin' && d.uid === uid) {
-      throw new HttpError('permission-denied', 'Une caissière ne peut pas valider ses propres demandes.');
+      throw new HttpError('permission-denied', 'Tu ne peux pas valider tes propres demandes.');
     }
+
     const tokens = kind === 'deposit' ? intOr(d.amount, 0) * TOKENS_PER_XAF : intOr(d.tokens, 0);
     let status;
     if (kind === 'deposit') {
