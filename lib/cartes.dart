@@ -6544,11 +6544,10 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
     final winners = [for (final w in (v['winnerUids'] as List? ?? [])) '$w'];
     if (winners.isEmpty || winners.length == players.length) return body;
     if (!_revealed(v)) return body;
-    // Gain par combinaison (21 ou moins, carré, 3 sept…) : on laisse le résultat
-    // (mains dévoilées + règle) à l'écran pendant 3 secondes.
-    const holdRules = {'four7', 'sum16', 'four', 'three7', 'le21'};
+    // Fin de manche (dernier pli ou combinaison) : on laisse les dernières cartes
+    // à l'écran pendant 3 secondes avant d'annoncer le vainqueur.
     final holdId = '${v['id']}';
-    if (holdRules.contains('${v['fapRule']}') && _holdDone != holdId) {
+    if (_holdDone != holdId) {
       _holdT ??= Timer(const Duration(seconds: 3), () {
         _holdT = null;
         if (mounted) setState(() => _holdDone = holdId);
@@ -6817,8 +6816,8 @@ class _FapFapOnlineRoomState extends State<FapFapOnlineRoom> with WidgetsBinding
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
-                      tr('Tu as joué un 10 : tu peux déjà jouer ta prochaine carte de la même famille.',
-                          'You played a 10: you may already play your next card of the same suit.'),
+                      tr('Tu as joué un 10 (ou le 9 de pique) : tu peux déjà jouer ta prochaine carte de la même famille.',
+                          'You played a 10 (or the 9 of spades): you may already play your next card of the same suit.'),
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: _goldSoft, fontSize: 12, fontWeight: FontWeight.w800),
                     ),

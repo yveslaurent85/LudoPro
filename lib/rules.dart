@@ -110,6 +110,8 @@ String _rFapFap() => tr(
           '• Combinaisons dès la distribution (la meilleure gagne tout de suite) : quatre 7 > total 16 (quatre 3 et un 4) > trois 7 > '
           'quatre cartes du même numéro (le plus petit numéro gagne) > total de 21 ou moins. Égalité : le 1er après le distributeur.\n'
           '• Sinon, le gagnant du dernier pli gagne ; avec un 3 : COURAT, gain doublé.\n'
+          '• Après un 10 de la famille demandée (le 9 de pique remplace le 10 de pique), tu peux déjà jouer ta prochaine carte de cette famille.\n'
+          '• Sans carte de la famille demandée, ta carte part toute seule, de la plus grande à la plus petite (le 3 reste pour la fin). Dernière carte : jouée seule.\n'
           '• 10 secondes par carte. 2 × la mise est bloquée : victoire normale = tu récupères ta mise et le gagnant prend les mises adverses.\n'
           '• À 3 ou 4 joueurs : localisation obligatoire et 150 m minimum entre les joueurs ; capture d\'écran bloquée sur Android.',
       'FAP-FAP (2-4 players, online only)\n'
@@ -117,6 +119,8 @@ String _rFapFap() => tr(
           '• Follow the led suit if you can. The highest card of the led suit wins the trick and leads the next.\n'
           '• Deal combinations win at once: four 7s > total 16 (four 3s and a 4) > three 7s > four of a kind (lowest number wins) > total of 21 or less. Tie: first after the dealer.\n'
           '• Otherwise the last trick winner wins; with a 3: COURAT, double win.\n'
+          '• After a 10 of the led suit (the 9 of spades replaces the missing 10 of spades) you may already play your next card of that suit.\n'
+          '• With no card of the led suit, your card is played automatically, highest to lowest (the 3 stays for last). Last card: played automatically.\n'
           '• 10 seconds per card. 2 x stake is locked: normal win = you get your stake back and the winner takes the others.\n'
           '• With 3-4 players: location required and 150 m minimum between players; screenshots blocked on Android.',
     );
