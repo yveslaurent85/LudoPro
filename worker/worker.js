@@ -5800,6 +5800,20 @@ function fapAfter(d, patch) {
       const p2 = fapPlay({ ...d, ...patch }, nu, nh[0]);
       return { ...patch, ...p2 };
     }
+    // Pas de carte de la famille demandée : aucune carte ne peut gagner le pli, donc la carte
+    // part toute seule, de la plus grande à la plus petite (gagner avec un 3 = Corat, on garde
+    // le 3 pour la fin). Sauf si le joueur peut « passer » (4e pli).
+    const tk = patch.trick || [];
+    if (nh.length > 1 && tk.length && !(d.early && d.early.uid === nu)) {
+      const lead = cardSuit(tk[0].card);
+      if (!nh.some((c) => cardSuit(c) === lead)) {
+        const d2 = { ...d, ...patch };
+        if (fapPassCard(d2, nu) < 0) {
+          const best = [...nh].sort((a, b) => cardVal(b) - cardVal(a) || b - a)[0];
+          return { ...patch, ...fapPlay(d2, nu, best) };
+        }
+      }
+    }
     return patch;
   }
   const hands = patch.hands;
@@ -5852,14 +5866,16 @@ function fapEarlyOptions(d, uid) {
   if (!trick.length || d.early) return [];
   const lead = cardSuit(trick[0].card);
   const mine = trick.find((t) => t.uid === uid);
-  if (!mine || cardVal(mine.card) !== 10 || cardSuit(mine.card) !== lead) return [];
+  // Le 10 de pique n'existe pas dans ce jeu : le 9 de pique le remplace.
+  const trigger = cardVal(mine ? mine.card : 0) === 10 || (cardVal(mine ? mine.card : 0) === 9 && cardSuit(mine ? mine.card : 0) === 0);
+  if (!mine || !trigger || cardSuit(mine.card) !== lead) return [];
   const hand = (d.hands && d.hands[uid]) || [];
   return hand.filter((c) => cardSuit(c) === lead);
 }
 
 function fapEarly(d, uid, card) {
   if (!fapEarlyOptions(d, uid).includes(card)) {
-    throw new HttpError('failed-precondition', 'Tu peux jouer d\'avance seulement après un 10, avec une carte de la même famille.');
+    throw new HttpError('failed-precondition', 'Tu peux jouer d\'avance seulement après un 10 (le 9 de pique pour les piques), avec une carte de la même famille.');
   }
   return { early: { uid, card } };
 }
