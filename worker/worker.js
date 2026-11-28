@@ -832,11 +832,11 @@ async function ensureWallet({ uid, data, env }) {
     const d = await tx.get(`users/${uid}`);
     await claimPromo(tx, uid, d, pseudo);
     if (d && typeof d.balance === 'number') {
-      if (pseudo && !d.pseudo) tx.write(`users/${uid}`, { set: { pseudo } });
+      tx.write(`users/${uid}`, { set: { lastSeenMs: Date.now(), ...(pseudo && !d.pseudo ? { pseudo } : {}) } });
       return d.balance;
     }
     tx.write(`users/${uid}`, {
-      set: { balance: WELCOME, ...(pseudo ? { pseudo } : {}) },
+      set: { balance: WELCOME, lastSeenMs: Date.now(), ...(pseudo ? { pseudo } : {}) },
       serverTime: ['createdAt'],
     });
     return WELCOME;
@@ -9222,6 +9222,68 @@ async function adminPlayerInfo({ uid, data, env }) {
   };
 }
 
+
+// ======================================================================
+// Carte des joueurs (administrateur) : inscrits par ville, connectés ou non
+// ======================================================================
+// users/{uid}.lastSeenMs : mis à jour à l'ouverture de l'appli (ensureWallet) puis toutes les 2 min (appPing).
+// Un joueur est « connecté » s'il a été vu depuis moins de 5 minutes.
+const ONLINE_WINDOW_MS = 5 * 60 * 1000;
+
+async function appPing({ uid, env }) {
+  await runTx(env, async (tx) => {
+    tx.write(`users/${uid}`, { set: { lastSeenMs: Date.now() } });
+  });
+  return { ok: true };
+}
+
+function cityKey(v) {
+  return String(v || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+}
+
+async function adminPlayersMap({ uid, env }) {
+  requireAdmin(uid, env);
+  const LIMIT = 4000;
+  const docs = await queryDocs(
+    env,
+    'users',
+    { fieldFilter: { field: { fieldPath: 'city' }, op: 'GREATER_THAN', value: toFs('') } },
+    LIMIT,
+  );
+  const now = Date.now();
+  const cities = new Map();
+  let online = 0;
+  let day = 0;
+  for (const u of docs) {
+    if (u.isBot === true) continue;
+    const key = cityKey(u.city);
+    if (!key) continue;
+    const seen = intOr(u.lastSeenMs, 0);
+    const isOn = seen > 0 && now - seen < ONLINE_WINDOW_MS;
+    if (isOn) online++;
+    if (seen > 0 && now - seen < 24 * 3600000) day++;
+    let c = cities.get(key);
+    if (!c) {
+      c = { key, name: String(u.city).trim().slice(0, 40), region: String(u.region || ''), total: 0, online: 0, players: [] };
+      cities.set(key, c);
+    }
+    c.total++;
+    if (isOn) c.online++;
+    c.players.push({ name: String(u.pseudo || '—').slice(0, 30), seen });
+  }
+  const list = [...cities.values()].map((c) => {
+    c.players.sort((a, b) => b.seen - a.seen);
+    c.players = c.players.slice(0, 60);
+    return c;
+  });
+  list.sort((a, b) => b.total - a.total);
+  return { now, total: docs.length, online, day, truncated: docs.length >= LIMIT, cities: list };
+}
+
 const HANDLERS = {
   adminPlayerInfo,
   adminDebitAccount,
@@ -9260,6 +9322,8 @@ const HANDLERS = {
   referralInfo,
   payStake,
   ludoJoinRunning,
+  appPing,
+  adminPlayersMap,
   startGame,
   captureFee,
   adminPlayers,
