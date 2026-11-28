@@ -4629,6 +4629,24 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
   /// Couleur dont la base est dans le quart d'écran [q].
   int _playerAt(int q) => ((q - _rot) % 4 + 4) % 4;
 
+  /// Pion arrivé : placé dans le triangle d'arrivée de sa couleur (au centre du plateau),
+  /// les pions d'une même couleur côte à côte.
+  List<double> _doneCenter(int p, int i) {
+    const xs = [6.75, 7.5, 8.25, 7.5];
+    const ys = [7.5, 6.75, 7.5, 8.25];
+    final pw = players[p].pawns;
+    var n = 0, k = 0;
+    for (var j = 0; j < pw.length; j++) {
+      if (pw[j] == 56) {
+        if (j < i) k++;
+        n++;
+      }
+    }
+    final off = (k - (n - 1) / 2) * 0.34;
+    final horizontal = p == 1 || p == 3;
+    return _rotPt(ys[p] + (horizontal ? 0.0 : off), xs[p] + (horizontal ? off : 0.0));
+  }
+
   List<double>? pawnCenter(int p, int i) {
     final position = players[p].pawns[i];
     if (position == 56) return null;
@@ -4702,8 +4720,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
     final entries = <_PawnEntry>[];
     for (final p in activeIdx) {
       for (int i = 0; i < players[p].pawns.length; i++) {
-        // Un pion arrivé (56) reste visible dans sa base.
-        final center = pawnCenter(p, i) ?? homeCenter(p, i);
+        // Un pion arrivé (56) rejoint le triangle de sa couleur, au milieu du plateau.
+        final center = players[p].pawns[i] == 56
+            ? _doneCenter(p, i)
+            : (pawnCenter(p, i) ?? homeCenter(p, i));
         entries.add(_PawnEntry(p, i, center));
       }
     }
@@ -4724,10 +4744,10 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
       final k = group.indexOf(e);
       final position = players[e.p].pawns[e.i];
       final done = position == 56;
-      final atHome = position == -1 || done;
-      final stacked = n > 1 && !atHome;
+      final atHome = position == -1;
+      final stacked = n > 1 && !atHome && !done;
 
-      final w = (done ? c * 1.35 : (atHome ? c * 1.5 : c * 1.0)) *
+      final w = (done ? c * 0.7 : (atHome ? c * 1.5 : c * 1.0)) *
           (stacked ? 0.8 : 1.0);
       final h = w * 1.25;
       final dx = stacked ? (k - (n - 1) / 2) * c * 0.3 : 0.0;
@@ -4753,7 +4773,7 @@ class _LudoGameState extends State<LudoGame> with TickerProviderStateMixin {
               painter: PawnPainter(
                 color: players[e.p].color,
                 highlight: movable,
-                done: done,
+                done: false,
               ),
             ),
           ),

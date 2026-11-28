@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'replay.dart';
 import 'accounts.dart';
 import 'admin_manual.dart';
+import 'admin_map.dart';
 import 'deux_des.dart';
 import 'hostess_screen.dart';
 import 'cashiers_admin.dart';
@@ -1270,6 +1271,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 icon: const Text('🗺️', style: TextStyle(fontSize: 18)),
                 label: const Text(
                   'Gestion des zones',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE3EAFF),
+                  foregroundColor: const Color(0xFF12183A),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const AdminPlayersMapScreen()),
+                ),
+                icon: const Text('📍', style: TextStyle(fontSize: 18)),
+                label: const Text(
+                  'Carte des joueurs (connectés)',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),

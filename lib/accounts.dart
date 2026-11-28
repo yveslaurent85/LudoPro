@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 
@@ -160,6 +161,7 @@ class Wallet {
         <String, dynamic>{'pseudo': pseudo ?? user.displayName ?? ''},
         user: user,
       );
+      _startPresence();
       final b = res['balance'];
       return b is num ? b.toInt() : 0;
     } catch (_) {
@@ -448,6 +450,21 @@ class Wallet {
       _call('adminCashierLog', <String, dynamic>{if (uid != null) 'uid': uid});
 
   /// Mon rôle : { admin, cashier }.
+  static Timer? _presenceTimer;
+
+  /// Signale au serveur que l'appli est ouverte (toutes les 2 minutes) : sert à la carte des
+  /// joueurs « connectés » de l'administrateur.
+  static void _startPresence() {
+    _presenceTimer ??= Timer.periodic(const Duration(minutes: 2), (_) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      _call('appPing', <String, dynamic>{}).then((_) {}, onError: (_) {});
+    });
+  }
+
+  /// Administrateur : joueurs inscrits par ville, avec leur état connecté / non connecté.
+  static Future<Map<String, dynamic>> adminPlayersMap() =>
+      _call('adminPlayersMap', <String, dynamic>{});
+
   static Future<Map<String, dynamic>> myRole() => _call('myRole', <String, dynamic>{});
 
   /// Administrateur : active ou retire un compte caissière (par code promo).
